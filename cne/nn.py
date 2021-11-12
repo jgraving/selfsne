@@ -14,8 +14,7 @@
 # limitations under the License.
 
 import torch
-import torch.nn.functional as F
-from torch.nn import Module, Linear, ModuleList, Dropout, AlphaDropout
+import torch.nn as nn
 from torch.nn import init
 import numpy as np
 
@@ -24,47 +23,43 @@ def lecun_normal_(x):
     return init.normal_(x, std=np.sqrt(1 / x.shape[1]))
 
 
-def init_selu(x: Linear):
+def init_selu(x: nn.Linear):
     lecun_normal_(x.weight)
     init.zeros_(x.bias)
+    return x
 
 
-def init_linear(x: Linear):
+def init_linear(x: nn.Linear):
     init.xavier_uniform_(x.weight)
     init.zeros_(x.bias)
+    return x
 
 
-activations = {"selu": F.selu, "elu": F.elu, "relu": F.relu}
-
-
-class FeedForward(Module):
-    def __init__(
-        self, in_features, layers=[256, 256, 256], activation="selu", dropout=0.0
-    ):
-        super(FeedForward, self).__init__()
-        if activation in activations.keys():
-            self.activation = activations[activation]
-        elif callable(activation):
-            self.activation = activation
-        else:
-            raise ValueError(
-                "this activation function is not supported "
-                "must be 'selu', 'relu', 'elu', or callable"
-            )
-
-        linears = [Linear(in_features, layers[0])]
-        for idx in range(1, len(layers)):
-            linears.append(Linear(layers[idx - 1], layers[idx]))
-        init = init_selu if activation in ["selu", F.selu] else init_linear
-        for linear in linears:
-            init(linear)
-        self.linears = ModuleList(linears)
-        self.dropout = Dropout(
-            dropout
-        )  # if self.activation != "selu" else AlphaDropout(dropout)
+class Residual(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
 
     def forward(self, x):
-        for linear in self.linears:
-            x = self.activation(linear(x))
-            x = self.dropout(x)
-        return x
+        return x + self.module(x)
+
+
+def SNN(in_channels, out_channels, hidden_channels=[256, 256, 256, 256]):
+    return nn.Sequential(
+        nn.BatchNorm1d(in_channels),
+        init_selu(nn.Linear(in_channels, hidden_channels[0])),
+        nn.Sequential(
+            *[
+                Residual(
+                    nn.Sequential(
+                        init_selu(
+                            nn.Linear(hidden_channels[idx - 1], hidden_channels[idx])
+                        ),
+                        nn.SELU(),
+                    )
+                )
+                for idx in range(1, len(hidden_channels))
+            ]
+        ),
+        init_linear(nn.Linear(hidden_channels[-1], out_channels)),
+    )

@@ -13,26 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-import torch.nn.functional as F
-import torch.distributions as D
 from torch.nn import Module
 from torch.distributions.utils import broadcast_all
-
 import numpy as np
 
 
-def inv_softplus(x):
-    return x.expm1().log()
-
-
-class LaplaceKernel(Module):
+class Laplace(Module):
     r"""
     Creates a Laplace kernel
     """
 
     def __init__(self, loc, scale=1.0):
-        super(LaplaceKernel, self).__init__()
+        super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
 
     def log_prob(self, value):
@@ -40,13 +32,13 @@ class LaplaceKernel(Module):
         return -y.abs().sum(-1)
 
 
-class StudentTKernel(Module):
+class StudentT(Module):
     r"""
     Creates a Student t kernel
     """
 
     def __init__(self, loc, scale=1.0):
-        super(StudentTKernel, self).__init__()
+        super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
 
     def log_prob(self, value):
@@ -54,13 +46,13 @@ class StudentTKernel(Module):
         return -y.pow(2).sum(-1).log1p()
 
 
-class NormalKernel(Module):
+class Normal(Module):
     r"""
     Creates a normal (Gaussian) kernel
     """
 
     def __init__(self, loc, scale=1.0):
-        super(NormalKernel, self).__init__()
+        super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
 
     def log_prob(self, value):
@@ -68,28 +60,39 @@ class NormalKernel(Module):
         return -y.pow(2).div(2).sum(-1)
 
 
-class VonMisesKernel(Module):
+class VonMises(Module):
     """
     Spherical von Mises kernel
     """
 
-    def __init__(self, concentration):
-        self.concentration = concentration
+    def __init__(self, loc):
         super().__init__()
+        self.concentration = loc
 
     def log_prob(self, value):
-        return -(value * self.concentration).sum(-1)
+        scale = self.concentration.norm(dim=-1)
+        log_normalizer = scale.log() - scale.sinh().log() - np.log(4 * np.pi)
+        return (self.concentration * value).sum(-1) + log_normalizer
 
 
-class CategoricalKernel(Module):
+class Categorical(Module):
     """
     Categorical kernel
     """
 
     def __init__(self, logits):
 
-        self.probs = logits.softmax(-1)
+        self.logits = logits.log_softmax(-1)
         super().__init__()
 
     def log_prob(self, value):
-        return (self.probs * value.log_softmax(-1)).sum(-1)
+        return (self.logits * value.softmax(-1)).sum(-1)
+
+
+KERNELS = {
+    "normal": Normal,
+    "studentt": StudentT,
+    "categorical": Categorical,
+    "laplace": Laplace,
+    "vonmises": VonMises,
+}

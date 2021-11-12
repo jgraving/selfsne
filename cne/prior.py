@@ -14,9 +14,8 @@
 # limitations under the License.
 
 import torch
-import torch.nn.functional as F
 import torch.distributions as D
-from torch.nn import Module, Parameter
+from torch import nn
 from torch.nn import init
 from torch import optim
 
@@ -24,29 +23,26 @@ import numpy as np
 from collections import OrderedDict
 
 from cne.callbacks import EarlyStopping
+from cne.kernels import KERNELS
 
 
-class MixturePrior(Module):
+class MixturePrior(nn.Module):
     def __init__(
         self,
-        z_dim,
-        k_components,
+        z_dim=2,
+        k_components=2048,
         kernel="normal",
         logits_mode="maxent",
     ):
         super(MixturePrior, self).__init__()
         self.z_dim = z_dim
         self.k_components = k_components
-        if kernel == "studentt":
-            self.kernel = StudentTKernel
-        elif kernel == "normal":
-            self.kernel = NormalKernel
-
-        self.locs = Parameter(torch.Tensor(k_components, z_dim))
-        init.normal_(self.locs, std=np.sqrt(self.z_dim))
+        self.kernel = KERNELS[kernel]
+        self.locs = nn.Parameter(torch.Tensor(k_components, z_dim))
+        init.normal_(self.locs, std=1 / np.sqrt(self.z_dim))
 
         if logits_mode == "learn":
-            self.logits = Parameter(torch.zeros((k_components,)))
+            self.logits = nn.Parameter(torch.zeros((k_components,)))
             init.zeros_(self.logits)
         elif logits_mode == "maxent":
             logits = torch.zeros((k_components,))
@@ -64,10 +60,10 @@ class MixturePrior(Module):
 
     @property
     def components(self):
-        return self.kernel(loc=self.locs, scale=np.sqrt(self.z_dim))
+        return self.kernel(loc=self.locs)
 
-    def entropy_lower_bound(self):
-        return (self.mixture.probs * self.log_prob(self.locs)).sum()
+    def entropy(self):
+        return -(self.mixture.probs * self.log_prob(self.locs)).sum()
 
     def weighted_log_prob(self, x):
         return self.components.log_prob(x.unsqueeze(-2)) + self.mixture.logits
@@ -78,21 +74,11 @@ class MixturePrior(Module):
     def assign_modes(self, x):
         return self.weighted_log_prob(x).argmax(-1)
 
-    def soft_quantize(self, x):
-        indices = D.Categorical(logits=self.weighted_log_prob(x)).sample()
-        return self.locs[indices]
-
-    def hard_quantize(self, x):
-        return self.locs[self.assign_modes(x)]
-
-    def gradient_quantize(self, x):
-        return (self.soft_quantize(x) - x).detach() + x
-
     @torch.enable_grad()
     def optimize_watershed(
         self, verbose=True, lr=0.1, patience=10, n_iter=9999, steps_per_epoch=100
     ):
-        self.watershed_locs = Parameter(self.locs.clone())
+        self.watershed_locs = nn.Parameter(self.locs.clone())
         params = [self.watershed_locs]
 
         optimizer = optim.Adam(params, lr=lr)

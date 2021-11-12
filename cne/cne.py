@@ -14,62 +14,22 @@
 # limitations under the License.
 
 import torch
-import torch.nn.functional as F
-import torch.distributions as D
 from torch import nn
-from torch.nn import Module, Linear
-from torch.nn import init
-from torch import optim
+from torch.optim import AdamW
 
 import numpy as np
 
 from tqdm import tqdm
 from collections import OrderedDict
 
-from cne.likelihood import LIKELIHOODS
 from cne.prior import MixturePrior
-from cne.kernels import StudentTKernel, NormalKernel, VonMisesKernel
-from cne.nn import FeedForward, init_linear
+from cne.kernels import KERNELS
 from cne.callbacks import EarlyStopping
+from cne.losses import infonce, redundancy_reduction
+from cne.neighbors import NearestNeighborSampler
 
 
-def stop_gradient(x):
-    return x.detach()
-
-
-class Queue(nn.Module):
-    def __init__(self, queue_size=4096):
-        super(Queue, self).__init__()
-        self.queue_size = queue_size
-        self.queue = None
-
-    def forward(self, x):
-        if self.queue is None:
-            self.queue = stop_gradient(x)
-        else:
-            self.queue = stop_gradient(torch.cat((self.queue, x))[-self.queue_size :])
-        return self.queue
-
-    def sample(self, n_samples):
-        indices = torch.randint(
-            self.queue.shape[0], (n_samples,), device=self.queue.device
-        )
-        return stop_gradient(self.queue[indices])
-
-    @property
-    def full(self):
-        return self.queue.shape[0] == self.queue_size
-
-
-def off_diagonal(x):
-    # return a flattened view of the off-diagonal elements of a square matrix
-    # adapted from https://github.com/facebookresearch/barlowtwins/blob/main/main.py
-    n, m = x.shape
-    assert n == m
-    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
-
-
-class CNE(Module):
+class CNE(nn.Module):
     """
     Contrastive Noise Embedding (CNE).
 
@@ -81,66 +41,29 @@ class CNE(Module):
         x_i ~ p(x)
         y_i ~ p(y|x_i)
 
-        I(x; y) ≥ InfoNCE(x; y) = E_p(x)p(y|x)[log q(y | x) − log q(y)]
-
-    This implementation includes a learned Gaussian mixture prior for the embedding,
-    which can be used for variational entropy clustering to automatically learn the
-    number of clusters in the embedding. You can enable the fixed standard normal
-    prior by setting `k_components` to 1.
-
-    CNE also supports multiple similarity kernels to compute a variety of embedding types.
+        I(x; y) ≥ InfoNCE(x; y) = p(x)p(y|x) log q(y | x) − log q(y)
 
     Parameters
     ----------
+    encoder : torch.nn.Module
+        An encoder module that transforms data from x_dim to z_dim
     x_dim : int, default = None
         Dimensionality of the data. Default is None, which will
         infer dimensionality from the data when calling `.fit`
     z_dim : int, default = 2
         Dimensionality of the embedded space.
-    k_components : int, default = 2048
-        The number of mixture components for the prior distribution.
-        Increasing this value increases the complexity of the prior
-        distribution.
-    metric : str, default = 'euclidean'
-        The distance metric to use when calculating distance between
-        data samples for calculating the high-dimensional similarities.
-        It must be one one of ["euclidean" ...]
     rate_multiplier : float, default = 1
         The weighting for the rate loss function
     similarity_multiplier : float, default = 1
         The weighting for the contrastive loss
-    likelihood_multiplier : float, default = 1
-        The weighting for the distortion (negative log likelihood)
-    likelihood : str, default = 'mse'
-        The likelihood distribution for reconstructing the data.
-        Must be one of likelihood.LIKELIHOODS
-    kernel_type : str, default = "studentt"
+    redundancy_multiplier : float, default = 1
+        The weighting for the orthogonal loss
+    kernel : str, default = "studentt"
         The kernel used for calculating low-dimensional pairwise similarities.
-        Must be one of ["studentt", "normal", "vonmises"].
-    encoder_layers : iterable, default = [256, 256, 256, 256]
-        The layout of the hidden layers for the encoder. An iterable where each value
-        corresponds to the number of units of one hidden layer in the network.
-    decoder_layers : iterable, default = None
-        The layout of the hidden layers for the decoder. An iterable where each value
-        corresponds to the number of units of one hidden layer in the network.
-        If `None` the decoder uses the encoder layout in reverse.
+        Must be one of cne.kernels.KERNELS.
     device : str, default = "cpu"
         The torch-enabled device to use. To enable GPU support, set this to "cuda", or specify
         "cuda:0", "cuda:1", etc.
-    prior_covariance : str, default = "eye"
-        The method for calculating the covariance matrix for the mixture
-        components of the prior. Only used when k_components > 1. Must be one of
-        "eye", "iso", or "diag", which uses an identity matrix, learns a shared isotropic variance,
-        or learns the diagonal as model parameters respectively.
-    prior_mixture : str, default = "maxent"
-        The method for calculating the weights for the mixture
-        distribution of the prior. Only used when k_components > 1. Must be one of
-        "maxent", or "learn", which uses a maximum entropy distribution, or
-        learns the mixture weights as model parameters respectively.
-    queue_size : int, default = 1000,
-        The size of the online FIFO queue used for computing nearest neighbors.
-        Larger values increase compute and memory requirements, but provide more accurate
-        neighbor calculations.
 
     References
     ----------
@@ -148,154 +71,41 @@ class CNE(Module):
 
     def __init__(
         self,
+        encoder,
         x_dim=None,
         z_dim=2,
-        k_components=2048,
-        encoder_layers=[256, 256, 256, 256],
-        decoder_layers=None,
-        kernel_type="studentt",
-        metric="euclidean",
-        likelihood="mse",
+        kernel="studentt",
+        prior=MixturePrior(),
         device="cpu",
         similarity_multiplier=1.0,
         redundancy_multiplier=1.0,
         rate_multiplier=1.0,
-        likelihood_multiplier=1.0,
-        prior_mixture="maxent",
-        prior_kernel="normal",
-        queue_size=1000,
+        noise=NearestNeighborSampler(),
     ):
         super(CNE, self).__init__()
         self.x_dim = x_dim
         self.z_dim = z_dim
-        self.k_components = k_components
-        self.encoder_layers = encoder_layers
-        decoder_layers = (
-            encoder_layers[::-1] if decoder_layers is None else decoder_layers
-        )
-        self.decoder_layers = decoder_layers
-        self.kernel_type = kernel_type
-        self.metric = metric
-        self.likelihood = likelihood
         self.device = device
         self.similarity_multiplier = similarity_multiplier
         self.redundancy_multiplier = redundancy_multiplier
         self.rate_multiplier = rate_multiplier
-        self.likelihood_multiplier = likelihood_multiplier
-        self.initialized = False
-        self.prior_mixture = prior_mixture
-        self.prior_kernel = prior_kernel
-        self.queue_size = queue_size
-
-        if self.metric == "cross_entropy":
-            self.distance = lambda x, y: -(
-                x.log().softmax(-1) @ y.log().log_softmax(-1).T
-            )
-        elif self.metric == "inner_product":
-            self.distance = lambda x, y: -(x @ y.T)
-        elif self.metric == "euclidean":
-            self.distance = torch.cdist
-        elif self.metric == "mahalanobis":
-            self.distance = lambda x, y: torch.cdist(self.input_bn(x), self.input_bn(y))
-        elif self.metric == "correlation":
-            self.distance = lambda x, y: -(self.input_bn(x) @ self.input_bn(y).T)
-
-        if self.kernel_type == "normal":
-            self.kernel = NormalKernel
-        elif self.kernel_type == "studentt":
-            self.kernel = StudentTKernel
-        elif self.kernel_type == "categorical":
-            self.kernel = CategoricalKernel
-        elif self.kernel_type == "laplace":
-            self.kernel = LaplaceKernel
-
-    def init_model(self, in_features):
-
-        if self.k_components > 1:
-            self.prior = MixturePrior(
-                self.z_dim,
-                self.k_components,
-                kernel=self.prior_kernel,
-                logits_mode=self.prior_mixture,
-            )
-        else:
-            self.prior = D.Independent(
-                D.Normal(
-                    torch.zeros((1, self.z_dim)).to(self.device),
-                    torch.ones((1, self.z_dim)).to(self.device) * np.sqrt(self.z_dim),
-                ),
-                1,
-            )
-
-        self.encoder = FeedForward(
-            in_features,
-            self.encoder_layers,
-        )
-        self.embed = Linear(self.encoder_layers[-1], self.z_dim)
-        init_linear(self.embed)
-
-        self.input_bn = nn.BatchNorm1d(in_features, affine=False, momentum=None)
-        self.queue = Queue(self.queue_size)
-
-        self.decoder = FeedForward(
-            self.z_dim,
-            self.decoder_layers,
-        )
-
-        self.likelihood_fn = LIKELIHOODS[self.likelihood]()
-        out_features = in_features * self.likelihood_fn.multiplier
-        self.likelihood = Linear(self.decoder_layers[-1], out_features)
-        init_linear(self.likelihood)
-
-        self.bn = torch.nn.BatchNorm1d(self.z_dim, affine=False, momentum=None)
-
+        self.noise = noise
+        self.encoder = encoder
+        self.kernel = KERNELS[kernel]
+        self.prior = prior
+        self.bn = nn.BatchNorm1d(z_dim, affine=False)
         self.to(self.device)
-        self.initialized = True
 
-    def distortion(self, x, z):
-        decoded = self.decoder(self.bn(z))
-        x_hat = self.likelihood(decoded)
-        distortion = self.likelihood_fn(x, x_hat)
-        return distortion
+    def forward(self, x_a):
+        x_b = self.noise(x_a)
+        z_a = self.encoder(x_a)
+        z_b = self.encoder(x_b)
 
-    def infonce(self, z_a, z_b):
-        n = z_a.shape[0]
-        kernel = self.kernel(z_a)
-        similarity = -kernel.log_prob(loc=z_b, scale=np.sqrt(self.z_dim))
-        contrast = kernel.log_prob(z_b.unsqueeze(-2))
-        return similarity + (contrast.logsumexp(-1) - np.log(n))
-
-    def redundancy_reduction(self, z_a, z_b):
-        n = z_a.shape[0]
-        d = z_a.shape[1]
-
-        c_z = self.bn(z_a).T @ self.bn(z_b) / n
-        invariance = (1 - c_z.diagonal()).pow(2).mean()  # .sum() / d
-        redundancy = off_diagonal(c_z).pow(2).mean()  # .sum() / (d * d - d)
-
-        return invariance + redundancy
-
-    def forward(self, x):
-        queue = self.queue(x)
-
-        with torch.no_grad():
-            values, indices = torch.topk(-self.distance(x, queue), 2, dim=-1)
-            x_nn = queue[indices[:, -1]]
-            # indices = D.Categorical(logits=-self.distance(x, queue)/self.temperature).sample()
-            # x_nn = queue[indices]
-
-        h_a = self.encoder(self.input_bn(x))
-        z_a = self.embed(h_a)
-        h_b = self.encoder(self.input_bn(x_nn))
-        z_b = self.embed(h_b)
-
-        similarity = self.infonce(z_a, z_b)
-        redundancy = self.redundancy_reduction(z_a, z_b)
-        distortion = self.distortion(x, z_a)
+        similarity = infonce(z_a, z_b, self.kernel)
+        redundancy = redundancy_reduction(z_a, z_b, self.bn)
         rate = -self.prior.log_prob(z_a)
 
         return {
-            "distortion": distortion.mean(),
             "rate": rate.mean(),
             "similarity": similarity.mean(),
             "redundancy": redundancy.mean(),
@@ -303,28 +113,15 @@ class CNE(Module):
 
     def train_batch(self, batch):
         batch = batch.to(self.device)
-        batch_size, n_features = batch.shape
+        batch_size = batch.shape[0]
         loss = self(batch)
 
-        loss["prior entropy"] = (
-            -self.prior.entropy_lower_bound()
-            if self.k_components > 1
-            else torch.zeros_like(loss["similarity"])
-        )
-
-        loss["elbo"] = -(
-            loss["distortion"] * self.likelihood_multiplier
-            + loss["rate"] * self.rate_multiplier
-        )
+        loss["prior entropy"] = self.prior.entropy()
 
         loss["loss"] = (
-            -loss["elbo"]
+            loss["rate"] * self.rate_multiplier
             + loss["similarity"] * self.similarity_multiplier
             + loss["redundancy"] * self.redundancy_multiplier
-        )
-
-        loss["unweighted_loss"] = (
-            loss["distortion"] + loss["rate"] + loss["similarity"] + loss["redundancy"]
         )
 
         for metric in loss.keys():
@@ -342,12 +139,9 @@ class CNE(Module):
 
         epoch_metrics = {
             "loss": 0,
-            "elbo": 0,
-            "distortion": 0,
             "rate": 0,
             "similarity": 0,
             "redundancy": 0,
-            "unweighted_loss": 0,
             "prior entropy": 0,
         }
 
@@ -384,8 +178,6 @@ class CNE(Module):
         display_metrics = OrderedDict({})
         metric_names = [
             "loss",
-            "elbo",
-            "distortion",
             "rate",
             "similarity",
             "redundancy",
@@ -453,27 +245,16 @@ class CNE(Module):
             0 means that the data will be loaded in the main process.
         """
 
-        if not self.initialized:
-            self.init_model(x[0].shape[-1] if self.x_dim is None else self.x_dim)
-
         if restart_optimizer:
             params_list = [
                 {"params": self.encoder.parameters()},
-                {"params": self.decoder.parameters()},
-                {"params": self.embed.parameters()},
-                {"params": self.likelihood.parameters()},
-                {"params": self.input_bn.parameters()},
                 {"params": self.bn.parameters()},
             ]
-            if self.k_components > 1:
-                params_list.append(
-                    {"params": self.prior.parameters(), "weight_decay": 0.0, "lr": lr}
-                )
+            params_list.append({"params": self.prior.parameters(), "weight_decay": 0.0})
 
-            self.optimizer = optim.AdamW(params_list, lr=lr, weight_decay=weight_decay)
+            self.optimizer = AdamW(params_list, lr=lr, weight_decay=weight_decay)
 
-        if self.k_components > 1:
-            self.prior.watershed_optimized = False
+        self.prior.watershed_optimized = False
 
         train_loader = torch.utils.data.DataLoader(
             x,
@@ -498,9 +279,8 @@ class CNE(Module):
                 early_stopping=early_stopping,
                 verbose=verbose,
             )
-            if self.queue.full:
-                if early_stopping.step(epoch_metrics[monitor]):
-                    break
+            if early_stopping.step(epoch_metrics[monitor]):
+                break
 
     @torch.no_grad()
     def predict(
@@ -539,39 +319,33 @@ class CNE(Module):
         """
 
         embedding = []
-        log_likelihood = []
         prior_log_prob = []
-        if self.k_components > 1:
-            labels = []
         predict_loader = torch.utils.data.DataLoader(
             x, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
-        if self.k_components > 1 and return_labels:
+        if return_labels:
+            labels = []
             if not watershed_kwargs:
                 watershed_kwargs = {"lr": 0.01, "patience": 10, "n_iter": 9999}
             if not self.prior.watershed_optimized:
                 self.prior.optimize_watershed(verbose=verbose, **watershed_kwargs)
+
         if verbose:
             predict_loader = tqdm(predict_loader, desc="prediction")
 
         self.eval()
         for batch in predict_loader:
             batch = batch.to(self.device)
-            embedded = self.embed(self.encoder(self.input_bn(batch)))
-            distortion = self.distortion(batch, embedded)
+            embedded = self.encoder(batch)
             prior_log_prob.append(self.prior.log_prob(embedded).cpu())
-            if self.k_components > 1 and return_labels:
+            if return_labels:
                 classes = self.prior.assign_labels(embedded)
                 labels.append(classes.cpu())
 
             embedding.append(embedded.cpu())
-            log_likelihood.append(distortion.cpu())
 
         return {
             "embedding": np.concatenate(embedding),
-            "log_likelihood": np.concatenate(log_likelihood),
-            "labels": np.concatenate(labels)
-            if self.k_components > 1 and return_labels
-            else None,
+            "labels": np.concatenate(labels) if return_labels else None,
             "prior_log_prob": np.concatenate(prior_log_prob),
         }

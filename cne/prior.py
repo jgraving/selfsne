@@ -18,34 +18,35 @@ import torch.distributions as D
 from torch import nn
 from torch.nn import init
 from torch import optim
-
+from torch.utils.data import DataLoader
 import numpy as np
-from collections import OrderedDict
+import pytorch_lightning as pl
 
-from cne.callbacks import EarlyStopping
 from cne.kernels import KERNELS
 
 
-class MixturePrior(nn.Module):
+class MixturePrior(pl.LightningModule):
     def __init__(
-        self,
-        z_dim=2,
-        k_components=2048,
-        kernel="normal",
-        logits_mode="maxent",
+        self, z_dim=2, k_components=2048, kernel="normal", logits_mode="maxent", lr=0.1
     ):
-        super(MixturePrior, self).__init__()
-        self.z_dim = z_dim
-        self.k_components = k_components
-        self.kernel = KERNELS[kernel]
-        self.locs = nn.Parameter(torch.Tensor(k_components, z_dim))
-        init.normal_(self.locs, std=1 / np.sqrt(self.z_dim))
+        super().__init__()
+        self.save_hyperparameters()
+        self.kernel = KERNELS[self.hparams.kernel]
+
+        if self.hparams.k_components == 1:
+            locs = torch.zeros((self.hparams.k_components, self.hparams.z_dim))
+            self.register_buffer("locs", locs)
+        else:
+            self.locs = nn.Parameter(
+                torch.Tensor(self.hparams.k_components, self.hparams.z_dim)
+            )
+            init.normal_(self.locs, std=1 / np.sqrt(self.hparams.z_dim))
 
         if logits_mode == "learn":
-            self.logits = nn.Parameter(torch.zeros((k_components,)))
+            self.logits = nn.Parameter(torch.zeros((self.hparams.k_components,)))
             init.zeros_(self.logits)
         elif logits_mode == "maxent":
-            logits = torch.zeros((k_components,))
+            logits = torch.zeros((self.hparams.k_components,))
             self.register_buffer("logits", logits)
 
         self.watershed_optimized = False
@@ -60,7 +61,7 @@ class MixturePrior(nn.Module):
 
     @property
     def components(self):
-        return self.kernel(loc=self.locs)
+        return self.kernel(self.locs)
 
     def entropy(self):
         return -(self.mixture.probs * self.log_prob(self.locs)).sum()
@@ -74,52 +75,22 @@ class MixturePrior(nn.Module):
     def assign_modes(self, x):
         return self.weighted_log_prob(x).argmax(-1)
 
-    @torch.enable_grad()
-    def optimize_watershed(
-        self, verbose=True, lr=0.1, patience=10, n_iter=9999, steps_per_epoch=100
-    ):
+    def configure_optimizers(self):
         self.watershed_locs = nn.Parameter(self.locs.clone())
-        params = [self.watershed_locs]
+        return optim.Adam([self.watershed_locs], lr=self.hparams.lr)
 
-        optimizer = optim.Adam(params, lr=lr)
-        early_stopping = EarlyStopping(
-            patience=patience, threshold_mode="abs", threshold=1e-3
-        )
-        self.train()
-        if verbose:
-            progress_bar = tqdm(range(n_iter), desc="entropy optimization")
-        else:
-            progess_bar = range(n_iter)
+    def entropy_upper_bound(self):
+        return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
 
-        display_metrics = OrderedDict({})
-
-        for idx in progress_bar:
-            total_loss = 0
-            for jdx in range(steps_per_epoch):
-                loss = -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-                avg_loss = total_loss / (jdx + 1)
-                if verbose:
-                    display_metrics["entropy"] = "{:.3f}".format(avg_loss)
-                    display_metrics["no improvement"] = "{}/{}".format(
-                        early_stopping.num_bad_epochs, early_stopping.patience
-                    )
-                    progress_bar.set_postfix(display_metrics)
-            if early_stopping.step(avg_loss):
-                break
-
-        # calculate watershed basins for each component
+    def on_train_end(self):
         watershed_modes = self.assign_modes(self.watershed_locs)
         # perform sparse watershed assignment for component means
-        watershed_assignments = torch.arange(self.k_components).to(
+        watershed_assignments = torch.arange(self.hparams.k_components).to(
             watershed_modes.device
         )
         # loop over k_components to ensure all modes are correctly assigned
         # hierarchy of clusters cannot be longer than k_components
-        for _ in range(self.k_components):
+        for _ in range(self.hparams.k_components):
             watershed_assignments = watershed_modes[watershed_assignments]
         # reindex starting at 0
         unique_labels = torch.unique(watershed_assignments)
@@ -128,7 +99,33 @@ class MixturePrior(nn.Module):
         self.watershed_assignments = watershed_assignments
         self.watershed_optimized = True
 
+    def training_step(self, batch, batch_idx):
+        self.log(
+            "entropy",
+            self.entropy_upper_bound(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        return self.entropy_upper_bound()
+
     def assign_labels(self, p):
         if not self.watershed_optimized:
             self.optimize_watershed()
         return self.watershed_assignments[self.assign_modes(p)]
+
+    def optimize_watershed(
+        self, max_epochs=999, steps_per_epoch=10, patience=10, verbose=True, gpus=None
+    ):
+        if verbose:
+            print("optimizing entropy...")
+        dummy_loader = DataLoader(np.zeros(steps_per_epoch), batch_size=1)
+        early_stopping = pl.callbacks.EarlyStopping("entropy", patience=patience)
+        trainer = pl.Trainer(
+            max_epochs=max_epochs,
+            progress_bar_refresh_rate=verbose,
+            weights_summary=None,
+            callbacks=[early_stopping],
+            gpus=gpus,
+        )
+        trainer.fit(self, dummy_loader)

@@ -23,8 +23,11 @@ class Noise(Module):
         self.p = p
 
     def forward(self, x):
-        p = D.Bernoulli(probs=self.p).sample()
-        return (p * self._forward(x)) + (1 - p) * x
+        if self.training:
+            p = D.Bernoulli(probs=self.p).sample()
+            return (p * self._forward(x)) + (1 - p) * x
+        else:
+            return x
 
 
 class Normal(Noise):

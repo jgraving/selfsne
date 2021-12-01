@@ -16,6 +16,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import init
+import torch.nn.functional as F
 import numpy as np
 
 
@@ -49,7 +50,7 @@ def lecun_normal_(x):
     return init.normal_(x, std=np.sqrt(1 / x.view(x.shape[0], -1).shape[-1]))
 
 
-def init_selu(x: nn.Linear):
+def init_selu(x):
     lecun_normal_(x.weight)
     init.zeros_(x.bias)
     return x
@@ -106,7 +107,7 @@ class Conv1d(nn.Conv1d):
         )
 
 
-class GlobalAveragePooling2d(nn.Module):
+class GlobalAvgPool2d(nn.Module):
     def forward(self, x):
         return x.mean((-1, -2))
 
@@ -124,13 +125,25 @@ def FlipSequence():
     return FlipAxis(-1)
 
 
+class PadShift(nn.Module):
+    def forward(self, x):
+        return F.pad(x, pad=(1, 0))[..., :-1]
+
+
 class SequenceSubsampler(nn.Module):
+    def __init__(self, max_window=None):
+        super().__init__()
+        self.max_window = max_window
+
     def forward(self, x):
         x_a, x_b = x
         if self.training:
-            max_window = x_a.shape[-1] // 2
+            if self.max_window is None:
+                max_window = x_a.shape[-1] // 2
+            else:
+                max_window = np.clip(self.max_window, 1, x_a.shape[-1] - 1)
             idx = torch.randint(x_a.shape[-1] - max_window, size=(x_a.shape[0],))
-            offset = torch.randint(low=1, high=max_window, size=(x_a.shape[0],))
+            offset = torch.randint(low=0, high=max_window, size=(x_a.shape[0],))
             batch = torch.arange(x_a.shape[0])
             return x_a[batch, ..., idx], x_b[batch, ..., idx + offset]
         else:
@@ -146,6 +159,7 @@ def TCN(
     n_layers=4,
     n_blocks=4,
     causal=False,
+    causal_shift=False,
     normalize_input=False,
 ):
     """Temporal Convolution Network (TCN)"""
@@ -154,6 +168,7 @@ def TCN(
         nn.BatchNorm1d(in_channels, affine=False, momentum=None)
         if normalize_input
         else nn.Identity(),
+        PadShift() if causal and causal_shift else nn.Identity(),
         init_selu(nn.Conv1d(in_channels, hidden_channels, 1)),
         nn.SELU(),
         Residual(
@@ -197,7 +212,7 @@ def ResNet2d(
     normalize_input=False,
 ):
     return nn.Sequential(
-        nn.BatchNorm1d(in_channels, affine=False, momentum=None)
+        nn.BatchNorm2d(in_channels, affine=False, momentum=None)
         if normalize_input
         else nn.Identity(),
         init_selu(nn.Conv2d(in_channels, hidden_channels, 7, stride=2, padding=3)),
@@ -225,14 +240,14 @@ def ResNet2d(
                             ]
                         )
                     ),
-                    nn.MaxPool2d(2, 2),
+                    nn.AvgPool2d(3, 2, 1),
                 )
                 for _ in range(n_blocks)
             ]
         ),
         init_selu(nn.Conv2d(hidden_channels, out_channels, 1)),
         nn.SELU(),
-        GlobalAveragePooling2d() if global_pooling else nn.Identity(),
+        GlobalAvgPool2d() if global_pooling else nn.Identity(),
     )
 
 
@@ -241,9 +256,7 @@ def SNN(
 ):
     """Self-normalizing Neural Network (SNN)"""
     return nn.Sequential(
-        nn.BatchNorm1d(in_channels, affine=False, momentum=None)
-        if normalize_input
-        else nn.Identity(),
+        nn.BatchNorm1d(in_channels) if normalize_input else nn.Identity(),
         init_selu(nn.Linear(in_channels, hidden_channels)),
         nn.SELU(),
         Residual(

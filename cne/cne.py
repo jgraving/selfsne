@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import pytorch_lightning as pl
 import torch.optim as optim
 import torch.nn as nn
-
 from cne.kernels import KERNELS
 from cne.losses import infonce, redundancy_reduction
 
@@ -26,8 +26,8 @@ class CNE(pl.LightningModule):
 
     def __init__(
         self,
-        encoder,
-        prior,
+        encoder=None,
+        prior=None,
         z_dim=2,
         kernel="studentt",
         similarity_multiplier=1.0,
@@ -55,34 +55,35 @@ class CNE(pl.LightningModule):
     def forward(self, batch):
         return self.encoder(batch)
 
-    def loss(self, z_a, z_b):
+    def loss(self, z_a, z_b, mode=""):
         similarity = infonce(z_a, z_b, self.kernel).mean()
         redundancy = redundancy_reduction(z_a, z_b, self.bn).mean()
         rate = -self.prior.log_prob(z_a).mean()
         loss = {
-            "similarity": similarity,
-            "redundancy": redundancy,
-            "rate": rate,
-            "prior_entropy": self.prior.entropy(),
-            "unweighted_loss": rate + similarity + redundancy,
-            "loss": (
+            mode + "similarity": similarity,
+            mode + "redundancy": redundancy,
+            mode + "rate": rate,
+            mode + "prior_entropy": self.prior.entropy(),
+            mode + "unweighted_loss": rate + similarity + redundancy,
+            mode
+            + "loss": (
                 rate * self.hparams.rate_multiplier
                 + similarity * self.hparams.similarity_multiplier
                 + redundancy * self.hparams.redundancy_multiplier
             ),
         }
         for key in loss.keys():
-            self.log(key, loss[key], on_step=True, on_epoch=True, prog_bar=True)
+            self.log(key, loss[key], prog_bar=True)
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.loss(*self(batch))["loss"]
+        return self.loss(*self(batch), mode="")["loss"]
 
     def validation_step(self, batch, batch_idx):
-        self.loss(*self(batch))
+        self.loss(*self(batch), mode="val_")
 
     def test_step(self, batch, batch_idx):
-        self.loss(*self(batch))
+        self.loss(*self(batch), mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         embedded_a, embedded_b = self(batch)

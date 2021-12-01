@@ -26,9 +26,7 @@ from cne.kernels import KERNELS
 
 
 class MixturePrior(pl.LightningModule):
-    def __init__(
-        self, z_dim=2, k_components=2048, kernel="normal", logits_mode="maxent", lr=0.1
-    ):
+    def __init__(self, z_dim=2, k_components=2048, kernel="normal", logits="learn"):
         super().__init__()
         self.save_hyperparameters()
         self.kernel = KERNELS[self.hparams.kernel]
@@ -40,12 +38,12 @@ class MixturePrior(pl.LightningModule):
             self.locs = nn.Parameter(
                 torch.Tensor(self.hparams.k_components, self.hparams.z_dim)
             )
-            init.normal_(self.locs, std=1 / np.sqrt(self.hparams.z_dim))
+            init.normal_(self.locs, std=1 / np.sqrt(self.hparams.k_components))
 
-        if logits_mode == "learn":
+        if self.hparams.logits == "learn":
             self.logits = nn.Parameter(torch.zeros((self.hparams.k_components,)))
             init.zeros_(self.logits)
-        elif logits_mode == "maxent":
+        elif self.hparams.logits == "maxent":
             logits = torch.zeros((self.hparams.k_components,))
             self.register_buffer("logits", logits)
 
@@ -82,7 +80,7 @@ class MixturePrior(pl.LightningModule):
     def entropy_upper_bound(self):
         return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
 
-    def on_train_end(self):
+    def watershed_labels(self):
         watershed_modes = self.assign_modes(self.watershed_locs)
         # perform sparse watershed assignment for component means
         watershed_assignments = torch.arange(self.hparams.k_components).to(
@@ -96,10 +94,22 @@ class MixturePrior(pl.LightningModule):
         unique_labels = torch.unique(watershed_assignments)
         for idx, label in enumerate(unique_labels):
             watershed_assignments[watershed_assignments == label] = idx
-        self.watershed_assignments = watershed_assignments
+
+        return watershed_assignments
+
+    def on_train_end(self):
+        self.watershed_assignments = self.watershed_labels()
         self.watershed_optimized = True
 
     def training_step(self, batch, batch_idx):
+        self.log(
+            "n_labels",
+            self.watershed_labels().max() + 1,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
         self.log(
             "entropy",
             self.entropy_upper_bound(),
@@ -115,8 +125,15 @@ class MixturePrior(pl.LightningModule):
         return self.watershed_assignments[self.assign_modes(p)]
 
     def optimize_watershed(
-        self, max_epochs=999, steps_per_epoch=10, patience=10, verbose=True, gpus=None
+        self,
+        max_epochs=999,
+        steps_per_epoch=10,
+        patience=10,
+        verbose=True,
+        gpus=None,
+        lr=0.1,
     ):
+        self.hparams.lr = lr
         if verbose:
             print("optimizing entropy...")
         dummy_loader = DataLoader(np.zeros(steps_per_epoch), batch_size=1)

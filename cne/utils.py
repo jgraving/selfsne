@@ -17,6 +17,13 @@ import pytorch_lightning as pl
 import numpy as np
 
 
+def concat_dicts(dicts):
+    return {
+        key: np.concatenate([dictionary[key] for dictionary in dicts], axis=0)
+        for key in dicts[0].keys()
+    }
+
+
 class Trainer(pl.Trainer):
     def predict(
         self,
@@ -33,7 +40,4 @@ class Trainer(pl.Trainer):
             return_predictions=return_predictions,
             ckpt_path=ckpt_path,
         )
-        return {
-            key: np.concatenate([dictionary[key] for dictionary in result], axis=0)
-            for key in result[0].keys()
-        }
+        return concat_dicts(result)

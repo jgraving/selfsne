@@ -19,10 +19,6 @@ import numpy as np
 
 
 class Laplace(Module):
-    r"""
-    Creates a Laplace kernel
-    """
-
     def __init__(self, loc, scale=1.0):
         super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -33,10 +29,6 @@ class Laplace(Module):
 
 
 class StudentT(Module):
-    r"""
-    Creates a Student t kernel
-    """
-
     def __init__(self, loc, scale=1.0):
         super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -47,10 +39,6 @@ class StudentT(Module):
 
 
 class Normal(Module):
-    r"""
-    Creates a normal (Gaussian) kernel
-    """
-
     def __init__(self, loc, scale=1.0):
         super().__init__()
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -61,10 +49,6 @@ class Normal(Module):
 
 
 class VonMises(Module):
-    """
-    Spherical von Mises kernel
-    """
-
     def __init__(self, loc):
         super().__init__()
         self.concentration = loc
@@ -76,10 +60,6 @@ class VonMises(Module):
 
 
 class Categorical(Module):
-    """
-    Categorical kernel
-    """
-
     def __init__(self, logits):
 
         self.logits = logits.log_softmax(-1)

@@ -26,25 +26,27 @@ from cne.kernels import KERNELS
 
 
 class MixturePrior(pl.LightningModule):
-    def __init__(self, z_dim=2, k_components=2048, kernel="normal", logits="learn"):
+    def __init__(
+        self, num_dims=2, num_components=2048, kernel="normal", logits="learn"
+    ):
         super().__init__()
         self.save_hyperparameters()
         self.kernel = KERNELS[self.hparams.kernel]
 
-        if self.hparams.k_components == 1:
-            locs = torch.zeros((self.hparams.k_components, self.hparams.z_dim))
+        if self.hparams.num_components == 1:
+            locs = torch.zeros((self.hparams.num_components, self.hparams.num_dims))
             self.register_buffer("locs", locs)
         else:
             self.locs = nn.Parameter(
-                torch.Tensor(self.hparams.k_components, self.hparams.z_dim)
+                torch.Tensor(self.hparams.num_components, self.hparams.num_dims)
             )
-            init.normal_(self.locs, std=1 / np.sqrt(self.hparams.k_components))
+            init.normal_(self.locs)
 
         if self.hparams.logits == "learn":
-            self.logits = nn.Parameter(torch.zeros((self.hparams.k_components,)))
+            self.logits = nn.Parameter(torch.zeros((self.hparams.num_components,)))
             init.zeros_(self.logits)
         elif self.hparams.logits == "maxent":
-            logits = torch.zeros((self.hparams.k_components,))
+            logits = torch.zeros((self.hparams.num_components,))
             self.register_buffer("logits", logits)
 
         self.watershed_optimized = False
@@ -57,38 +59,63 @@ class MixturePrior(pl.LightningModule):
     def mixture(self):
         return D.Categorical(logits=self.logits)
 
+    def sample(self, n_samples):
+        components = D.Independent(D.Normal(loc=self.locs, scale=1), 1)
+        mixture = self.mixture
+        normal_mixture = D.MixtureSameFamily(mixture, components)
+        return normal_mixture.sample([n_samples])
+
     @property
     def components(self):
-        return self.kernel(self.locs)
+        return self.kernel(self.locs.unsqueeze(1))
 
     def entropy(self):
         return -(self.mixture.probs * self.log_prob(self.locs)).sum()
 
     def weighted_log_prob(self, x):
-        return self.components.log_prob(x.unsqueeze(-2)) + self.mixture.logits
+        return self.components.log_prob(x) + self.mixture.logits.unsqueeze(1)
 
     def log_prob(self, x):
-        return self.weighted_log_prob(x).logsumexp(-1)
+        return self.weighted_log_prob(x).logsumexp(0)
+
+    def disable_grad(self):
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def enable_grad(self):
+        for param in self.parameters():
+            param.requires_grad = True
+
+    def commitment(self, x):
+        self.disable_grad()
+        commitment = self.log_prob(x)
+        self.enable_grad()
+        return commitment
 
     def assign_modes(self, x):
-        return self.weighted_log_prob(x).argmax(-1)
+        return self.weighted_log_prob(x).argmax(0)
+
+    def quantize(self, x):
+        return self.locs[self.assign_modes(x)]
 
     def configure_optimizers(self):
-        self.watershed_locs = nn.Parameter(self.locs.clone())
+        self.watershed_locs = nn.Parameter(self.locs.detach().clone())
         return optim.Adam([self.watershed_locs], lr=self.hparams.lr)
 
     def entropy_upper_bound(self):
         return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
 
     def watershed_labels(self):
-        watershed_modes = self.assign_modes(self.watershed_locs)
+
         # perform sparse watershed assignment for component means
-        watershed_assignments = torch.arange(self.hparams.k_components).to(
-            watershed_modes.device
+        watershed_modes = self.assign_modes(self.watershed_locs)
+        watershed_assignments = torch.arange(
+            self.hparams.num_components, device=watershed_modes.device
         )
+
         # loop over k_components to ensure all modes are correctly assigned
-        # hierarchy of clusters cannot be longer than k_components
-        for _ in range(self.hparams.k_components):
+        # hierarchy of clusters cannot be longer than num_components
+        for _ in range(self.hparams.num_components):
             watershed_assignments = watershed_modes[watershed_assignments]
         # reindex starting at 0
         unique_labels = torch.unique(watershed_assignments)
@@ -101,14 +128,16 @@ class MixturePrior(pl.LightningModule):
         self.watershed_assignments = self.watershed_labels()
         self.watershed_optimized = True
 
-    def training_step(self, batch, batch_idx):
+    def training_epoch_end(self, training_step_outputs):
         self.log(
-            "n_labels",
+            "n_labels_epoch",
             self.watershed_labels().max() + 1,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
+
+    def training_step(self, batch, batch_idx):
 
         self.log(
             "entropy",

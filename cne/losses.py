@@ -16,12 +16,34 @@
 import numpy as np
 
 
-def infonce(z_a, z_b, kernel):
-    n = z_a.shape[0]
-    kernel = kernel(z_a)
-    conditional = kernel.log_prob(z_b)
-    marginal = kernel.log_prob(z_b.unsqueeze(1)).logsumexp(1) - np.log(n)
-    return -conditional + marginal
+def logmeanexp(x, dim=-1):
+    return x.logsumexp(dim) - np.log(x.shape[dim])
+
+
+def categorical_infonce(query, pos_key, neg_key, kernel):
+
+    pos_logits = kernel(query).log_prob(pos_key)
+    neg_logits = kernel(query.unsqueeze(1)).log_prob(neg_key)
+
+    attract = -pos_logits
+    repel = logmeanexp(neg_logits)
+
+    return attract + repel
+
+
+def binary_infonce(query, pos_key, neg_key, kernel):
+
+    pos_logits = kernel(query).log_prob(pos_key).unsqueeze(-1)
+    neg_logits = kernel(query.unsqueeze(1)).log_prob(neg_key)
+
+    attract = -F.log_sigmoid(pos_logits)
+
+    # use numerically stable repulsion term
+    # Shi et al. 2022 (https://arxiv.org/abs/2111.08851)
+    # log(1 - sigmoid(logits)) = log(sigmoid(logits)) - logits
+    repel = -(F.logsigmoid(neg_logits) - neg_logits)
+
+    return attract + repel.mean(-1)
 
 
 def off_diagonal(x):
@@ -32,12 +54,11 @@ def off_diagonal(x):
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
 
-def redundancy_reduction(z_a, z_b, normalizer):
-    n = z_a.shape[0]
-    # d = z_a.shape[1]
+def redundancy_reduction(query, key, normalizer):
+    n, d = z_a.shape
 
-    c_z = normalizer(z_a).T @ normalizer(z_b) / n
-    invariance = (1 - c_z.diagonal()).pow(2).mean()  # .sum() / d
-    redundancy = off_diagonal(c_z).pow(2).mean()  # .sum() / (d * d - d)
+    correlation = normalizer(query).T @ normalizer(key) / n
+    invariance = (1 - correlation.diagonal()).pow(2).mean()  # .sum() / d
+    redundancy = off_diagonal(correlation).pow(2).mean()  # .sum() / (d * d - d)
 
     return invariance + redundancy

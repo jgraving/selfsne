@@ -20,39 +20,15 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class TwinEncoder(nn.Module):
-    def __init__(
-        self,
-        encoder=nn.Identity(),
-        noise_a=nn.Identity(),
-        noise_b=nn.Identity(),
-        encoder_a=nn.Identity(),
-        encoder_b=nn.Identity(),
-        subsampler=nn.Identity(),
-    ):
-        super().__init__()
-        self.encoder = encoder
-        self.noise_a = noise_a
-        self.noise_b = noise_b
-        self.encoder_a = encoder_a
-        self.encoder_b = encoder_b
-        self.subsampler = subsampler
-
-    def forward(self, x):
-        x_a = self.noise_a(x)
-        x_b = self.noise_b(x)
-        z_a = self.encoder_a(self.encoder(x_a))
-        z_b = self.encoder_b(self.encoder(x_b))
-        return self.subsampler([z_a, z_b])
-
-
-def lecun_normal_(x):
-    return init.normal_(x, std=np.sqrt(1 / x.view(x.shape[0], -1).shape[-1]))
+def lecun_normal_(x, mode="fan_in"):
+    return init.kaiming_normal_(x, mode=mode, nonlinearity="linear")
 
 
 def init_selu(x):
     lecun_normal_(x.weight)
-    init.zeros_(x.bias)
+    if hasattr(x, "bias"):
+        if x.bias is not None:
+            init.zeros_(x.bias)
     return x
 
 
@@ -62,8 +38,17 @@ class Residual(nn.Module):
         self.module = module
 
     def forward(self, x):
-        # use average to preserve self-normalization
-        return 0.5 * (x + self.module(x))
+        return x + self.module(x)
+
+
+class ParametricResidual(nn.Module):
+    def __init__(self, in_channels, out_channels, module):
+        super().__init__()
+        self.proj = nn.Linear(in_channels, out_channels)
+        self.module = module
+
+    def forward(self, x):
+        return self.proj(x) + self.module(x)
 
 
 class CausalConv1d(nn.Conv1d):
@@ -95,6 +80,7 @@ class Conv1d(nn.Conv1d):
         out_channels,
         kernel_size=3,
         dilation=1,
+        stride=1,
         **kwargs,
     ):
         super().__init__(
@@ -112,45 +98,6 @@ class GlobalAvgPool2d(nn.Module):
         return x.mean((-1, -2))
 
 
-class FlipAxis(nn.Module):
-    def __init__(self, dim=-1):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return x.flip(self.dim)
-
-
-def FlipSequence():
-    return FlipAxis(-1)
-
-
-class PadShift(nn.Module):
-    def forward(self, x):
-        return F.pad(x, pad=(1, 0))[..., :-1]
-
-
-class SequenceSubsampler(nn.Module):
-    def __init__(self, max_window=None):
-        super().__init__()
-        self.max_window = max_window
-
-    def forward(self, x):
-        x_a, x_b = x
-        if self.training:
-            if self.max_window is None:
-                max_window = x_a.shape[-1] // 2
-            else:
-                max_window = np.clip(self.max_window, 1, x_a.shape[-1] - 1)
-            idx = torch.randint(x_a.shape[-1] - max_window, size=(x_a.shape[0],))
-            offset = torch.randint(low=0, high=max_window, size=(x_a.shape[0],))
-            batch = torch.arange(x_a.shape[0])
-            return x_a[batch, ..., idx], x_b[batch, ..., idx + offset]
-        else:
-            idx = x_a.shape[-1] // 2
-            return x_a[..., idx], x_b[..., idx]
-
-
 def TCN(
     in_channels,
     out_channels,
@@ -161,13 +108,12 @@ def TCN(
     causal=False,
     causal_shift=False,
     normalize_input=False,
+    batch_norm=False,
 ):
     """Temporal Convolution Network (TCN)"""
     conv1d = CausalConv1d if causal else Conv1d
     return nn.Sequential(
-        nn.BatchNorm1d(in_channels, affine=False, momentum=None)
-        if normalize_input
-        else nn.Identity(),
+        nn.BatchNorm1d(in_channels) if normalize_input else nn.Identity(),
         PadShift() if causal and causal_shift else nn.Identity(),
         init_selu(nn.Conv1d(in_channels, hidden_channels, 1)),
         nn.SELU(),
@@ -179,6 +125,9 @@ def TCN(
                             *[
                                 Residual(
                                     nn.Sequential(
+                                        nn.BatchNorm1d(hidden_channels)
+                                        if batch_norm
+                                        else nn.Identity(),
                                         init_selu(
                                             conv1d(
                                                 hidden_channels,
@@ -198,7 +147,124 @@ def TCN(
                 ]
             )
         ),
+        nn.BatchNorm1d(hidden_channels) if batch_norm else nn.Identity(),
         init_selu(nn.Conv1d(hidden_channels, out_channels, 1)),
+    )
+
+
+def TCN2d(
+    in_channels,
+    out_channels,
+    kernel_size=3,
+    hidden_channels=64,
+    n_layers=4,
+    n_blocks=4,
+    causal=False,
+    causal_shift=False,
+    normalize_input=False,
+    batch_norm=False,
+):
+    """Temporal Convolution Network (TCN)"""
+    conv = nn.Conv2d
+    return nn.Sequential(
+        nn.BatchNorm2d(in_channels) if normalize_input else nn.Identity(),
+        init_selu(nn.Conv2d(in_channels, hidden_channels, (1, 1))),
+        nn.SELU(),
+        Residual(
+            nn.Sequential(
+                *[
+                    Residual(
+                        nn.Sequential(
+                            *[
+                                Residual(
+                                    nn.Sequential(
+                                        nn.BatchNorm2d(hidden_channels)
+                                        if batch_norm
+                                        else nn.Identity(),
+                                        init_selu(
+                                            conv(
+                                                hidden_channels,
+                                                hidden_channels,
+                                                kernel_size=(1, kernel_size),
+                                                dilation=(1, dilation),
+                                                padding=(
+                                                    0,
+                                                    ((kernel_size - 1) * dilation // 2),
+                                                ),
+                                            )
+                                        ),
+                                        nn.SELU(),
+                                    )
+                                )
+                                for dilation in 2 ** np.arange(n_layers)
+                            ]
+                        )
+                    )
+                    for _ in range(n_blocks)
+                ]
+            )
+        ),
+        nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
+        init_selu(nn.Conv2d(hidden_channels, out_channels, (1, 1))),
+    )
+
+
+def TCN3d(
+    in_channels,
+    out_channels,
+    kernel_size=3,
+    hidden_channels=64,
+    n_layers=4,
+    n_blocks=4,
+    causal=False,
+    causal_shift=False,
+    normalize_input=False,
+    residual=False,
+    batch_norm=False,
+):
+    """Temporal Convolution Network (TCN)"""
+    conv = nn.Conv3d
+    return nn.Sequential(
+        nn.BatchNorm3d(in_channels) if normalize_input else nn.Identity(),
+        init_selu(nn.Conv3d(in_channels, hidden_channels, (1, 1, 1))),
+        nn.SELU(),
+        Residual(
+            nn.Sequential(
+                *[
+                    Residual(
+                        nn.Sequential(
+                            *[
+                                Residual(
+                                    nn.Sequential(
+                                        nn.BatchNorm3d(hidden_channels)
+                                        if batch_norm
+                                        else nn.Identity(),
+                                        init_selu(
+                                            conv(
+                                                hidden_channels,
+                                                hidden_channels,
+                                                kernel_size=(1, 1, kernel_size),
+                                                dilation=(1, 1, dilation),
+                                                padding=(
+                                                    0,
+                                                    0,
+                                                    ((kernel_size - 1) * dilation // 2),
+                                                ),
+                                            )
+                                        ),
+                                        nn.SELU(),
+                                    )
+                                )
+                                for dilation in 2 ** np.arange(n_layers)
+                            ]
+                        )
+                    )
+                    for _ in range(n_blocks)
+                ]
+            )
+        ),
+        nn.BatchNorm3d(hidden_channels) if batch_norm else nn.Identity(),
+        init_selu(nn.Conv3d(hidden_channels, out_channels, (1, 1, 1))),
     )
 
 
@@ -210,6 +276,7 @@ def ResNet2d(
     n_blocks=4,
     global_pooling=True,
     normalize_input=False,
+    batch_norm=False,
 ):
     return nn.Sequential(
         nn.BatchNorm2d(in_channels, affine=False, momentum=None)
@@ -225,6 +292,9 @@ def ResNet2d(
                             *[
                                 Residual(
                                     nn.Sequential(
+                                        nn.BatchNorm2d(hidden_channels)
+                                        if batch_norm
+                                        else nn.Identity(),
                                         init_selu(
                                             nn.Conv2d(
                                                 hidden_channels,
@@ -245,17 +315,21 @@ def ResNet2d(
                 for _ in range(n_blocks)
             ]
         ),
+        nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
         init_selu(nn.Conv2d(hidden_channels, out_channels, 1)),
-        nn.SELU(),
         GlobalAvgPool2d() if global_pooling else nn.Identity(),
     )
 
 
-def SNN(
-    in_channels, out_channels, hidden_channels=256, n_layers=4, normalize_input=False
+def MLP(
+    in_channels,
+    out_channels,
+    hidden_channels=256,
+    n_layers=4,
+    normalize_input=False,
+    batch_norm=False,
 ):
-    """Self-normalizing Neural Network (SNN)"""
-    return nn.Sequential(
+    net = nn.Sequential(
         nn.BatchNorm1d(in_channels) if normalize_input else nn.Identity(),
         init_selu(nn.Linear(in_channels, hidden_channels)),
         nn.SELU(),
@@ -264,6 +338,9 @@ def SNN(
                 *[
                     Residual(
                         nn.Sequential(
+                            nn.BatchNorm1d(hidden_channels)
+                            if batch_norm
+                            else nn.Identity(),
                             init_selu(nn.Linear(hidden_channels, hidden_channels)),
                             nn.SELU(),
                         )
@@ -272,5 +349,11 @@ def SNN(
                 ]
             )
         ),
+        nn.BatchNorm1d(hidden_channels) if batch_norm else nn.Identity(),
         init_selu(nn.Linear(hidden_channels, out_channels)),
+    )
+    return (
+        Residual(net)
+        if in_channels == out_channels
+        else ParametricResidual(in_channels, out_channels, net)
     )

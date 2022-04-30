@@ -73,11 +73,30 @@ class Residual(nn.Module):
 class ParametricResidual(nn.Module):
     def __init__(self, in_channels, out_channels, module):
         super().__init__()
-        self.proj = nn.Linear(in_channels, out_channels)
+        self.proj = init_selu(nn.Linear(in_channels, out_channels))
         self.module = module
 
     def forward(self, x):
         return self.proj(x) + self.module(x)
+
+
+class Lambda(nn.Module):
+    def __init__(self, func):
+        super().__init__()
+        self.func = func
+
+    def forward(self, x):
+        return self.func(x)
+
+
+class PosEmbedding(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+
+    def forward(self, x):
+        idx = torch.arange(x.shape[1], device=x.device)
+        return x + self.embedding(idx)
 
 
 class CausalConv1d(nn.Conv1d):

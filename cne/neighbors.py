@@ -23,12 +23,11 @@ class Queue(Module):
     def __init__(self, queue_size=2 ** 15):
         super(Queue, self).__init__()
         self.queue_size = queue_size
-        self.queue = None
 
     @torch.no_grad()
     def forward(self, x):
-        if self.queue is None:
-            self.queue = x
+        if not hasattr(self, "queue"):
+            self.register_buffer("queue", x)
         else:
             self.queue = torch.cat((self.queue, x))[-self.queue_size :]
         return self.queue
@@ -75,6 +74,9 @@ class NearestNeighborSampler(Module):
 
     @torch.no_grad()
     def forward(self, x):
-        queue = self.queue(x)
-        values, indices = torch.topk(-self.metric(x, queue), 2, dim=-1)
-        return queue[indices[:, -1]]
+        if self.training:
+            queue = self.queue(x)
+            values, indices = torch.topk(-self.metric(x, queue), 2, dim=-1)
+            return queue[indices[:, -1]]
+        else:
+            return x

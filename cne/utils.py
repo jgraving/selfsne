@@ -17,6 +17,16 @@ import pytorch_lightning as pl
 import numpy as np
 
 
+class EMA:
+    """Exponential Moving Average"""
+
+    def __init__(self, beta=0.9):
+        self.beta = beta
+
+    def __call__(self, moving_average, value):
+        return moving_average * self.beta + (1 - self.beta) * value
+
+
 def concat_dicts(dicts):
     return {
         key: np.concatenate([dictionary[key] for dictionary in dicts], axis=0)

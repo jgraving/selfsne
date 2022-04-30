@@ -25,7 +25,10 @@ class Noise(Module):
     def forward(self, x):
         if self.training:
             p = D.Bernoulli(probs=self.p).sample()
-            return (p * self._forward(x)) + (1 - p) * x
+            if p == 1:
+                return self._forward(x)
+            else:
+                return x
         else:
             return x
 

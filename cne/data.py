@@ -39,9 +39,6 @@ def lorenz(x, y, z, s=10, r=28, b=2.667):
 class Lorenz(Dataset):
     def __init__(self, window_size, dt=0.01, num_steps=200000, s=10, r=28, b=2.667):
         super().__init__()
-        dt = 0.01
-        num_steps = 200000
-
         # Need one more for the initial values
         xs = np.empty(num_steps + 1)
         ys = np.empty(num_steps + 1)

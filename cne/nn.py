@@ -47,6 +47,7 @@ from math import pi, log
 from functools import wraps
 
 from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
 
 def lecun_normal_(x, mode="fan_in"):
@@ -97,6 +98,14 @@ class PosEmbedding(nn.Module):
     def forward(self, x):
         idx = torch.arange(x.shape[1], device=x.device)
         return x + self.embedding(idx)
+
+
+def TokenMask(p=0.5):
+    return nn.Sequential(
+        Rearrange("batch tokens features -> batch tokens features ()"),
+        nn.Dropout2d(p),
+        Rearrange("batch tokens features () ->  batch tokens features"),
+    )
 
 
 class CausalConv1d(nn.Conv1d):
@@ -508,7 +517,6 @@ class Perceiver(nn.Module):
         latent_heads=8,
         cross_dim_head=64,
         latent_dim_head=64,
-        weight_tie_layers=False,
         decoder_ff=False,
     ):
         super().__init__()

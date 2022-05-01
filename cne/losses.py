@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy as np
+import torch.nn.functional as F
 
 
 def logmeanexp(x, dim=-1):
@@ -41,9 +42,9 @@ def binary_infonce(query, pos_key, neg_key, kernel):
     # use numerically stable repulsion term
     # Shi et al. 2022 (https://arxiv.org/abs/2111.08851)
     # log(1 - sigmoid(logits)) = log(sigmoid(logits)) - logits
-    repel = -(F.logsigmoid(neg_logits) - neg_logits)
+    repel = -(F.logsigmoid(neg_logits) - neg_logits).mean(-1)
 
-    return attract + repel.mean(-1)
+    return attract + repel
 
 
 def off_diagonal(x):

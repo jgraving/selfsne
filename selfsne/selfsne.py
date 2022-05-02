@@ -17,33 +17,42 @@
 import pytorch_lightning as pl
 import torch.optim as optim
 import torch.nn as nn
-from cne.kernels import KERNELS
-from cne.losses import infonce, redundancy_reduction
+
+import copy
+
+from selfsne.kernels import KERNELS
+from selfsne.losses import categorical_infonce, redundancy_reduction
+from selfsne.neighbors import Queue
+from selfsne.prior import MixturePrior
 
 
-class CNE(pl.LightningModule):
-    """Contrastive Noise Embedding"""
+class SelfSNE(pl.LightningModule):
+    """Self-Supervised Noise Embedding"""
 
     def __init__(
         self,
-        encoder=None,
-        prior=None,
-        z_dim=2,
+        encoder,
+        augmenter_a=nn.Identity(),
+        augmenter_b=nn.Identity(),
+        prior=MixturePrior(num_dims=2, num_components=1),
+        embedding_dims=2,
         kernel="studentt",
         similarity_multiplier=1.0,
         redundancy_multiplier=1.0,
-        rate_multiplier=1.0,
+        rate_multiplier=0.1,
         learning_rate=1e-3,
         weight_decay=0.01,
     ):
         super().__init__()
         self.encoder = encoder
+        self.augmenter_a = augmenter_a
+        self.augmenter_b = augmenter_b
         self.prior = prior
-
         self.kernel = KERNELS[kernel]
-        self.bn = nn.BatchNorm1d(z_dim, affine=False)
+        self.bn = nn.BatchNorm1d(embedding_dims, affine=False)
+
         self.save_hyperparameters(
-            "z_dim",
+            "embedding_dims",
             "kernel",
             "similarity_multiplier",
             "redundancy_multiplier",
@@ -55,10 +64,19 @@ class CNE(pl.LightningModule):
     def forward(self, batch):
         return self.encoder(batch)
 
-    def loss(self, z_a, z_b, mode=""):
-        similarity = infonce(z_a, z_b, self.kernel).mean()
-        redundancy = redundancy_reduction(z_a, z_b, self.bn).mean()
-        rate = -self.prior.log_prob(z_a).mean()
+    def loss(self, batch, mode=""):
+        query = self.encoder(self.augmenter_a(batch))
+        key = self.encoder(self.augmenter_b(batch))
+
+        similarity = categorical_infonce(query, key, key, self.kernel).mean()
+
+        redundancy = redundancy_reduction(query, key, self.bn).mean()
+
+        rate = -(
+            self.prior.log_prob(query.clone().detach()).mean()
+            + self.prior.commitment(query).mean() * self.hparams.rate_multiplier
+        )
+
         loss = {
             mode + "similarity": similarity,
             mode + "redundancy": redundancy,
@@ -67,7 +85,7 @@ class CNE(pl.LightningModule):
             mode + "unweighted_loss": rate + similarity + redundancy,
             mode
             + "loss": (
-                rate * self.hparams.rate_multiplier
+                rate
                 + similarity * self.hparams.similarity_multiplier
                 + redundancy * self.hparams.redundancy_multiplier
             ),
@@ -77,28 +95,23 @@ class CNE(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.loss(*self(batch), mode="")["loss"]
+        return self.loss(batch, mode="")["loss"]
 
     def validation_step(self, batch, batch_idx):
-        self.loss(*self(batch), mode="val_")
+        self.loss(batch, mode="val_")
 
     def test_step(self, batch, batch_idx):
-        self.loss(*self(batch), mode="test_")
+        self.loss(batch, mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        embedded_a, embedded_b = self(batch)
-        prior_log_prob_a = self.prior.log_prob(embedded_a)
-        prior_log_prob_b = self.prior.log_prob(embedded_b)
-        labels_a = self.prior.assign_labels(embedded_a)
-        labels_b = self.prior.assign_labels(embedded_b)
+        embedded = self(batch)
+        prior_log_prob = self.prior.log_prob(embedded)
+        labels = self.prior.assign_labels(embedded)
 
         return {
-            "embedding_a": embedded_a.cpu().numpy(),
-            "embedding_b": embedded_b.cpu().numpy(),
-            "labels_a": labels_a.cpu().numpy(),
-            "labels_a": labels_a.cpu().numpy(),
-            "prior_log_prob_a": prior_log_prob_a.cpu().numpy(),
-            "prior_log_prob_b": prior_log_prob_b.cpu().numpy(),
+            "embedding": embedded.cpu().numpy(),
+            "labels": labels.cpu().numpy(),
+            "prior_log_prob": prior_log_prob.cpu().numpy(),
         }
 
     def configure_optimizers(self):
@@ -106,7 +119,9 @@ class CNE(pl.LightningModule):
             {"params": self.encoder.parameters()},
             {"params": self.bn.parameters()},
         ]
-        params_list.append({"params": self.prior.parameters(), "weight_decay": 0.0})
+        params_list.append(
+            {"params": self.prior.parameters(), "weight_decay": 0.0, "lr": 0.1}
+        )
 
         return optim.AdamW(
             params_list,

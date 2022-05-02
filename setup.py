@@ -20,17 +20,16 @@ import sys
 import warnings
 from setuptools import setup, find_packages
 
-DESCRIPTION = "Contrastive Noise Embeddings (CNE) for dimensionality reduction and clustering"
-LONG_DESCRIPTION = """\
-CNE is a probabilistic self-supervised deep learning model for compressing high-dimensional data to a low-dimensional embedding. CNE is a general-purpose algorithm that works with multiple types of data including images, sequences, and tabular data. It uses the InfoNCE objective, a variational bound on mutual information based on noise contrastive estimation (NCE), to preserve local structure in the compressed latent space. CNE also simultaneously learns a cluster distribution (a prior over the latent embedding) during optimization, and overlapping clusters are automatically combined by optimizing a variational upper bound on entropy, so the number of clusters does not have to be specified manually — provided the number of initial clusters is large enough. CNE produces embeddings with similar quality to existing dimensionality reduction methods; can detect outliers; scales to large, out-of-core datasets; and can easily add new data to an existing embedding/clustering.
+DESCRIPTION = "Self-Supervised Noise Embeddings (Self-SNE) for dimensionality reduction and clustering"
+LONG_DESCRIPTION = """
 """
 
-DISTNAME = "cne-learn"
+DISTNAME = "selfsne"
 MAINTAINER = "Jacob Graving <jgraving@gmail.com>"
 MAINTAINER_EMAIL = "jgraving@gmail.com"
-URL = "https://github.com/jgraving/cne"
+URL = "https://github.com/jgraving/selfsne"
 LICENSE = "Apache 2.0"
-DOWNLOAD_URL = "https://github.com/jgraving/cne.git"
+DOWNLOAD_URL = "https://github.com/jgraving/selfsne.git"
 VERSION = "0.0.dev"
 
 

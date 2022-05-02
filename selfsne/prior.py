@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 import pytorch_lightning as pl
 
-from cne.kernels import KERNELS
+from selfsne.kernels import KERNELS
 
 
 class MixturePrior(pl.LightningModule):

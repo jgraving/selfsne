@@ -14,7 +14,10 @@
 # limitations under the License.
 
 from torch.nn import Module
+import torch.nn.functional as F
+
 from torch.distributions.utils import broadcast_all
+
 import numpy as np
 
 
@@ -25,7 +28,7 @@ class Laplace(Module):
 
     def log_prob(self, value):
         y = (value - self.loc) / self.scale
-        return -y.abs().sum(-1)
+        return -y.abs_().sum(-1)
 
 
 class LaplaceT(Module):
@@ -35,7 +38,7 @@ class LaplaceT(Module):
 
     def log_prob(self, value):
         y = (value - self.loc) / self.scale
-        return -y.abs().sum(-1).log1p()
+        return -y.abs_().sum(-1).log1p_()
 
 
 class StudentT(Module):
@@ -45,7 +48,7 @@ class StudentT(Module):
 
     def log_prob(self, value):
         y = (value - self.loc) / self.scale
-        return -y.pow(2).sum(-1).log1p()
+        return -y.pow_(2).sum(-1).log1p_()
 
 
 class Normal(Module):
@@ -55,27 +58,27 @@ class Normal(Module):
 
     def log_prob(self, value):
         y = (value - self.loc) / self.scale
-        return -y.pow(2).div(2).sum(-1)
+        return -y.pow_(2).div_(2).sum(-1)
 
 
 class VonMises(Module):
     def __init__(self, loc):
         super().__init__()
-        self.loc = loc / loc.norm(dim=-1, keepdim=True)
+        self.loc = F.normalize(loc, dim=-1)
 
     def log_prob(self, value):
-        value = value / value.norm(dim=-1, keepdim=True)
+        value = F.normalize(value, dim=-1)
         return (self.loc * value).sum(-1)
 
 
 class SphericalT(Module):
     def __init__(self, loc):
         super().__init__()
-        self.loc = loc / loc.norm(dim=-1, keepdim=True)
+        self.loc = F.normalize(loc, dim=-1)
 
     def log_prob(self, value):
-        value = value / value.norm(dim=-1, keepdim=True)
-        return -F.softplus(-(self.loc * value).sum(-1))
+        value = F.normalize(value, dim=-1)
+        return F.softplus((self.loc * value).sum(-1))
 
 
 class Categorical(Module):

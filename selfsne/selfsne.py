@@ -20,10 +20,9 @@ import torch.nn as nn
 
 import copy
 
-from selfsne.kernels import KERNELS
-from selfsne.losses import categorical_infonce, redundancy_reduction
-from selfsne.neighbors import Queue
 from selfsne.prior import MixturePrior
+from selfsne.losses import InfoNCE, RedundancyReduction
+from selfsne.neighbors import NearestNeighborSampler
 
 
 class SelfSNE(pl.LightningModule):
@@ -33,10 +32,11 @@ class SelfSNE(pl.LightningModule):
         self,
         encoder,
         augmenter_a=nn.Identity(),
-        augmenter_b=nn.Identity(),
+        augmenter_b=NearestNeighborSampler(),
         prior=MixturePrior(num_dims=2, num_components=1),
         embedding_dims=2,
-        kernel="studentt",
+        similarity_loss=InfoNCE("studentt"),
+        redundancy_loss=RedundancyReduction(2),
         similarity_multiplier=1.0,
         redundancy_multiplier=1.0,
         rate_multiplier=0.1,
@@ -48,12 +48,11 @@ class SelfSNE(pl.LightningModule):
         self.augmenter_a = augmenter_a
         self.augmenter_b = augmenter_b
         self.prior = prior
-        self.kernel = KERNELS[kernel]
-        self.bn = nn.BatchNorm1d(embedding_dims, affine=False)
+        self.similarity_loss = similarity_loss
+        self.redundancy_loss = redundancy_loss
 
         self.save_hyperparameters(
             "embedding_dims",
-            "kernel",
             "similarity_multiplier",
             "redundancy_multiplier",
             "rate_multiplier",
@@ -68,9 +67,9 @@ class SelfSNE(pl.LightningModule):
         query = self.encoder(self.augmenter_a(batch))
         key = self.encoder(self.augmenter_b(batch))
 
-        similarity = categorical_infonce(query, key, key, self.kernel).mean()
+        similarity = self.similarity_loss(query, key).mean()
 
-        redundancy = redundancy_reduction(query, key, self.bn).mean()
+        redundancy = self.redundancy_loss(query, key).mean()
 
         rate = -(
             self.prior.log_prob(query.clone().detach()).mean()
@@ -82,7 +81,6 @@ class SelfSNE(pl.LightningModule):
             mode + "redundancy": redundancy,
             mode + "rate": rate,
             mode + "prior_entropy": self.prior.entropy(),
-            mode + "unweighted_loss": rate + similarity + redundancy,
             mode
             + "loss": (
                 rate
@@ -117,7 +115,7 @@ class SelfSNE(pl.LightningModule):
     def configure_optimizers(self):
         params_list = [
             {"params": self.encoder.parameters()},
-            {"params": self.bn.parameters()},
+            {"params": self.redundancy_loss.parameters()},
         ]
         params_list.append(
             {"params": self.prior.parameters(), "weight_decay": 0.0, "lr": 0.1}

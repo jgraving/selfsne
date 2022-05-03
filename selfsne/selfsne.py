@@ -22,8 +22,6 @@ import copy
 
 from selfsne.prior import MixturePrior
 from selfsne.losses import InfoNCE, RedundancyReduction
-from selfsne.neighbors import NearestNeighborSampler
-
 
 class SelfSNE(pl.LightningModule):
     """Self-Supervised Noise Embedding"""
@@ -31,10 +29,8 @@ class SelfSNE(pl.LightningModule):
     def __init__(
         self,
         encoder,
-        augmenter_a=nn.Identity(),
-        augmenter_b=NearestNeighborSampler(),
+        pair_sampler,
         prior=MixturePrior(num_dims=2, num_components=1),
-        embedding_dims=2,
         similarity_loss=InfoNCE("studentt"),
         redundancy_loss=RedundancyReduction(2),
         similarity_multiplier=1.0,
@@ -45,14 +41,12 @@ class SelfSNE(pl.LightningModule):
     ):
         super().__init__()
         self.encoder = encoder
-        self.augmenter_a = augmenter_a
-        self.augmenter_b = augmenter_b
+        self.pair_sampler = pair_sampler
         self.prior = prior
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
 
         self.save_hyperparameters(
-            "embedding_dims",
             "similarity_multiplier",
             "redundancy_multiplier",
             "rate_multiplier",
@@ -64,13 +58,13 @@ class SelfSNE(pl.LightningModule):
         return self.encoder(batch)
 
     def loss(self, batch, mode=""):
-        query = self.encoder(self.augmenter_a(batch))
-        key = self.encoder(self.augmenter_b(batch))
+        query, key = self.pair_sampler(batch)
+
+        query = self.encoder(query)
+        key = self.encoder(key)
 
         similarity = self.similarity_loss(query, key).mean()
-
         redundancy = self.redundancy_loss(query, key).mean()
-
         rate = -(
             self.prior.log_prob(query.clone().detach()).mean()
             + self.prior.commitment(query).mean() * self.hparams.rate_multiplier
@@ -115,6 +109,7 @@ class SelfSNE(pl.LightningModule):
     def configure_optimizers(self):
         params_list = [
             {"params": self.encoder.parameters()},
+            {"params": self.pair_sampler.parameters()},
             {"params": self.redundancy_loss.parameters()},
         ]
         params_list.append(

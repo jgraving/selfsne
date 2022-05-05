@@ -46,6 +46,7 @@ from torch import diagonal
 
 from selfsne.kernels import KERNELS
 
+
 def logmeanexp(x, dim=-1):
     return x.logsumexp(dim) - np.log(x.shape[dim])
 
@@ -54,6 +55,7 @@ def query_logits(query, pos_key, neg_key, kernel):
     pos_logits = kernel(query).log_prob(pos_key)
     neg_logits = kernel(query.unsqueeze(1)).log_prob(neg_key)
     return pos_logits, neg_logits
+
 
 def categorical_cross_entropy(pos_logits, neg_logits):
     attract = -pos_logits

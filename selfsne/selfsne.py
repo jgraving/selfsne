@@ -22,6 +22,8 @@ import copy
 
 from selfsne.prior import MixturePrior
 from selfsne.losses import InfoNCE, RedundancyReduction
+from selfsne.neighbors import NearestNeighborSampler
+
 
 class SelfSNE(pl.LightningModule):
     """Self-Supervised Noise Embedding"""
@@ -52,12 +54,19 @@ class SelfSNE(pl.LightningModule):
             "rate_multiplier",
             "learning_rate",
             "weight_decay",
+            ignore=[
+                "encoder",
+                "pair_sampler",
+                "prior",
+                "similarity_loss",
+                "redundancy_loss",
+            ],
         )
 
     def forward(self, batch):
         return self.encoder(batch)
 
-    def loss(self, batch, mode=""):
+    def loss(self, batch, batch_idx, mode=""):
         query, key = self.pair_sampler(batch)
 
         query = self.encoder(query)
@@ -65,10 +74,8 @@ class SelfSNE(pl.LightningModule):
 
         similarity = self.similarity_loss(query, key).mean()
         redundancy = self.redundancy_loss(query, key).mean()
-        rate = -(
-            self.prior.log_prob(query.clone().detach()).mean()
-            + self.prior.commitment(query).mean() * self.hparams.rate_multiplier
-        )
+        rate = -self.prior.log_prob(query.clone().detach()).mean()
+        commitment = -self.prior.commitment(query).mean()
 
         loss = {
             mode + "similarity": similarity,
@@ -78,6 +85,7 @@ class SelfSNE(pl.LightningModule):
             mode
             + "loss": (
                 rate
+                + commitment * self.hparams.rate_multiplier
                 + similarity * self.hparams.similarity_multiplier
                 + redundancy * self.hparams.redundancy_multiplier
             ),
@@ -87,13 +95,13 @@ class SelfSNE(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.loss(batch, mode="")["loss"]
+        return self.loss(batch, batch_idx, mode="")["loss"]
 
     def validation_step(self, batch, batch_idx):
-        self.loss(batch, mode="val_")
+        self.loss(batch, batch_idx, mode="val_")
 
     def test_step(self, batch, batch_idx):
-        self.loss(batch, mode="test_")
+        self.loss(batch, batch_idx, mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         embedded = self(batch)
@@ -113,7 +121,11 @@ class SelfSNE(pl.LightningModule):
             {"params": self.redundancy_loss.parameters()},
         ]
         params_list.append(
-            {"params": self.prior.parameters(), "weight_decay": 0.0, "lr": 0.1}
+            {
+                "params": self.prior.parameters(),
+                "weight_decay": 0.0,
+                "lr": self.prior.hparams.lr,
+            }
         )
 
         return optim.AdamW(

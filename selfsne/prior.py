@@ -23,11 +23,12 @@ import numpy as np
 import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
+from selfsne.neighbors import Queue
 
 
 class MixturePrior(pl.LightningModule):
     def __init__(
-        self, num_dims=2, num_components=2048, kernel="normal", logits="learn"
+        self, num_dims=2, num_components=2048, kernel="normal", logits="learn", lr=0.1
     ):
         super().__init__()
         self.save_hyperparameters()

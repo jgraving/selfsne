@@ -105,7 +105,16 @@ class Bhattacharyya(Module):
         self.logits = logits.log_softmax(-1)
 
     def log_prob(self, value):
-        return 0.5 * (self.logits + value.log_softmax(-1)).logsumexp(-1)
+        return (self.logits + value.log_softmax(-1)).mul_(0.5).logsumexp(-1)
+
+
+class JointProduct(Module):
+    def __init__(self, logits):
+        super().__init__()
+        self.logits = logits.log_softmax(-1)
+
+    def log_prob(self, value):
+        return (self.logits + value.log_softmax(-1)).logsumexp(-1)
 
 
 KERNELS = {
@@ -118,4 +127,5 @@ KERNELS = {
     "laplacet": LaplaceT,
     "inner_product": InnerProduct,
     "bhattacharyya": Bhattacharyya,
+    "joint_product": JointProduct,
 }

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Code for redundancy reduction loss is adapted from:
+# Code for Barlow's Twins redundancy reduction loss is adapted from:
 # https://github.com/facebookresearch/barlowtwins/blob/main/main.py
 # Under the following License:
 
@@ -97,16 +97,19 @@ def redundancy_reduction(query, key, normalizer):
 
 
 class InfoNCE(nn.Module):
-    def __init__(self, kernel="studentt", cross_entropy="categorical"):
+    def __init__(self, kernel="studentt", cross_entropy="categorical", temperature=1.0):
         super().__init__()
         self.kernel = KERNELS[kernel]
         self.cross_entropy = CE_LOSSES[cross_entropy]
+        self.temperature = temperature
 
     def forward(self, query, pos_key, neg_key=None):
         pos_logits, neg_logits = query_logits(
             query, pos_key, pos_key if neg_key is None else neg_key, self.kernel
         )
-        return self.cross_entropy(pos_logits, neg_logits)
+        return self.cross_entropy(
+            pos_logits / self.temperature, neg_logits / self.temperature
+        )
 
 
 class RedundancyReduction(nn.Module):

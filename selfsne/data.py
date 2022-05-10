@@ -19,6 +19,25 @@
 import numpy as np
 from torch.utils.data import Dataset
 import h5py
+from sklearn.datasets import fetch_openml
+
+
+class MNIST(Dataset):
+    def __init__(self, return_images=False):
+        super().__init__()
+        # Load data from https://www.openml.org/d/554
+        self.x_train, self.y_train = fetch_openml(
+            "mnist_784", version=1, return_X_y=True, as_frame=False
+        )
+        if return_images:
+            self.x_train = self.x_train.reshape((-1, 1, 28, 28))
+        self.x_train /= 255
+
+    def __len__(self):
+        return len(self.x_train)
+
+    def __getitem__(self, idx):
+        return np.array(self.x_train[idx]).astype(np.float32)
 
 
 def lorenz(x, y, z, s=10, r=28, b=2.667):

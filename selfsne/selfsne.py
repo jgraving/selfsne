@@ -69,8 +69,8 @@ class SelfSNE(pl.LightningModule):
     def loss(self, batch, batch_idx, mode=""):
         query, key = self.pair_sampler(batch)
 
-        query = self.encoder(query)
-        key = self.encoder(key)
+        query = self(query)
+        key = self(key)
 
         similarity = self.similarity_loss(query, key).mean()
         redundancy = self.redundancy_loss(query, key).mean()
@@ -119,14 +119,12 @@ class SelfSNE(pl.LightningModule):
             {"params": self.encoder.parameters()},
             {"params": self.pair_sampler.parameters()},
             {"params": self.redundancy_loss.parameters()},
-        ]
-        params_list.append(
             {
                 "params": self.prior.parameters(),
                 "weight_decay": 0.0,
                 "lr": self.prior.hparams.lr,
-            }
-        )
+            },
+        ]
 
         return optim.AdamW(
             params_list,

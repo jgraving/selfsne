@@ -100,7 +100,7 @@ class MixturePrior(pl.LightningModule):
         return self.locs[self.assign_modes(x)]
 
     def configure_optimizers(self):
-        self.watershed_locs = nn.Parameter(self.locs.detach().clone())
+        self.watershed_locs = nn.Parameter(self.locs.clone().detach())
         return optim.Adam([self.watershed_locs], lr=self.hparams.lr)
 
     def entropy_upper_bound(self):

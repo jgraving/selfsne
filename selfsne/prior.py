@@ -139,15 +139,15 @@ class MixturePrior(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-
+        entropy = self.entropy_upper_bound()
         self.log(
             "entropy",
-            self.entropy_upper_bound(),
+            entropy,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
-        return self.entropy_upper_bound()
+        return entropy
 
     def assign_labels(self, p):
         if not self.watershed_optimized:

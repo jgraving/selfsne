@@ -23,6 +23,7 @@ import copy
 from selfsne.prior import MixturePrior
 from selfsne.losses import InfoNCE, RedundancyReduction
 from selfsne.neighbors import NearestNeighborSampler
+from selfsne.utils import stop_gradient
 
 
 class SelfSNE(pl.LightningModule):
@@ -74,8 +75,8 @@ class SelfSNE(pl.LightningModule):
 
         similarity = self.similarity_loss(query, key).mean()
         redundancy = self.redundancy_loss(query, key).mean()
-        rate = -self.prior.log_prob(query.clone().detach()).mean()
-        commitment = -self.prior.commitment(query).mean()
+        prior_log_prob = -self.prior.log_prob(stop_gradient(query)).mean()
+        rate = -self.prior.rate(query).mean()
 
         loss = {
             mode + "similarity": similarity,
@@ -84,8 +85,8 @@ class SelfSNE(pl.LightningModule):
             mode + "prior_entropy": self.prior.entropy(),
             mode
             + "loss": (
-                rate
-                + commitment * self.hparams.rate_multiplier
+                prior_log_prob
+                + rate * self.hparams.rate_multiplier
                 + similarity * self.hparams.similarity_multiplier
                 + redundancy * self.hparams.redundancy_multiplier
             ),

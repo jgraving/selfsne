@@ -17,6 +17,10 @@ import pytorch_lightning as pl
 import numpy as np
 
 
+def stop_gradient(x):
+    return x.clone().detach()
+
+
 class EMA:
     """Exponential Moving Average"""
 

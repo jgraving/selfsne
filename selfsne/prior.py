@@ -23,12 +23,17 @@ import numpy as np
 import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
-from selfsne.neighbors import Queue
 
 
 class MixturePrior(pl.LightningModule):
     def __init__(
-        self, num_dims=2, num_components=2048, kernel="normal", logits="learn", lr=0.1
+        self,
+        num_dims=2,
+        num_components=2048,
+        kernel="normal",
+        logits="learn",
+        kernel_scale=1.0,
+        lr=0.1,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -62,13 +67,12 @@ class MixturePrior(pl.LightningModule):
 
     def sample(self, n_samples):
         components = D.Independent(D.Normal(loc=self.locs, scale=1), 1)
-        mixture = self.mixture
-        normal_mixture = D.MixtureSameFamily(mixture, components)
+        normal_mixture = D.MixtureSameFamily(self.mixture, components)
         return normal_mixture.sample([n_samples])
 
     @property
     def components(self):
-        return self.kernel(self.locs.unsqueeze(1))
+        return self.kernel(self.locs.unsqueeze(1), self.hparams.kernel_scale)
 
     def entropy(self):
         return -(self.mixture.probs * self.log_prob(self.locs)).sum()
@@ -87,11 +91,11 @@ class MixturePrior(pl.LightningModule):
         for param in self.parameters():
             param.requires_grad = True
 
-    def commitment(self, x):
+    def rate(self, x):
         self.disable_grad()
-        commitment = self.log_prob(x)
+        rate = self.log_prob(x)
         self.enable_grad()
-        return commitment
+        return rate
 
     def assign_modes(self, x):
         return self.weighted_log_prob(x).argmax(0)
@@ -99,12 +103,12 @@ class MixturePrior(pl.LightningModule):
     def quantize(self, x):
         return self.locs[self.assign_modes(x)]
 
+    def entropy_upper_bound(self):
+        return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
+
     def configure_optimizers(self):
         self.watershed_locs = nn.Parameter(self.locs.clone().detach())
         return optim.Adam([self.watershed_locs], lr=self.hparams.lr)
-
-    def entropy_upper_bound(self):
-        return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
 
     def watershed_labels(self):
 

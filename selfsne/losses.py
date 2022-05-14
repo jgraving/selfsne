@@ -51,9 +51,9 @@ def logmeanexp(x, dim=-1):
     return x.logsumexp(dim) - np.log(x.shape[dim])
 
 
-def query_logits(query, pos_key, neg_key, kernel):
-    pos_logits = kernel(query).log_prob(pos_key)
-    neg_logits = kernel(query.unsqueeze(1)).log_prob(neg_key)
+def query_logits(query, pos_key, neg_key, kernel, kernel_scale=1.0):
+    pos_logits = kernel(query, kernel_scale).log_prob(pos_key)
+    neg_logits = kernel(query.unsqueeze(1), kernel_scale).log_prob(neg_key)
     return pos_logits, neg_logits
 
 
@@ -97,19 +97,23 @@ def redundancy_reduction(query, key, normalizer):
 
 
 class InfoNCE(nn.Module):
-    def __init__(self, kernel="studentt", cross_entropy="categorical", temperature=1.0):
+    def __init__(
+        self, kernel="studentt", cross_entropy="categorical", kernel_scale=1.0
+    ):
         super().__init__()
         self.kernel = KERNELS[kernel]
         self.cross_entropy = CE_LOSSES[cross_entropy]
-        self.temperature = temperature
+        self.kernel_scale = kernel_scale
 
     def forward(self, query, pos_key, neg_key=None):
         pos_logits, neg_logits = query_logits(
-            query, pos_key, pos_key if neg_key is None else neg_key, self.kernel
+            query,
+            pos_key,
+            pos_key if neg_key is None else neg_key,
+            self.kernel,
+            self.kernel_scale,
         )
-        return self.cross_entropy(
-            pos_logits / self.temperature, neg_logits / self.temperature
-        )
+        return self.cross_entropy(pos_logits, neg_logits)
 
 
 class RedundancyReduction(nn.Module):

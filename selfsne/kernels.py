@@ -15,106 +15,80 @@
 
 from torch.nn import Module
 import torch.nn.functional as F
-
-from torch.distributions.utils import broadcast_all
-
 import numpy as np
 
 
-class Laplace(Module):
+class LocScale(Module):
     def __init__(self, loc, scale=1.0):
         super().__init__()
-        self.loc, self.scale = broadcast_all(loc, scale)
+        self.loc = loc
+        self.scale = scale
+
+    def forward(self, value):
+        return (value - self.loc).div_(self.scale)
+
+
+class Laplace(LocScale):
+    def log_prob(self, value):
+        return -self(value).abs_().sum(-1)
+
+
+class LaplaceT(LocScale):
+    def log_prob(self, value):
+        return -self(value).abs_().sum(-1).log1p_()
+
+
+class StudentT(LocScale):
+    def log_prob(self, value):
+        return -self(value).pow_(2).sum(-1).log1p_()
+
+
+class Normal(LocScale):
+    def log_prob(self, value):
+        return -self(value).pow_(2).div_(2).sum(-1)
+
+
+class InnerProduct(LocScale):
+    def forward(self, value):
+        return (self.loc * value).div_(self.scale).sum(-1)
 
     def log_prob(self, value):
-        y = (value - self.loc) / self.scale
-        return -y.abs_().sum(-1)
+        return self(value)
 
 
-class LaplaceT(Module):
+class VonMises(InnerProduct):
     def __init__(self, loc, scale=1.0):
-        super().__init__()
-        self.loc, self.scale = broadcast_all(loc, scale)
+        super().__init__(F.normalize(loc, dim=-1), scale)
 
     def log_prob(self, value):
-        y = (value - self.loc) / self.scale
-        return -y.abs_().sum(-1).log1p_()
+        return self(F.normalize(value, dim=-1))
 
 
-class StudentT(Module):
-    def __init__(self, loc, scale=1.0):
-        super().__init__()
-        self.loc, self.scale = broadcast_all(loc, scale)
-
+class SphericalT(VonMises):
     def log_prob(self, value):
-        y = (value - self.loc) / self.scale
-        return -y.pow_(2).sum(-1).log1p_()
-
-
-class Normal(Module):
-    def __init__(self, loc, scale=1.0):
-        super().__init__()
-        self.loc, self.scale = broadcast_all(loc, scale)
-
-    def log_prob(self, value):
-        y = (value - self.loc) / self.scale
-        return -y.pow_(2).div_(2).sum(-1)
-
-
-class VonMises(Module):
-    def __init__(self, loc):
-        super().__init__()
-        self.loc = F.normalize(loc, dim=-1)
-
-    def log_prob(self, value):
-        value = F.normalize(value, dim=-1)
-        return (self.loc * value).sum(-1)
-
-
-class SphericalT(Module):
-    def __init__(self, loc):
-        super().__init__()
-        self.loc = F.normalize(loc, dim=-1)
-
-    def log_prob(self, value):
-        value = F.normalize(value, dim=-1)
-        return F.softplus((self.loc * value).sum(-1))
+        return F.softplus(self(value))
 
 
 class Categorical(Module):
-    def __init__(self, logits):
-        super().__init__()
+    def __init__(self, logits, temperature):
         self.logits = logits.log_softmax(-1)
+        self.temperature = temperature
 
     def log_prob(self, value):
-        return (self.logits * value.softmax(-1)).sum(-1)
+        return (self.logits * value.softmax(-1)).div_(self.temperature).sum(-1)
 
 
-class InnerProduct(Module):
-    def __init__(self, loc):
-        super().__init__()
-        self.loc = loc
-
-    def log_prob(self, value):
-        return (self.loc * value).sum(-1)
-
-
-class Bhattacharyya(Module):
-    def __init__(self, logits):
-        super().__init__()
-        self.logits = logits.log_softmax(-1)
+class JointProduct(Categorical):
+    def forward(self, value):
+        return (self.logits + value.log_softmax(-1)).div_(self.temperature)
 
     def log_prob(self, value):
-        return (self.logits + value.log_softmax(-1)).mul_(0.5).logsumexp(-1)
+        return self(value).logsumexp(-1)
 
 
-class JointProduct(Module):
-    def __init__(self, logits):
-        super().__init__()
-        self.logits = logits.log_softmax(-1)
-
+class Bhattacharyya(JointProduct):
     def log_prob(self, value):
-        return (self.logits + value.log_softmax(-1)).logsumexp(-1)
+        return self(value).mul_(0.5).logsumexp(-1)
 
 
 KERNELS = {

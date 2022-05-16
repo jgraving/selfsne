@@ -64,9 +64,10 @@ class VonMises(InnerProduct):
         return self(F.normalize(value, dim=-1))
 
 
-class SphericalT(VonMises):
+class WrappedCauchy(VonMises):
     def log_prob(self, value):
-        return F.softplus(self(value))
+        cos = (self.loc * F.normalize(value, dim=-1)).sum(-1)
+        return -(np.cosh(self.scale) - cos).log()
 
 
 class Categorical(Module):
@@ -97,7 +98,7 @@ KERNELS = {
     "categorical": Categorical,
     "laplace": Laplace,
     "vonmises": VonMises,
-    "sphericalt": SphericalT,
+    "wrapped_cauchy": WrappedCauchy,
     "laplacet": LaplaceT,
     "inner_product": InnerProduct,
     "bhattacharyya": Bhattacharyya,

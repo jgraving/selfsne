@@ -33,6 +33,7 @@ class SelfSNE(pl.LightningModule):
         self,
         encoder,
         pair_sampler,
+        projector=nn.Identity(),
         prior=MixturePrior(num_dims=2, num_components=1),
         similarity_loss=InfoNCE("studentt"),
         redundancy_loss=RedundancyReduction(2),
@@ -44,6 +45,7 @@ class SelfSNE(pl.LightningModule):
     ):
         super().__init__()
         self.encoder = encoder
+        self.projector = projector
         self.pair_sampler = pair_sampler
         self.prior = prior
         self.similarity_loss = similarity_loss
@@ -57,6 +59,7 @@ class SelfSNE(pl.LightningModule):
             "weight_decay",
             ignore=[
                 "encoder",
+                "projector",
                 "pair_sampler",
                 "prior",
                 "similarity_loss",
@@ -65,7 +68,7 @@ class SelfSNE(pl.LightningModule):
         )
 
     def forward(self, batch):
-        return self.encoder(batch)
+        return self.projector(self.encoder(batch))
 
     def loss(self, batch, batch_idx, mode=""):
         query, key = self.pair_sampler(batch)
@@ -119,7 +122,12 @@ class SelfSNE(pl.LightningModule):
         params_list = [
             {"params": self.encoder.parameters()},
             {"params": self.pair_sampler.parameters()},
+            {"params": self.similarity_loss.parameters()},
             {"params": self.redundancy_loss.parameters()},
+            {
+                "params": self.projector.parameters(),
+                "weight_decay": 0.0,
+            },
             {
                 "params": self.prior.parameters(),
                 "weight_decay": 0.0,

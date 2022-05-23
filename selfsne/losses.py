@@ -45,38 +45,13 @@ from torch import nn
 from torch import diagonal
 
 from selfsne.kernels import KERNELS
-
-
-def logmeanexp(x, dim=-1):
-    return x.logsumexp(dim) - np.log(x.shape[dim])
+from selfsne.discriminators import DISCRIMINATORS
 
 
 def query_logits(query, pos_key, neg_key, kernel, kernel_scale=1.0):
     pos_logits = kernel(query, kernel_scale).log_prob(pos_key)
     neg_logits = kernel(query.unsqueeze(1), kernel_scale).log_prob(neg_key)
     return pos_logits, neg_logits
-
-
-def categorical_cross_entropy(pos_logits, neg_logits):
-    attract = -pos_logits
-    repel = logmeanexp(neg_logits)
-    return attract + repel
-
-
-def binary_cross_entropy(pos_logits, neg_logits):
-    attract = -F.logsigmoid(pos_logits)
-    # use numerically stable repulsion term
-    # Shi et al. 2022 (https://arxiv.org/abs/2111.08851)
-    # log(1 - sigmoid(logits)) = log(sigmoid(logits)) - logits
-    repel = -(F.logsigmoid(neg_logits) - neg_logits).mean(-1)
-    return attract + repel
-
-
-CE_LOSSES = {
-    "categorical": categorical_cross_entropy,
-    "binary": binary_cross_entropy,
-    "bernoulli": binary_cross_entropy,
-}
 
 
 def off_diagonal(x):
@@ -98,11 +73,11 @@ def redundancy_reduction(query, key, normalizer):
 
 class InfoNCE(nn.Module):
     def __init__(
-        self, kernel="studentt", cross_entropy="categorical", kernel_scale=1.0
+        self, kernel="studentt", discriminator="categorical", kernel_scale=1.0
     ):
         super().__init__()
         self.kernel = KERNELS[kernel]
-        self.cross_entropy = CE_LOSSES[cross_entropy]
+        self.discriminator = DISCRIMINATORS[discriminator]
         self.kernel_scale = kernel_scale
 
     def forward(self, query, pos_key, neg_key=None):
@@ -113,7 +88,7 @@ class InfoNCE(nn.Module):
             self.kernel,
             self.kernel_scale,
         )
-        return self.cross_entropy(pos_logits, neg_logits)
+        return self.discriminator(pos_logits, neg_logits)
 
 
 class RedundancyReduction(nn.Module):

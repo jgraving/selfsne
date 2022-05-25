@@ -18,8 +18,6 @@ import pytorch_lightning as pl
 import torch.optim as optim
 import torch.nn as nn
 
-import copy
-
 from selfsne.prior import MixturePrior
 from selfsne.losses import InfoNCE, RedundancyReduction
 from selfsne.neighbors import NearestNeighborSampler

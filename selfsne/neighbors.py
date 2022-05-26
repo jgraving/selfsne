@@ -20,28 +20,27 @@ from torch.nn import Module
 
 
 class Queue(Module):
-    def __init__(self, queue_size=2 ** 15):
+    def __init__(self, num_features, queue_size=2 ** 15):
         super(Queue, self).__init__()
-        self.queue_size = queue_size
+        self.register_buffer("queue", torch.zeros((queue_size, num_features)))
+        self.max_size = queue_size
+        self.queue_size = 0
 
     @torch.no_grad()
     def forward(self, x):
-        if not hasattr(self, "queue"):
-            self.register_buffer("queue", x)
-        else:
-            self.queue = torch.cat((self.queue, x))[-self.queue_size :]
-        return self.queue
+        self.queue = torch.cat((self.queue, x))[-self.max_size :]
+        self.queue_size = np.minimum(self.queue_size + x.shape[0], self.max_size)
+        return self.queue[-self.queue_size :]
 
     @torch.no_grad()
     def sample(self, n_samples):
-        indices = torch.randint(
-            self.queue.shape[0], (n_samples,), device=self.queue.device
-        )
-        return self.queue[indices]
+        assert n_samples <= self.queue_size
+        indices = torch.randint(self.queue_size, (n_samples,), device=self.queue.device)
+        return self.queue[-indices]
 
     @property
     def full(self):
-        return self.queue.shape[0] == self.queue_size
+        return self.queue_size == self.max_size
 
 
 def inner_product(x, y):
@@ -67,9 +66,9 @@ METRICS = {
 
 
 class NearestNeighborSampler(Module):
-    def __init__(self, queue_size=2 ** 15, metric="euclidean"):
+    def __init__(self, num_features, queue_size=2 ** 15, metric="euclidean"):
         super().__init__()
-        self.queue = Queue(queue_size)
+        self.queue = Queue(num_features, queue_size)
         self.metric = METRICS[metric]
 
     @torch.no_grad()

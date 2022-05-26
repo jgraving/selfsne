@@ -71,7 +71,72 @@ def redundancy_reduction(query, key, normalizer):
     return invariance + redundancy
 
 
-class InfoNCE(nn.Module):
+class NCE(nn.Module):
+    """Noise Contrastive Estimation [1, 2]
+
+    A generalized multi-sample contrastive loss that preserves local embedding
+    structure by maximizing similarity for positive pairs and minimizing
+    similarity for negative (noise) pairs.
+
+    A user-selected similarity kernel is used to calculate logits for each
+    pair, which are then optimized by a user-selected discriminator function
+    to maximize logits for positive pairs (attractive forces)
+    and minimize logits for negative pairs (repulsive forces).
+
+    Parameters
+    ----------
+    kernel: str
+        Similarity kernel used for calculating discriminator logits.
+        Must be one of selfsne.kernels.KERNELS.
+        For example, "studentt" can be used to produce t-SNE [3] or UMAP [4]
+        embeddings, "normal" can be used to produce SNE [5] embeddings,
+        and "vonmises" can be used for (hyper)spherical embeddings [6, 7].
+
+    discriminator: str
+        Discriminator function used for instance classification.
+        Must be one of selfsne.discriminators.DISCRIMINATORS.
+        For example, "categorical" applies categorical cross entropy,
+        or InfoNCE [2], which can be used for t-SNE [3] and SimCLR [6]
+        embeddings, while "binary" applies binary cross entropy,
+        or classic NCE [1], which can be used for UMAP [4] embeddings.
+
+    kernel_scale: float, default=1.0
+        Postive scale value for calculating logits.
+        For loc-scale family kernels sqrt(embedding_dims) is recommended.
+
+    References
+    ----------
+    [1] Gutmann, M., & Hyvärinen, A. (2010). Noise-contrastive estimation:
+        A new estimation principle for unnormalized statistical models.
+        In Proceedings of the thirteenth international conference on artificial
+        intelligence and statistics (pp. 297-304). JMLR Workshop and
+        Conference Proceedings.
+
+    [2] Oord, A. V. D., Li, Y., & Vinyals, O. (2018).
+        Representation learning with contrastive predictive coding.
+        arXiv preprint arXiv:1807.03748.
+
+    [3] Van Der Maaten, L. (2009). Learning a parametric embedding
+        by preserving local structure. In Artificial intelligence
+        and statistics (pp. 384-391). PMLR.
+
+    [4] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
+        Parametric UMAP Embeddings for Representation and Semisupervised
+        Learning. Neural Computation, 33(11), 2881-2907.
+
+    [5] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
+        Advances in neural information processing systems, 15.
+
+    [6] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020, November).
+        A simple framework for contrastive learning of visual representations.
+        In International conference on machine learning (pp. 1597-1607). PMLR.
+
+    [7] Wang, M., & Wang, D. (2016, March). Vmf-sne: Embedding for spherical
+        data. In 2016 IEEE International Conference on Acoustics, Speech
+        and Signal Processing (ICASSP) (pp. 2344-2348). IEEE.
+
+    """
+
     def __init__(
         self, kernel="studentt", discriminator="categorical", kernel_scale=1.0
     ):
@@ -92,6 +157,32 @@ class InfoNCE(nn.Module):
 
 
 class RedundancyReduction(nn.Module):
+    """Redundancy Reduction [1]
+
+    A self-supervised loss that reduces feature redundancy for an embedding
+    by minimizing mean squared error between an identity matrix and the
+    empirical cross-correlation matrix between positive pairs.
+    This helps to preserve global structure in the embedding as a form of
+    nonlinear canonical correlation analysis (CCA) [2].
+
+    Parameters
+    ----------
+    num_features: int
+        Number of embedding features
+
+    References
+    ----------
+    [1] Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021).
+        Barlow twins: Self-supervised learning via redundancy reduction.
+        In International Conference on Machine Learning (pp. 12310-12320).
+        PMLR.
+
+    [2] Balestriero, R., & LeCun, Y. (2022). Contrastive and Non-Contrastive
+        Self-Supervised Learning Recover Global and Local Spectral Embedding
+        Methods. doi:10.48550/arxiv.2205.11508
+
+    """
+
     def __init__(self, num_features=2):
         super().__init__()
         self.normalizer = nn.BatchNorm1d(num_features, affine=False)

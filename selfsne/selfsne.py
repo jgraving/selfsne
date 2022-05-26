@@ -19,7 +19,7 @@ import torch.optim as optim
 import torch.nn as nn
 
 from selfsne.prior import MixturePrior
-from selfsne.losses import InfoNCE, RedundancyReduction
+from selfsne.losses import NCE, RedundancyReduction
 from selfsne.neighbors import NearestNeighborSampler
 from selfsne.utils import stop_gradient
 
@@ -33,7 +33,7 @@ class SelfSNE(pl.LightningModule):
         pair_sampler,
         projector=nn.Identity(),
         prior=MixturePrior(num_dims=2, num_components=1),
-        similarity_loss=InfoNCE("studentt"),
+        similarity_loss=NCE("studentt"),
         redundancy_loss=RedundancyReduction(2),
         similarity_multiplier=1.0,
         redundancy_multiplier=1.0,

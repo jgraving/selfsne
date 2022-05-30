@@ -17,6 +17,7 @@ import torch
 import torch.nn.functional as F
 import torch.distributions as D
 from torch.nn import Module
+import numpy as np
 
 
 class Queue(Module):

@@ -14,60 +14,84 @@
 # limitations under the License.
 
 import numpy as np
+
+import torch
+from torch import nn
 import torch.nn.functional as F
 
+from selfsne.utils import logmeanexp
 
-def logmeanexp(x, dim=-1):
-    return x.logsumexp(dim) - np.log(x.shape[dim])
+
+def noise_contrastive_estimation(pos_logits, neg_logits):
+    noise_log_prob = np.log(neg_logits.shape[1]) + torch.zeros(
+        1, device=neg_logits.device
+    )
+    attraction = torch.logaddexp(pos_logits, noise_log_prob) - pos_logits
+    repulsion = (torch.logaddexp(neg_logits, noise_log_prob) - noise_log_prob).mean(-1)
+    return attraction, repulsion
 
 
 def categorical_cross_entropy(pos_logits, neg_logits):
-    attract = -pos_logits
-    repel = logmeanexp(neg_logits)
-    return attract + repel
+    attraction = -pos_logits
+    repulsion = logmeanexp(neg_logits, dim=-1)
+    return attraction, repulsion
 
 
 def binary_cross_entropy(pos_logits, neg_logits):
-    attract = F.softplus(-pos_logits)
-    repel = F.softplus(neg_logits).mean(-1)
-    return attract + repel
+    attraction = -F.logsigmoid(pos_logits)
+    # use numerically stable repulsion term
+    # Shi et al. 2022 (https://arxiv.org/abs/2111.08851)
+    # log(1 - sigmoid(logits)) = log(sigmoid(logits)) - logits
+    repulsion = -(F.logsigmoid(neg_logits) - neg_logits).mean(-1)
+    return attraction, repulsion
 
 
 def cauchy_schwarz_divergence(pos_logits, neg_logits):
-    attract = -pos_logits
-    repel = 0.5 * logmeanexp(2 * neg_logits)
-    return attract + repel
+    attraction = -pos_logits
+    repulsion = 0.5 * logmeanexp(2 * neg_logits, dim=-1)
+    return attraction, repulsion
+
+
+# discriminators from Poole et al. (2019) https://arxiv.org/abs/1905.06922
+def tuba(pos_logits, neg_logits):
+    attraction = -pos_logits - 1
+    repulsion = logmeanexp(neg_logits).exp()
+    return attraction, repulsion
+
+
+def nwj(pos_logits, neg_logits):
+    return tuba(pos_logits - 1, neg_logits - 1)
 
 
 # discriminators from Qin et al. (2020) https://arxiv.org/abs/1811.09567
 def wasserstein_logits(pos_logits, neg_logits):
-    attract = -pos_logits
-    repel = neg_logits.mean(-1)
-    return attract + repel
+    attraction = -pos_logits
+    repulsion = neg_logits.mean(-1)
+    return attraction, repulsion
 
 
 def wasserstein(pos_logits, neg_logits):
-    attract = -pos_logits.exp()
-    repel = logmeanexp(neg_logits).exp()
-    return attract + repel
+    attraction = -pos_logits.exp()
+    repulsion = logmeanexp(neg_logits).exp()
+    return attraction, repulsion
 
 
 def least_squares(pos_logits, neg_logits):
-    attract = pos_logits.expm1().pow(2)
-    repel = logmeanexp(neg_logits.mul(2)).exp()
-    return attract + repel
+    attraction = pos_logits.expm1().pow(2)
+    repulsion = logmeanexp(neg_logits.mul(2)).exp()
+    return attraction, repulsion
 
 
 def zero_centered_least_squares(pos_logits, neg_logits):
-    attract = pos_logits.expm1().pow(2)
-    repel = logmeanexp(F.softplus(neg_logits).mul(2)).exp()
-    return attract + repel
+    attraction = pos_logits.expm1().pow(2)
+    repulsion = logmeanexp(F.softplus(neg_logits).mul(2)).exp()
+    return attraction, repulsion
 
 
 def cosine(pos_logits, neg_logits):
-    attract = -pos_logits.expm1().cos()
-    repel = -neg_logits.exp().cos().add(1).mean(-1)
-    return attract + repel
+    attraction = -pos_logits.expm1().cos()
+    repulsion = -neg_logits.exp().cos().add(1).mean(-1)
+    return attraction, repulsion
 
 
 # discriminators from Nowozin et al. (2016) https://arxiv.org/abs/1606.00709
@@ -78,9 +102,9 @@ def jensen_shannon_divergence(pos_logits, neg_logits):
     def conjugate(t):
         return -(2 - t.exp()).log()
 
-    attract = -activation(pos_logits)
-    repel = conjugate(activation(neg_logits)).mean(-1)
-    return attract + repel
+    attraction = -activation(pos_logits)
+    repulsion = conjugate(activation(neg_logits)).mean(-1)
+    return attraction, repulsion
 
 
 def kullback_leibler_divergence(pos_logits, neg_logits):
@@ -90,9 +114,9 @@ def kullback_leibler_divergence(pos_logits, neg_logits):
     def conjugate(t):
         return (t - 1).exp()
 
-    attract = -activation(pos_logits)
-    repel = conjugate(activation(neg_logits)).mean(-1)
-    return attract + repel
+    attraction = -activation(pos_logits)
+    repulsion = conjugate(activation(neg_logits)).mean(-1)
+    return attraction, repulsion
 
 
 def reverse_kullback_leibler_divergence(pos_logits, neg_logits):
@@ -102,9 +126,9 @@ def reverse_kullback_leibler_divergence(pos_logits, neg_logits):
     def conjugate(t):
         return -1 - torch.log(-t)
 
-    attract = -activation(pos_logits)
-    repel = conjugate(activation(neg_logits)).mean(-1)
-    return attract + repel
+    attraction = -activation(pos_logits)
+    repulsion = conjugate(activation(neg_logits)).mean(-1)
+    return attraction, repulsion
 
 
 def pearson_chi_sq(pos_logits, neg_logits):
@@ -114,9 +138,9 @@ def pearson_chi_sq(pos_logits, neg_logits):
     def conjugate(t):
         return 0.25 * t ** 2 + t
 
-    attract = -activation(pos_logits)
-    repel = conjugate(activation(neg_logits)).mean(-1)
-    return attract + repel
+    attraction = -activation(pos_logits)
+    repulsion = conjugate(activation(neg_logits)).mean(-1)
+    return attraction, repulsion
 
 
 def squared_hellinger(pos_logits, neg_logits):
@@ -126,14 +150,19 @@ def squared_hellinger(pos_logits, neg_logits):
     def conjugate(t):
         return t / (1 - t)
 
-    attract = -activation(pos_logits)
-    repel = conjugate(activation(neg_logits)).mean(-1)
-    return attract + repel
+    attraction = -activation(pos_logits)
+    repulsion = conjugate(activation(neg_logits)).mean(-1)
+    return attraction, repulsion
 
 
 DISCRIMINATORS = {
+    "nce": noise_contrastive_estimation,
     "categorical": categorical_cross_entropy,
+    "infonce": categorical_cross_entropy,
+    "tuba": tuba,
+    "nwj": nwj,
     "binary": binary_cross_entropy,
+    "neg": binary_cross_entropy,
     "bernoulli": binary_cross_entropy,
     "jsd": jensen_shannon_divergence,
     "reverse_kld": reverse_kullback_leibler_divergence,

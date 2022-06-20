@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Code for Barlow's Twins redundancy reduction loss is adapted from:
+# Code for Barlow Twins redundancy reduction loss is adapted from:
 # https://github.com/facebookresearch/barlowtwins/blob/main/main.py
+# Code for VICReg loss is adapted from :
+# https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py
 # Under the following License:
 
 # MIT License
@@ -40,69 +42,108 @@
 # SOFTWARE.
 
 import numpy as np
-import torch.nn.functional as F
+import torch
 from torch import nn
 from torch import diagonal
+import torch.nn.functional as F
 
 from selfsne.kernels import KERNELS
 from selfsne.discriminators import DISCRIMINATORS
+from selfsne.utils import (
+    remove_diagonal,
+    off_diagonal,
+    logmeanexp,
+    log_interpolate,
+    stop_gradient,
+)
 
 
-def query_logits(query, pos_key, neg_key, kernel, kernel_scale=1.0):
-    pos_logits = kernel(query, kernel_scale).log_prob(pos_key)
-    neg_logits = kernel(query.unsqueeze(1), kernel_scale).log_prob(neg_key)
-    return pos_logits, neg_logits
+class MomentumNormalizer(nn.Module):
+    def __init__(self, momentum=0.9):
+        super().__init__()
+        log_normalizer = torch.zeros(1)
+        self.register_buffer("log_normalizer", log_normalizer)
+        momentum = torch.zeros(1) + momentum
+        self.register_buffer("momentum_logit", momentum.logit())
+
+    def momentum_update(self, log_normalizer):
+        self.log_normalizer = log_interpolate(
+            self.log_normalizer, stop_gradient(log_normalizer), self.momentum_logit
+        )
+        return self.log_normalizer
+
+    def forward(self, pos_logits, neg_logits):
+        log_normalizer = self.momentum_update(logmeanexp(neg_logits))
+        return pos_logits - log_normalizer, neg_logits - log_normalizer
 
 
-def off_diagonal(x):
-    # return a flattened view of the off-diagonal elements of a square matrix
-    n, m = x.shape
-    assert n == m
-    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+class LearnedNormalizer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.log_normalizer = nn.Parameter(torch.zeros(1))
+
+    def forward(self, pos_logits, neg_logits):
+        return pos_logits - self.log_normalizer, neg_logits - self.log_normalizer
 
 
-def redundancy_reduction(query, key, normalizer):
-    n, d = query.shape
+class ConstantNormalizer(nn.Module):
+    def __init__(self, log_normalizer=0.0):
+        super().__init__()
+        log_normalizer = torch.zeros(1) + log_normalizer
+        self.register_buffer("log_normalizer", log_normalizer)
 
-    correlation = normalizer(query).T @ normalizer(key) / n
-    invariance = diagonal(correlation).add_(-1).pow_(2).mean()  # .sum() / d
-    redundancy = off_diagonal(correlation).pow_(2).mean()  # .sum() / (d * d - d)
-
-    return invariance + redundancy
+    def forward(self, pos_logits, neg_logits):
+        return pos_logits - self.log_normalizer, neg_logits - self.log_normalizer
 
 
 class NCE(nn.Module):
-    """Noise Contrastive Estimation [1, 2]
-
-    A generalized multi-sample contrastive loss that preserves local embedding
-    structure by maximizing similarity for positive pairs and minimizing
-    similarity for negative (noise) pairs.
+    """
+    A generalized multi-sample contrastive loss based on
+    Noise Contrastive Estimation (NCE) [1] and its variants [2, 3]
+    that preserves local embedding structure by maximizing similarity
+    for positive pairs and minimizing similarity for negative (noise) pairs.
 
     A user-selected similarity kernel is used to calculate logits for each
     pair, which are then optimized by a user-selected discriminator function
-    to maximize logits for positive pairs (attractive forces)
-    and minimize logits for negative pairs (repulsive forces).
+    to maximize logits for positive pairs (attraction)
+    and minimize logits for negative pairs (repulsion).
 
     Parameters
     ----------
     kernel: str
         Similarity kernel used for calculating discriminator logits.
         Must be one of selfsne.kernels.KERNELS.
-        For example, "studentt" can be used to produce t-SNE [3] or UMAP [4]
-        embeddings, "normal" can be used to produce SNE [5] embeddings,
-        and "vonmises" can be used for (hyper)spherical embeddings [6, 7].
+        For example, "studentt" can be used to produce t-SNE [4] or UMAP [5]
+        embeddings, "normal" can be used to produce SNE [6] embeddings,
+        and "vonmises" can be used for (hyper)spherical embeddings [7, 8].
 
     discriminator: str
         Discriminator function used for instance classification.
         Must be one of selfsne.discriminators.DISCRIMINATORS.
-        For example, "categorical" applies categorical cross entropy,
-        or InfoNCE [2], which can be used for t-SNE [3] and SimCLR [6]
-        embeddings, while "binary" applies binary cross entropy,
-        or classic NCE [1], which can be used for UMAP [4] embeddings.
+        For example, "nce" applies classic NCE [1],
+        "categorical" applies categorical cross entropy, or InfoNCE [2],
+        which can be used for t-SNE [4] and SimCLR [6] embeddings,
+        while "binary" applies binary cross entropy, or NEG [4],
+        which can be used for UMAP [5] embeddings.
 
     kernel_scale: float, default=1.0
         Postive scale value for calculating logits.
         For loc-scale family kernels sqrt(embedding_dims) is recommended.
+
+    log_normalizer : float or str, default = 0
+        The value of the log normalizer for calculating the logits.
+        Must be a float or "learn", which learns the
+        log partition function as a free parameter.
+
+    no_diagonal : bool, default = True
+        Whether to remove the positive logits (the diagonal of the negative logits)
+        when calculating the repulsion term. The diagonal is removed when set to True.
+
+    attraction_weight: float, default=1.0
+        Weighting for the attraction term
+
+    repulsion_weight: float, default=1.0
+        Weighting for the repulsion term
 
     References
     ----------
@@ -116,64 +157,104 @@ class NCE(nn.Module):
         Representation learning with contrastive predictive coding.
         arXiv preprint arXiv:1807.03748.
 
-    [3] Van Der Maaten, L. (2009). Learning a parametric embedding
+    [3] Mikolov, T., Sutskever, I., Chen, K., Corrado, G. S., & Dean, J. (2013).
+        Distributed representations of words and phrases and their compositionality.
+        Advances in neural information processing systems, 26.
+
+    [4] Van Der Maaten, L. (2009). Learning a parametric embedding
         by preserving local structure. In Artificial intelligence
         and statistics (pp. 384-391). PMLR.
 
-    [4] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
+    [5] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
         Parametric UMAP Embeddings for Representation and Semisupervised
         Learning. Neural Computation, 33(11), 2881-2907.
 
-    [5] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
+    [6] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
         Advances in neural information processing systems, 15.
 
-    [6] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020, November).
+    [7] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020).
         A simple framework for contrastive learning of visual representations.
         In International conference on machine learning (pp. 1597-1607). PMLR.
 
-    [7] Wang, M., & Wang, D. (2016, March). Vmf-sne: Embedding for spherical
+    [8] Wang, M., & Wang, D. (2016). Vmf-sne: Embedding for spherical
         data. In 2016 IEEE International Conference on Acoustics, Speech
         and Signal Processing (ICASSP) (pp. 2344-2348). IEEE.
 
     """
 
     def __init__(
-        self, kernel="studentt", discriminator="categorical", kernel_scale=1.0
+        self,
+        kernel="studentt",
+        discriminator="categorical",
+        kernel_scale=1.0,
+        log_normalizer=0.0,
+        no_diagonal=True,
+        attraction_weight=1.0,
+        repulsion_weight=1.0,
     ):
         super().__init__()
         self.kernel = KERNELS[kernel]
         self.discriminator = DISCRIMINATORS[discriminator]
         self.kernel_scale = kernel_scale
+        if log_normalizer == "learn":
+            self.log_normalizer = LearnedNormalizer()
+        elif log_normalizer == "momentum":
+            self.log_normalizer = MomentumNormalizer()
+        else:
+            self.log_normalizer = ConstantNormalizer(log_normalizer)
+        self.no_diagonal = remove_diagonal
+        self.attraction_weight = attraction_weight
+        self.repulsion_weight = repulsion_weight
 
-    def forward(self, query, pos_key, neg_key=None):
-        pos_logits, neg_logits = query_logits(
-            query,
-            pos_key,
-            pos_key if neg_key is None else neg_key,
-            self.kernel,
-            self.kernel_scale,
+    def forward(self, x, pos_y, neg_y=None):
+        neg_logits = self.kernel(x.unsqueeze(1), self.kernel_scale).log_prob(
+            pos_y if neg_y is None else neg_y
         )
-        return self.discriminator(pos_logits, neg_logits)
+        pos_logits = (
+            diagonal(neg_logits)
+            if neg_y is None
+            else self.kernel(x, self.kernel_scale).log_prob(pos_y)
+        )
+        neg_logits = (
+            remove_diagonal(neg_logits)
+            if self.no_diagonal and neg_y is None
+            else neg_logits
+        )
+        pos_logits, neg_logits = self.log_normalizer(pos_logits, neg_logits)
+        attraction, repulsion = self.discriminator(pos_logits, neg_logits)
+        return (
+            attraction.mean() * self.attraction_weight
+            + repulsion.mean() * self.repulsion_weight
+        )
 
 
 class RedundancyReduction(nn.Module):
     """Redundancy Reduction [1]
 
-    A self-supervised loss that reduces feature redundancy for an embedding
-    by minimizing mean squared error between an identity matrix and the
-    empirical cross-correlation matrix between positive pairs.
+    A self-supervised loss that creates an an embedding by minimizing
+    mean squared error between an identity matrix and the
+    empirical cross-correlation matrix between positive pairs,
+    which maximizes feature invariance to differences between positive pairs
+    while also minimizing redundancy (correlation) between features.
     This helps to preserve global structure in the embedding as a form of
-    nonlinear canonical correlation analysis (CCA) [2].
+    nonlinear Canonical Correlation Analysis (CCA) [2].
 
     Parameters
     ----------
     num_features: int
         Number of embedding features
 
+    invariance_weight: float, default=1.0
+        Weighting for the invariance term
+
+    redundancy_weight: float, default=1.0
+        Weighting for the redundancy term
+
+
     References
     ----------
     [1] Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021).
-        Barlow twins: Self-supervised learning via redundancy reduction.
+        Barlow Twins: Self-Supervised Learning via Redundancy Reduction.
         In International Conference on Machine Learning (pp. 12310-12320).
         PMLR.
 
@@ -183,9 +264,102 @@ class RedundancyReduction(nn.Module):
 
     """
 
-    def __init__(self, num_features=2):
+    def __init__(self, num_features=2, invariance_weight=1.0, redundancy_weight=1.0):
         super().__init__()
         self.normalizer = nn.BatchNorm1d(num_features, affine=False)
+        self.invariance_weight = invariance_weight
+        self.redundancy_weight = redundancy_weight
 
-    def forward(self, query, key):
-        return redundancy_reduction(query, key, self.normalizer)
+    def forward(self, x, y):
+        n, d = x.shape
+
+        correlation = self.normalizer(x).T @ self.normalizer(y) / n
+        invariance = diagonal(correlation).add_(-1).pow_(2).mean()  # .sum() / d
+        redundancy = off_diagonal(correlation).pow_(2).mean()  # .sum() / (d * d - d)
+
+        return invariance * self.invariance_weight + redundancy * self.redundancy_weight
+
+
+class VICReg(nn.Module):
+    """Variance-Invariance-Covariance Regularization [1]
+
+    A self-supervised embedding loss that combinines three terms:
+    (1) a variance stabilizing term (hinge loss for feature-wise std. dev.),
+    (2) an invariance term (mean squared error between positive pairs),
+    (3) a covariance regularization (minimize squared covariance), which is
+    a decorrelation mechanism based on redundancy reduction [2].
+    This helps to preserve global structure in the embedding as a form of
+    Laplacian Eigenmaps [3].
+
+    Parameters
+    ----------
+    num_features: int
+        Number of embedding features
+
+    eps: float, default=1e-8
+        A value added to the variance term for numerical stability
+
+    variance_weight: float, default=1.0
+        Weighting for the variance term
+
+    invariance_weight: float, default=1.0
+        Weighting for the invariance term
+
+    covariance_weight: float, default=1.0
+        Weighting for the covariance term
+
+    References
+    ----------
+    [1] Bardes, A., Ponce, J., & LeCun, Y. (2021). VICReg:
+        Variance-Invariance-Covariance Regularization for self-supervised
+        learning. arXiv preprint arXiv:2105.04906.
+
+    [1] Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021).
+        Barlow Twins: Self-Supervised Learning via Redundancy Reduction.
+        In International Conference on Machine Learning (pp. 12310-12320).
+        PMLR.
+
+    [2] Balestriero, R., & LeCun, Y. (2022). Contrastive and Non-Contrastive
+        Self-Supervised Learning Recover Global and Local Spectral Embedding
+        Methods. doi:10.48550/arxiv.2205.11508
+
+    """
+
+    def __init__(
+        self,
+        num_features,
+        eps=1e-8,
+        variance_weight=1.0,
+        invariance_weight=1.0,
+        covariance_weight=1.0,
+    ):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.variance_weight = variance_weight
+        self.invariance_weight = invariance_weight
+        self.covariance_weight = covariance_weight
+
+    def forward(self, x, y):
+
+        n, d = x.shape
+        invariance = F.mse_loss(x, y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        cov_x = (x.T @ x) / (n - 1)
+        cov_y = (y.T @ y) / (n - 1)
+        std_x = diagonal(cov_x).add(self.eps).sqrt()
+        std_y = diagonal(cov_y).add(self.eps).sqrt()
+        variance = F.relu(1 - std_x).mean() / 2 + F.relu(1 - std_y).mean() / 2
+        covariance = (
+            off_diagonal(cov_x).pow_(2).sum().div(d) / 2
+            + off_diagonal(cov_y).pow_(2).sum().div(d) / 2
+        )
+
+        return (
+            variance * self.variance_weight
+            + invariance * self.invariance_weight
+            + covariance * self.covariance_weight
+        )

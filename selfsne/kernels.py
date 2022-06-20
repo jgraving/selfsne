@@ -43,6 +43,11 @@ class StudentT(LocScale):
         return -self(value).pow_(2).sum(-1).log1p_()
 
 
+class Inverse(LocScale):
+    def log_prob(self, value):
+        return -self(value).pow_(2).sum(-1).add(1e-5).log_()
+
+
 class Normal(LocScale):
     def log_prob(self, value):
         return -self(value).pow_(2).div_(2).sum(-1)
@@ -72,6 +77,7 @@ class WrappedCauchy(VonMises):
 
 class Categorical(Module):
     def __init__(self, logits, temperature):
+        super().__init__()
         self.logits = logits.log_softmax(-1)
         self.temperature = temperature
 
@@ -95,6 +101,8 @@ class Bhattacharyya(JointProduct):
 KERNELS = {
     "normal": Normal,
     "studentt": StudentT,
+    "cauchy": StudentT,
+    "inverse": Inverse,
     "categorical": Categorical,
     "laplace": Laplace,
     "vonmises": VonMises,

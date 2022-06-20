@@ -35,12 +35,17 @@ class SelfSNE(pl.LightningModule):
         prior=MixturePrior(num_dims=2, num_components=1),
         similarity_loss=NCE("studentt"),
         redundancy_loss=RedundancyReduction(2),
-        similarity_multiplier=1.0,
-        redundancy_multiplier=1.0,
-        rate_multiplier=0.1,
+        similarity_weight=1.0,
+        redundancy_weight=1.0,
+        rate_weight=0.1,
         learning_rate=1e-3,
         weight_decay=0.01,
+        lr_scheduler=True,
+        lr_warmup_steps=5,
+        target_lr_steps=5,
+        lr_decay_rate=0.95,
     ):
+        self.kwargs = locals()
         super().__init__()
         self.encoder = encoder
         self.projector = projector
@@ -48,13 +53,18 @@ class SelfSNE(pl.LightningModule):
         self.prior = prior
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
+        self.steps_before_lr_decay = lr_warmup_steps + target_lr_steps
 
         self.save_hyperparameters(
-            "similarity_multiplier",
-            "redundancy_multiplier",
-            "rate_multiplier",
+            "similarity_weight",
+            "redundancy_weight",
+            "rate_weight",
             "learning_rate",
             "weight_decay",
+            "lr_scheduler",
+            "lr_warmup_steps",
+            "target_lr_steps",
+            "lr_decay_rate",
             ignore=[
                 "encoder",
                 "projector",
@@ -69,15 +79,15 @@ class SelfSNE(pl.LightningModule):
         return self.projector(self.encoder(batch))
 
     def loss(self, batch, batch_idx, mode=""):
-        query, key = self.pair_sampler(batch)
+        x, y = self.pair_sampler(batch)
 
-        query = self(query)
-        key = self(key)
+        x = self(x)
+        y = self(y)
 
-        similarity = self.similarity_loss(query, key).mean()
-        redundancy = self.redundancy_loss(query, key).mean()
-        prior_log_prob = -self.prior.log_prob(stop_gradient(query)).mean()
-        rate = -self.prior.rate(query).mean()
+        similarity = self.similarity_loss(x, y).mean()
+        redundancy = self.redundancy_loss(x, y).mean()
+        prior_log_prob = -self.prior.log_prob(stop_gradient(x)).mean()
+        rate = -self.prior.rate(x).mean()
 
         loss = {
             mode + "similarity": similarity,
@@ -87,9 +97,9 @@ class SelfSNE(pl.LightningModule):
             mode
             + "loss": (
                 prior_log_prob
-                + rate * self.hparams.rate_multiplier
-                + similarity * self.hparams.similarity_multiplier
-                + redundancy * self.hparams.redundancy_multiplier
+                + rate * self.hparams.rate_weight
+                + similarity * self.hparams.similarity_weight
+                + redundancy * self.hparams.redundancy_weight
             ),
         }
         for key in loss.keys():
@@ -132,9 +142,45 @@ class SelfSNE(pl.LightningModule):
                 "lr": self.prior.hparams.lr,
             },
         ]
-
-        return optim.AdamW(
+        optimizer = optim.AdamW(
             params_list,
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
         )
+        if self.hparams.lr_scheduler:
+
+            def lr_lambda(step):
+                # linear warmup
+                if step < self.hparams.lr_warmup_steps:
+                    lr_scale = step / self.hparams.lr_warmup_steps
+                elif step < self.steps_before_lr_decay:
+                    lr_scale = 1
+                # exponential decay
+                else:
+                    lr_scale = self.hparams.lr_decay_rate ** (
+                        step - self.steps_before_lr_decay
+                    )
+
+                return lr_scale
+
+            scheduler = optim.lr_scheduler.LambdaLR(
+                optimizer, lr_lambda=lr_lambda, verbose=False
+            )
+
+            return [optimizer], [
+                {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1,
+                    "reduce_on_plateau": False,
+                    "monitor": "loss",
+                }
+            ]
+        else:
+            return optimizer
+
+    def load_from_checkpoint(self, *args, **kwargs):
+        return super().load_from_checkpoint(*args, **kwargs, **self.kwargs)
+
+
+SelfSNE.load_from_checkpoint.__doc__ = pl.LightningModule.load_from_checkpoint.__doc__

@@ -109,13 +109,13 @@ def TokenMask(p=0.5):
 
 
 class PairSampler(nn.Module):
-    def __init__(self, query_sampler=nn.Identity(), key_sampler=nn.Identity()):
+    def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
         super().__init__()
-        self.query_sampler = query_sampler
-        self.key_sampler = key_sampler
+        self.x_sampler = x_sampler
+        self.y_sampler = y_sampler
 
     def forward(self, x):
-        return self.query_sampler(x), self.key_sampler(x)
+        return self.x_sampler(x), self.y_sampler(x)
 
 
 class CausalConv1d(nn.Conv1d):

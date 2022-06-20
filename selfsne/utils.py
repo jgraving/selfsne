@@ -16,19 +16,42 @@
 import pytorch_lightning as pl
 import numpy as np
 
+import torch
+import torch.nn.functional as F
+
 
 def stop_gradient(x):
     return x.clone().detach()
 
 
-class EMA:
-    """Exponential Moving Average"""
+def log_interpolate(log_a, log_b, alpha_logit):
+    log_alpha = F.logsigmoid(alpha_logit)
+    log1m_alpha = F.logsigmoid(alpha_logit) - alpha_logit
+    return torch.logaddexp(
+        log_a + log_alpha,
+        log_b + log1m_alpha,
+    )
 
-    def __init__(self, beta=0.9):
-        self.beta = beta
 
-    def __call__(self, moving_average, value):
-        return moving_average * self.beta + (1 - self.beta) * value
+def logmeanexp(x, dim=None):
+    if dim is not None:
+        return x.logsumexp(dim) - np.log(x.shape[dim])
+    else:
+        return x.logsumexp(tuple([dim for dim in range(x.dim())])) - np.log(x.numel())
+
+
+def off_diagonal(x):
+    # return a flattened view of the off-diagonal elements of a square matrix
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+
+def remove_diagonal(x):
+    # remove diagonal elements of a n x n matrix
+    # and return off diagonal elements as n x (n - 1) matrix
+    n, m = x.shape
+    return off_diagonal(x).reshape(n, n - 1)
 
 
 def concat_dicts(dicts):

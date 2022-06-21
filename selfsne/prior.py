@@ -23,6 +23,7 @@ import numpy as np
 import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
+from selfsne.normalizers import NORMALIZERS
 
 
 class MixturePrior(pl.LightningModule):
@@ -33,27 +34,31 @@ class MixturePrior(pl.LightningModule):
         kernel="normal",
         logits="learn",
         kernel_scale=1.0,
+        log_normalizer=0.0,
         lr=0.1,
     ):
         super().__init__()
         self.save_hyperparameters()
-        self.kernel = KERNELS[self.hparams.kernel]
+        self.kernel = KERNELS[kernel]
 
-        if self.hparams.num_components == 1:
-            locs = torch.zeros((self.hparams.num_components, self.hparams.num_dims))
+        if num_components == 1:
+            locs = torch.zeros((num_components, num_dims))
             self.register_buffer("locs", locs)
         else:
-            self.locs = nn.Parameter(
-                torch.Tensor(self.hparams.num_components, self.hparams.num_dims)
-            )
+            self.locs = nn.Parameter(torch.Tensor(num_components, num_dims))
             init.normal_(self.locs)
 
-        if self.hparams.logits == "learn":
-            self.logits = nn.Parameter(torch.zeros((self.hparams.num_components,)))
+        if logits == "learn":
+            self.logits = nn.Parameter(torch.zeros((num_components,)))
             init.zeros_(self.logits)
-        elif self.hparams.logits == "maxent":
-            logits = torch.zeros((self.hparams.num_components,))
+        elif logits == "maxent":
+            logits = torch.zeros((num_components,))
             self.register_buffer("logits", logits)
+
+        if isinstance(log_normalizer, str):
+            self.log_normalizer = NORMALIZERS[log_normalizer]()
+        else:
+            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
 
         self.watershed_optimized = False
 
@@ -65,29 +70,29 @@ class MixturePrior(pl.LightningModule):
     def mixture(self):
         return D.Categorical(logits=self.logits)
 
-    def sample(self, n_samples):
-        components = D.Independent(D.Normal(loc=self.locs, scale=1), 1)
-        normal_mixture = D.MixtureSameFamily(self.mixture, components)
-        return normal_mixture.sample([n_samples])
-
     @property
     def components(self):
         return self.kernel(self.locs.unsqueeze(1), self.hparams.kernel_scale)
 
     def entropy(self):
-        return -(self.mixture.probs * self.log_prob(self.locs)).sum()
+        return -(self.mixture.probs * self._log_prob(self.locs)).sum()
 
     def weighted_log_prob(self, x):
         return self.components.log_prob(x) + self.mixture.logits.unsqueeze(1)
 
-    def log_prob(self, x):
+    def _log_prob(self, x):
         return self.weighted_log_prob(x).logsumexp(0)
 
+    def log_prob(self, x):
+        return self.log_normalizer(self._log_prob(x))
+
     def disable_grad(self):
+        self.eval()
         for param in self.parameters():
             param.requires_grad = False
 
     def enable_grad(self):
+        self.train()
         for param in self.parameters():
             param.requires_grad = True
 
@@ -104,7 +109,7 @@ class MixturePrior(pl.LightningModule):
         return self.locs[self.assign_modes(x)]
 
     def entropy_upper_bound(self):
-        return -(self.mixture.probs * self.log_prob(self.watershed_locs)).sum()
+        return -(self.mixture.probs * self._log_prob(self.watershed_locs)).sum()
 
     def configure_optimizers(self):
         self.watershed_locs = nn.Parameter(self.locs.clone().detach())
@@ -135,7 +140,7 @@ class MixturePrior(pl.LightningModule):
 
     def training_epoch_end(self, training_step_outputs):
         self.log(
-            "n_labels_epoch",
+            "num_labels_epoch",
             self.watershed_labels().max() + 1,
             on_step=False,
             on_epoch=True,

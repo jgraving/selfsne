@@ -49,51 +49,8 @@ import torch.nn.functional as F
 
 from selfsne.kernels import KERNELS
 from selfsne.discriminators import DISCRIMINATORS
-from selfsne.utils import (
-    remove_diagonal,
-    off_diagonal,
-    logmeanexp,
-    log_interpolate,
-    stop_gradient,
-)
-
-
-class MomentumNormalizer(nn.Module):
-    def __init__(self, momentum=0.9):
-        super().__init__()
-        log_normalizer = torch.zeros(1)
-        self.register_buffer("log_normalizer", log_normalizer)
-        momentum = torch.zeros(1) + momentum
-        self.register_buffer("momentum_logit", momentum.logit())
-
-    def momentum_update(self, log_normalizer):
-        self.log_normalizer = log_interpolate(
-            self.log_normalizer, stop_gradient(log_normalizer), self.momentum_logit
-        )
-        return self.log_normalizer
-
-    def forward(self, pos_logits, neg_logits):
-        log_normalizer = self.momentum_update(logmeanexp(neg_logits))
-        return pos_logits - log_normalizer, neg_logits - log_normalizer
-
-
-class LearnedNormalizer(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.log_normalizer = nn.Parameter(torch.zeros(1))
-
-    def forward(self, pos_logits, neg_logits):
-        return pos_logits - self.log_normalizer, neg_logits - self.log_normalizer
-
-
-class ConstantNormalizer(nn.Module):
-    def __init__(self, log_normalizer=0.0):
-        super().__init__()
-        log_normalizer = torch.zeros(1) + log_normalizer
-        self.register_buffer("log_normalizer", log_normalizer)
-
-    def forward(self, pos_logits, neg_logits):
-        return pos_logits - self.log_normalizer, neg_logits - self.log_normalizer
+from selfsne.normalizers import NORMALIZERS
+from selfsne.utils import remove_diagonal, off_diagonal
 
 
 class NCE(nn.Module):
@@ -132,10 +89,11 @@ class NCE(nn.Module):
 
     log_normalizer : float or str, default = 0
         The value of the log normalizer for calculating the logits.
-        Must be a float or "learn", which learns the
-        log partition function as a free parameter.
+        Must be a float, "learn", which learns the
+        log partition function as a free parameter, or "momentum",
+        which uses an exponential moving average of the negative logits.
 
-    no_diagonal : bool, default = True
+    remove_diagonal : bool, default = True
         Whether to remove the positive logits (the diagonal of the negative logits)
         when calculating the repulsion term. The diagonal is removed when set to True.
 
@@ -188,7 +146,7 @@ class NCE(nn.Module):
         discriminator="categorical",
         kernel_scale=1.0,
         log_normalizer=0.0,
-        no_diagonal=True,
+        remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
     ):
@@ -196,31 +154,19 @@ class NCE(nn.Module):
         self.kernel = KERNELS[kernel]
         self.discriminator = DISCRIMINATORS[discriminator]
         self.kernel_scale = kernel_scale
-        if log_normalizer == "learn":
-            self.log_normalizer = LearnedNormalizer()
-        elif log_normalizer == "momentum":
-            self.log_normalizer = MomentumNormalizer()
+        if isinstance(log_normalizer, str):
+            self.log_normalizer = NORMALIZERS[log_normalizer]()
         else:
-            self.log_normalizer = ConstantNormalizer(log_normalizer)
-        self.no_diagonal = remove_diagonal
+            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
+        self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
 
-    def forward(self, x, pos_y, neg_y=None):
-        neg_logits = self.kernel(x.unsqueeze(1), self.kernel_scale).log_prob(
-            pos_y if neg_y is None else neg_y
-        )
-        pos_logits = (
-            diagonal(neg_logits)
-            if neg_y is None
-            else self.kernel(x, self.kernel_scale).log_prob(pos_y)
-        )
-        neg_logits = (
-            remove_diagonal(neg_logits)
-            if self.no_diagonal and neg_y is None
-            else neg_logits
-        )
-        pos_logits, neg_logits = self.log_normalizer(pos_logits, neg_logits)
+    def forward(self, x, y):
+        logits = self.kernel(x, self.kernel_scale).log_prob(y.unsqueeze(-2))
+        logits = self.log_normalizer(logits)
+        pos_logits = diagonal(logits)
+        neg_logits = remove_diagonal(logits) if self.remove_diagonal else logits
         attraction, repulsion = self.discriminator(pos_logits, neg_logits)
         return (
             attraction.mean() * self.attraction_weight

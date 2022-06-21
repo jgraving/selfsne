@@ -37,6 +37,12 @@ def categorical_cross_entropy(pos_logits, neg_logits):
     return attraction, repulsion
 
 
+def joint_categorical_cross_entropy(pos_logits, neg_logits):
+    attraction = -pos_logits
+    repulsion = logmeanexp(neg_logits)
+    return attraction, repulsion
+
+
 def binary_cross_entropy(pos_logits, neg_logits):
     attraction = -F.logsigmoid(pos_logits)
     # use numerically stable repulsion term
@@ -54,8 +60,8 @@ def cauchy_schwarz_divergence(pos_logits, neg_logits):
 
 # discriminators from Poole et al. (2019) https://arxiv.org/abs/1905.06922
 def tuba(pos_logits, neg_logits):
-    attraction = -pos_logits - 1
-    repulsion = logmeanexp(neg_logits).exp()
+    attraction = -pos_logits
+    repulsion = logmeanexp(neg_logits).expm1()
     return attraction, repulsion
 
 
@@ -72,19 +78,19 @@ def wasserstein_logits(pos_logits, neg_logits):
 
 def wasserstein(pos_logits, neg_logits):
     attraction = -pos_logits.exp()
-    repulsion = logmeanexp(neg_logits).exp()
+    repulsion = logmeanexp(neg_logits, dim=-1).exp()
     return attraction, repulsion
 
 
 def least_squares(pos_logits, neg_logits):
     attraction = pos_logits.expm1().pow(2)
-    repulsion = logmeanexp(neg_logits.mul(2)).exp()
+    repulsion = logmeanexp(neg_logits.mul(2), dim=-1).exp()
     return attraction, repulsion
 
 
 def zero_centered_least_squares(pos_logits, neg_logits):
     attraction = pos_logits.expm1().pow(2)
-    repulsion = logmeanexp(F.softplus(neg_logits).mul(2)).exp()
+    repulsion = logmeanexp(F.softplus(neg_logits).mul(2), dim=-1).exp()
     return attraction, repulsion
 
 
@@ -159,6 +165,7 @@ DISCRIMINATORS = {
     "nce": noise_contrastive_estimation,
     "categorical": categorical_cross_entropy,
     "infonce": categorical_cross_entropy,
+    "joint_categorical": joint_categorical_cross_entropy,
     "tuba": tuba,
     "nwj": nwj,
     "binary": binary_cross_entropy,

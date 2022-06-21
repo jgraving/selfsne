@@ -24,6 +24,10 @@ def stop_gradient(x):
     return x.clone().detach()
 
 
+def straight_through_estimator(gradient, estimator):
+    return stop_gradient(estimator - gradient) + gradient
+
+
 def log_interpolate(log_a, log_b, alpha_logit):
     log_alpha = F.logsigmoid(alpha_logit)
     log1m_alpha = F.logsigmoid(alpha_logit) - alpha_logit

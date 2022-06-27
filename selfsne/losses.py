@@ -162,9 +162,10 @@ class NCE(nn.Module):
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
 
-    def forward(self, x, y):
+    def forward(self, x, y, log_baseline=0.0):
         logits = self.kernel(x, self.kernel_scale).log_prob(y.unsqueeze(-2))
         logits = self.log_normalizer(logits)
+        logits = logits - log_baseline
         pos_logits = diagonal(logits)
         neg_logits = remove_diagonal(logits) if self.remove_diagonal else logits
         attraction, repulsion = self.discriminator(pos_logits, neg_logits)

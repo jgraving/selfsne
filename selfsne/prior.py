@@ -187,7 +187,7 @@ class MixturePrior(pl.LightningModule):
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             progress_bar_refresh_rate=verbose,
-            weights_summary=None,
+            enable_model_summary=False,
             callbacks=[early_stopping],
             gpus=gpus,
         )

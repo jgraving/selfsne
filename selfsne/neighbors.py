@@ -21,27 +21,35 @@ import numpy as np
 
 
 class Queue(Module):
-    def __init__(self, num_features, queue_size=2 ** 15):
+    def __init__(self, num_features, queue_size=2 ** 15, freeze_on_full=False):
         super(Queue, self).__init__()
         self.register_buffer("queue", torch.zeros((queue_size, num_features)))
         self.max_size = queue_size
         self.queue_size = 0
+        self.freeze_on_full = freeze_on_full
 
     @torch.no_grad()
     def forward(self, x):
-        self.queue = torch.cat((self.queue, x))[-self.max_size :]
-        self.queue_size = np.minimum(self.queue_size + x.shape[0], self.max_size)
-        return self.queue[-self.queue_size :]
+        if self.freeze:
+            return self.queue
+        else:
+            self.queue = torch.cat((x, self.queue))[: self.max_size]
+            self.queue_size = np.minimum(self.queue_size + x.shape[0], self.max_size)
+            return self.queue[: self.queue_size]
 
     @torch.no_grad()
     def sample(self, n_samples):
         assert n_samples <= self.queue_size
         indices = torch.randint(self.queue_size, (n_samples,), device=self.queue.device)
-        return self.queue[-indices]
+        return self.queue[indices]
 
     @property
     def full(self):
         return self.queue_size == self.max_size
+
+    @property
+    def freeze(self):
+        return self.full and self.freeze_on_full
 
 
 def inner_product(x, y):
@@ -53,9 +61,7 @@ def cross_entropy(x, y):
 
 
 def cosine(x, y):
-    x_norm = F.normalize(x, dim=-1)
-    y_norm = F.normalize(y, dim=-1)
-    return inner_product(x_norm, y_norm)
+    return inner_product(F.normalize(x, dim=-1), F.normalize(y, dim=-1))
 
 
 METRICS = {
@@ -67,16 +73,27 @@ METRICS = {
 
 
 class NearestNeighborSampler(Module):
-    def __init__(self, num_features, queue_size=2 ** 15, metric="euclidean"):
+    def __init__(
+        self,
+        num_features,
+        queue_size=2 ** 15,
+        metric="euclidean",
+        freeze_queue_on_full=False,
+    ):
         super().__init__()
-        self.queue = Queue(num_features, queue_size)
+        self.queue = Queue(num_features, queue_size, freeze_queue_on_full)
         self.metric = METRICS[metric]
 
     @torch.no_grad()
     def forward(self, x):
         if self.training:
             queue = self.queue(x)
-            values, indices = torch.topk(-self.metric(x, queue), 2, dim=-1)
-            return queue[indices[:, -1]]
+            distances = self.metric(x, queue)
+            if not self.queue.freeze:
+                # set self distances to inf
+                index = torch.arange(x.shape[0], device=x.device)
+                distances[index, index] = np.inf
+            values, indices = torch.topk(distances, 1, dim=-1, largest=False)
+            return queue[indices[:, 0]]
         else:
             return x

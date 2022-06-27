@@ -24,6 +24,7 @@ import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
 from selfsne.normalizers import NORMALIZERS
+from selfsne.utils import disable_grad, enable_grad, stop_gradient
 
 
 class MixturePrior(pl.LightningModule):
@@ -35,7 +36,8 @@ class MixturePrior(pl.LightningModule):
         logits="learn",
         kernel_scale=1.0,
         log_normalizer=0.0,
-        lr=0.1,
+        lr=1.0,
+        scheduler_kwargs={},
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -60,7 +62,8 @@ class MixturePrior(pl.LightningModule):
         else:
             self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
 
-        self.watershed_optimized = False
+        self.watershed_locs = nn.Parameter(stop_gradient(self.locs))
+        self.watershed_assignments = self.watershed_labels()
 
     @property
     def multinomial(self):
@@ -86,20 +89,10 @@ class MixturePrior(pl.LightningModule):
     def log_prob(self, x):
         return self.log_normalizer(self._log_prob(x))
 
-    def disable_grad(self):
-        self.eval()
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def enable_grad(self):
-        self.train()
-        for param in self.parameters():
-            param.requires_grad = True
-
     def rate(self, x):
-        self.disable_grad()
+        disable_grad(self)
         rate = self.log_prob(x)
-        self.enable_grad()
+        enable_grad(self)
         return rate
 
     def assign_modes(self, x):
@@ -111,10 +104,6 @@ class MixturePrior(pl.LightningModule):
     def entropy_upper_bound(self):
         return -(self.mixture.probs * self._log_prob(self.watershed_locs)).sum()
 
-    def configure_optimizers(self):
-        self.watershed_locs = nn.Parameter(self.locs.clone().detach())
-        return optim.Adam([self.watershed_locs], lr=self.hparams.lr)
-
     def watershed_labels(self):
 
         # perform sparse watershed assignment for component means
@@ -123,7 +112,7 @@ class MixturePrior(pl.LightningModule):
             self.hparams.num_components, device=watershed_modes.device
         )
 
-        # loop over k_components to ensure all modes are correctly assigned
+        # loop over num_components to ensure all modes are correctly assigned
         # hierarchy of clusters cannot be longer than num_components
         for _ in range(self.hparams.num_components):
             watershed_assignments = watershed_modes[watershed_assignments]
@@ -134,9 +123,29 @@ class MixturePrior(pl.LightningModule):
 
         return watershed_assignments
 
+    def assign_labels(self, p):
+        return self.watershed_assignments[self.assign_modes(p)]
+
+    def on_train_start(self):
+        self.watershed_locs.data = stop_gradient(self.locs.data)
+
     def on_train_end(self):
         self.watershed_assignments = self.watershed_labels()
-        self.watershed_optimized = True
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam([self.watershed_locs], lr=self.hparams.lr)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, **self.hparams.scheduler_kwargs
+        )
+        return [optimizer], [
+            {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+                "reduce_on_plateau": True,
+                "monitor": "entropy_epoch",
+            }
+        ]
 
     def training_epoch_end(self, training_step_outputs):
         self.log(
@@ -158,21 +167,19 @@ class MixturePrior(pl.LightningModule):
         )
         return entropy
 
-    def assign_labels(self, p):
-        if not self.watershed_optimized:
-            self.optimize_watershed()
-        return self.watershed_assignments[self.assign_modes(p)]
-
     def optimize_watershed(
         self,
         max_epochs=999,
         steps_per_epoch=10,
-        patience=10,
+        patience=100,
         verbose=True,
         gpus=None,
-        lr=0.1,
+        lr=1,
+        scheduler_kwargs={},
     ):
         self.hparams.lr = lr
+        self.hparams.scheduler_kwargs = scheduler_kwargs
+
         if verbose:
             print("optimizing entropy...")
         dummy_loader = DataLoader(np.zeros(steps_per_epoch), batch_size=1)

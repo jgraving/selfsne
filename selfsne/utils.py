@@ -24,6 +24,21 @@ def stop_gradient(x):
     return x.clone().detach()
 
 
+def set_grad(module, requires_grad):
+    for param in module.parameters():
+        param.requires_grad = requires_grad
+
+
+def disable_grad(module):
+    module.eval()
+    set_grad(module, False)
+
+
+def enable_grad(module):
+    module.train()
+    set_grad(module, True)
+
+
 def straight_through_estimator(gradient, estimator):
     return stop_gradient(estimator - gradient) + gradient
 

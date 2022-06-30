@@ -15,8 +15,12 @@
 
 
 import pytorch_lightning as pl
-import torch.optim as optim
+
 import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
+
+import numpy as np
 
 from selfsne.prior import MixturePrior
 from selfsne.losses import NCE, RedundancyReduction
@@ -43,9 +47,12 @@ class SelfSNE(pl.LightningModule):
         weight_decay=0.0,
         projector_weight_decay=0.0,
         lr_scheduler=False,
-        lr_warmup_steps=5,
-        target_lr_steps=5,
-        lr_decay_rate=0.95,
+        lr_warmup_steps=10,
+        lr_target_steps=10,
+        lr_cosine_steps=30,
+        lr_cosine_steps_per_cycle=10,
+        lr_warm_restarts=False,
+        lr_decay_rate=0.9,
     ):
         self.kwargs = locals()
         super().__init__()
@@ -56,8 +63,6 @@ class SelfSNE(pl.LightningModule):
         self.baseline = baseline
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
-        self.steps_before_lr_decay = lr_warmup_steps + target_lr_steps
-
         self.save_hyperparameters(
             ignore=[
                 "encoder",
@@ -151,22 +156,41 @@ class SelfSNE(pl.LightningModule):
         )
         if self.hparams.lr_scheduler:
 
-            def lr_lambda(step):
-                # linear warmup
-                if step < self.hparams.lr_warmup_steps:
-                    lr_scale = step / self.hparams.lr_warmup_steps
-                elif step < self.steps_before_lr_decay:
-                    lr_scale = 1
-                # exponential decay
-                else:
-                    lr_scale = self.hparams.lr_decay_rate ** (
-                        step - self.steps_before_lr_decay
-                    )
+            lr_warmup_steps = self.hparams.lr_warmup_steps
+            lr_target_steps = self.hparams.lr_target_steps
+            lr_cosine_steps = self.hparams.lr_cosine_steps
+            lr_cosine_steps_per_cycle = self.hparams.lr_cosine_steps_per_cycle
+            lr_decay_rate = self.hparams.lr_decay_rate
 
-                return lr_scale
+            milestones = np.cumsum(
+                [
+                    lr_warmup_steps,
+                    lr_target_steps,
+                    lr_cosine_steps + (lr_warmup_steps == 0 and lr_target_steps == 0),
+                ]
+            )
+            linear_warmup = (
+                lr_scheduler.LinearLR(
+                    optimizer, start_factor=1e-8, total_iters=lr_warmup_steps
+                )
+                if lr_warmup_steps > 0
+                else lr_scheduler.ConstantLR(optimizer, factor=1.0)
+            )
+            target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
+            if self.hparams.lr_warm_restarts:
+                cosine_annealing = lr_scheduler.CosineAnnealingWarmRestarts(
+                    optimizer, T_0=lr_cosine_steps_per_cycle, eta_min=0
+                )
+            else:
+                cosine_annealing = lr_scheduler.CosineAnnealingLR(
+                    optimizer, T_max=lr_cosine_steps_per_cycle, eta_min=0
+                )
 
-            scheduler = optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=lr_lambda, verbose=False
+            exp_decay = lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay_rate)
+            scheduler = lr_scheduler.SequentialLR(
+                optimizer,
+                [linear_warmup, target_lr, cosine_annealing, exp_decay],
+                milestones,
             )
 
             return [optimizer], [

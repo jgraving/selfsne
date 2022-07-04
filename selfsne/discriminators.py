@@ -20,6 +20,23 @@ from torch import nn
 import torch.nn.functional as F
 
 from selfsne.utils import logmeanexp
+from selfsne.normalizers import GradientLogEMA
+
+
+class MINE(nn.Module):
+    """
+    MINE estimator with debiased gradients
+    from Belghazi et al. (2021) https://arxiv.org/abs/1801.04062
+    """
+
+    def __init__(self, momentum=0.99):
+        super().__init__()
+        self.log_ema = GradientLogEMA(momentum)
+
+    def forward(self, pos_logits, neg_logits):
+        attraction = -pos_logits
+        repulsion = self.log_ema(neg_logits)
+        return attraction, repulsion
 
 
 def noise_contrastive_estimation(pos_logits, neg_logits):
@@ -163,6 +180,7 @@ def squared_hellinger(pos_logits, neg_logits):
 
 DISCRIMINATORS = {
     "nce": noise_contrastive_estimation,
+    "mine": MINE(),
     "categorical": categorical_cross_entropy,
     "infonce": categorical_cross_entropy,
     "joint_categorical": joint_categorical_cross_entropy,

@@ -151,13 +151,22 @@ class NCE(nn.Module):
         repulsion_weight=1.0,
     ):
         super().__init__()
-        self.kernel = KERNELS[kernel]
-        self.discriminator = DISCRIMINATORS[discriminator]
+        if isinstance(kernel, str):
+            self.kernel = KERNELS[kernel]
+        else:
+            self.kernel = kernel
         self.kernel_scale = kernel_scale
+
+        if isinstance(discriminator, str):
+            self.discriminator = DISCRIMINATORS[discriminator]
+        else:
+            self.discriminator = discriminator
         if isinstance(log_normalizer, str):
             self.log_normalizer = NORMALIZERS[log_normalizer]()
-        else:
+        elif isinstance(log_normalizer, (int, float)):
             self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
+        else:
+            self.log_normalizer = log_normalizer
         self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight

@@ -21,55 +21,42 @@ import numpy as np
 from selfsne.utils import off_diagonal, logmeanexp, log_interpolate, stop_gradient
 
 
-class LogMeanExp(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input, log_moving_average):
-        ctx.save_for_backward(input, log_moving_average)
-        return logmeanexp(input)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, log_moving_average = ctx.saved_tensors
-        log_n = np.log(input.numel())
-        moving_average = log_moving_average.add(log_n).exp()
-        return grad_output * input.exp() / moving_average, None
-
-
 class LogEMA(nn.Module):
-    def __init__(self, momentum=0.99):
+    def __init__(self, momentum=0.99, gradient=True):
         super().__init__()
-        log_moving_average = torch.zeros(1)
-        self.register_buffer("log_moving_average", log_moving_average)
+        self.register_buffer("log_moving_average", torch.zeros(1))
         momentum = torch.zeros(1) + momentum
         self.register_buffer("momentum_logit", momentum.logit())
 
-    def momentum_update(self, log_mean_x):
-        self.log_moving_average = log_interpolate(
-            self.log_moving_average, stop_gradient(log_mean_x), self.momentum_logit
-        )
-        return self.log_moving_average
+        class LogMeanExp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                self.log_moving_average.data = stop_gradient(
+                    log_interpolate(
+                        self.log_moving_average, logmeanexp(input), self.momentum_logit
+                    )
+                )
+                return self.log_moving_average
 
-    def forward(self, log_x):
-        if self.training:
-            return self.momentum_update(logmeanexp(log_x))
-        else:
-            return self.log_moving_average
+            @staticmethod
+            def backward(ctx, grad_output):
+                input = ctx.saved_tensors[0]
+                log_n = np.log(input.numel())
+                moving_average = self.log_moving_average.add(log_n).exp()
+                grad_output = grad_output * input.exp() / moving_average
+                return grad_output if gradient else None
 
+        self.logmeanexp = LogMeanExp.apply
 
-class GradientLogEMA(LogEMA):
-    def forward(self, log_x):
-        if self.training:
-            log_mean_x = LogMeanExp.apply(log_x, self.log_moving_average)
-            self.momentum_update(log_mean_x)
-            return log_mean_x
-        else:
-            return self.log_moving_average
+    def forward(self, x):
+        return self.logmeanexp(x)
 
 
 class MomentumNormalizer(nn.Module):
     def __init__(self, momentum=0.99):
         super().__init__()
-        self.log_ema = LogEMA(momentum)
+        self.log_ema = LogEMA(momentum, gradient=False)
 
     def forward(self, logits):
         return logits - self.log_ema(
@@ -80,7 +67,7 @@ class MomentumNormalizer(nn.Module):
 class GradientMomentumNormalizer(MomentumNormalizer):
     def __init__(self, momentum=0.99):
         super().__init__()
-        self.log_ema = GradientLogEMA(momentum)
+        self.log_ema = LogEMA(momentum, gradient=True)
 
 
 class BatchNormalizer(nn.Module):
@@ -100,8 +87,7 @@ class LearnedNormalizer(nn.Module):
 class ConstantNormalizer(nn.Module):
     def __init__(self, log_normalizer=0.0):
         super().__init__()
-        log_normalizer = torch.zeros(1) + log_normalizer
-        self.register_buffer("log_normalizer", log_normalizer)
+        self.register_buffer("log_normalizer", torch.zeros(1) + log_normalizer)
 
     def forward(self, logits):
         return logits - self.log_normalizer

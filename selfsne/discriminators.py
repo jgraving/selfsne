@@ -20,7 +20,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from selfsne.utils import logmeanexp
-from selfsne.normalizers import GradientLogEMA
+from selfsne.normalizers import LogEMA
 
 
 class MINE(nn.Module):
@@ -31,7 +31,7 @@ class MINE(nn.Module):
 
     def __init__(self, momentum=0.99):
         super().__init__()
-        self.log_ema = GradientLogEMA(momentum)
+        self.log_ema = LogEMA(momentum, gradient=True)
 
     def forward(self, pos_logits, neg_logits):
         attraction = -pos_logits

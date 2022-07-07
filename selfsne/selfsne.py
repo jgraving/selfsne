@@ -22,9 +22,6 @@ from torch.optim import lr_scheduler
 
 import numpy as np
 
-from selfsne.prior import MixturePrior
-from selfsne.losses import NCE, RedundancyReduction
-from selfsne.neighbors import NearestNeighborSampler
 from selfsne.utils import stop_gradient
 
 
@@ -34,12 +31,12 @@ class SelfSNE(pl.LightningModule):
     def __init__(
         self,
         encoder,
-        pair_sampler,
-        baseline=None,
+        pair_sampler=None,
+        log_baseline=None,
         projector=nn.Identity(),
-        prior=MixturePrior(num_dims=2, num_components=1),
-        similarity_loss=NCE("studentt"),
-        redundancy_loss=RedundancyReduction(2),
+        prior=None,
+        similarity_loss=None,
+        redundancy_loss=None,
         similarity_weight=1.0,
         redundancy_weight=1.0,
         rate_weight=0.0,
@@ -60,7 +57,7 @@ class SelfSNE(pl.LightningModule):
         self.projector = projector
         self.pair_sampler = pair_sampler
         self.prior = prior
-        self.baseline = baseline
+        self.log_baseline = log_baseline
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
         self.save_hyperparameters(
@@ -79,35 +76,58 @@ class SelfSNE(pl.LightningModule):
         return self.projector(self.encoder(batch))
 
     def loss(self, batch, batch_idx, mode=""):
-        x, y = self.pair_sampler(batch)
+
+        loss = {}
+
+        if self.pair_sampler is not None:
+            x, y = self.pair_sampler(batch)
+        else:
+            x = batch
+            y = batch
 
         x = self(x)
         y = self(y)
 
         sg_y = stop_gradient(y)
 
-        similarity = self.similarity_loss(
-            x, y, log_baseline=self.baseline(sg_y) if self.baseline is not None else 0
-        )
-        redundancy = self.redundancy_loss(x, y)
-        prior_log_prob = -self.prior.log_prob(sg_y).mean()
-        rate = -self.prior.rate(y).mean()
+        if self.similarity_loss is not None:
+            similarity = self.similarity_loss(
+                x,
+                y,
+                log_baseline=self.log_baseline(sg_y)
+                if self.log_baseline is not None
+                else 0,
+            )
+            loss[mode + "similarity"] = similarity
 
-        loss = {
-            mode + "similarity": similarity,
-            mode + "redundancy": redundancy,
-            mode + "rate": rate,
-            mode + "prior_entropy": self.prior.entropy(),
-            mode
-            + "loss": (
-                prior_log_prob
-                + rate * self.hparams.rate_weight
-                + similarity * self.hparams.similarity_weight
-                + redundancy * self.hparams.redundancy_weight
-            ),
-        }
+        if self.redundancy_loss is not None:
+            redundancy = self.redundancy_loss(x, y)
+            loss[mode + "redundancy"] = redundancy
+
+        if self.prior is not None:
+            prior_log_prob = -self.prior.log_prob(sg_y).mean()
+            rate = -self.prior.rate(y).mean()
+            loss[mode + "rate"] = rate
+            loss[mode + "prior_entropy"] = self.prior.entropy()
+
+        loss[mode + "loss"] = (
+            (prior_log_prob if self.prior is not None else 0)
+            + ((rate * self.hparams.rate_weight) if self.prior is not None else 0)
+            + (
+                (similarity * self.hparams.similarity_weight)
+                if self.similarity_loss is not None
+                else 0
+            )
+            + (
+                (redundancy * self.hparams.redundancy_weight)
+                if self.redundancy_loss is not None
+                else 0
+            )
+        )
+
         for key in loss.keys():
             self.log(key, loss[key], prog_bar=True)
+
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -120,40 +140,49 @@ class SelfSNE(pl.LightningModule):
         self.loss(batch, batch_idx, mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        embedded = self(batch)
-        prior_log_prob = self.prior.log_prob(embedded)
-        labels = self.prior.assign_labels(embedded)
+        prediction = {}
 
-        return {
-            "embedding": embedded.cpu().numpy(),
-            "labels": labels.cpu().numpy(),
-            "prior_log_prob": prior_log_prob.cpu().numpy(),
-        }
+        prediction["embedding"] = self(batch)
+        if self.prior is not None:
+            prediction["prior_log_prob"] = self.prior.log_prob(prediction["embedding"])
+            prediction["labels"] = self.prior.assign_labels(prediction["embedding"])
+
+        return prediction
 
     def configure_optimizers(self):
         params_list = [
             {"params": self.encoder.parameters()},
             {"params": self.pair_sampler.parameters()},
-            {"params": self.similarity_loss.parameters()},
-            {"params": self.redundancy_loss.parameters()},
             {
                 "params": self.projector.parameters(),
                 "weight_decay": self.hparams.projector_weight_decay,
             },
-            {
-                "params": self.prior.parameters(),
-                "weight_decay": 0.0,
-                "lr": self.prior.hparams.lr,
-            },
         ]
-        if self.baseline is not None:
-            params_list.append({"params": self.baseline.parameters()})
+
+        if self.similarity_loss is not None:
+            params_list.append({"params": self.similarity_loss.parameters()})
+
+        if self.redundancy_loss is not None:
+            params_list.append({"params": self.redundancy_loss.parameters()})
+
+        if self.prior is not None:
+            params_list.append(
+                {
+                    "params": self.prior.parameters(),
+                    "weight_decay": 0.0,
+                    "lr": self.prior.hparams.lr,
+                }
+            )
+
+        if self.log_baseline is not None:
+            params_list.append({"params": self.log_baseline.parameters()})
 
         optimizer = optim.AdamW(
             params_list,
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay,
         )
+
         if self.hparams.lr_scheduler:
 
             lr_warmup_steps = self.hparams.lr_warmup_steps

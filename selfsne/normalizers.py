@@ -22,29 +22,33 @@ from selfsne.utils import off_diagonal, logmeanexp, log_interpolate, stop_gradie
 
 
 class LogEMA(nn.Module):
-    def __init__(self, momentum=0.99, gradient=True):
+    def __init__(
+        self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
+    ):
         super().__init__()
         self.register_buffer("log_moving_average", torch.zeros(1))
-        momentum = torch.zeros(1) + momentum
-        self.register_buffer("momentum_logit", momentum.logit())
+        self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
 
         class LogMeanExp(torch.autograd.Function):
             @staticmethod
             def forward(ctx, input):
-                ctx.save_for_backward(input)
+                log_batch_average = logmeanexp(input)
+                ctx.save_for_backward(input, log_batch_average)
                 self.log_moving_average.data = stop_gradient(
                     log_interpolate(
-                        self.log_moving_average, logmeanexp(input), self.momentum_logit
+                        self.log_moving_average, log_batch_average, self.momentum_logit
                     )
                 )
-                return self.log_moving_average
+                return self.log_moving_average if ema_forward else log_batch_average
 
             @staticmethod
             def backward(ctx, grad_output):
-                input = ctx.saved_tensors[0]
+                input, log_batch_average = ctx.saved_tensors
                 log_n = np.log(input.numel())
-                moving_average = self.log_moving_average.add(log_n).exp()
-                grad_output = grad_output * input.exp() / moving_average
+                log_average = (
+                    self.log_moving_average if ema_backward else log_batch_average
+                )
+                grad_output = grad_output * input.exp() / log_average.add(log_n).exp()
                 return grad_output if gradient else None
 
         self.logmeanexp = LogMeanExp.apply
@@ -70,9 +74,18 @@ class GradientMomentumNormalizer(MomentumNormalizer):
         self.log_ema = LogEMA(momentum, gradient=True)
 
 
-class BatchNormalizer(nn.Module):
-    def forward(self, logits):
-        return logits - logmeanexp(off_diagonal(logits) if logits.dim() > 1 else logits)
+class BatchNormalizer(MomentumNormalizer):
+    def __init__(self, momentum=0.99):
+        super().__init__()
+        self.log_ema = LogEMA(momentum, gradient=False, ema_forward=False)
+
+
+class GradientBatchNormalizer(MomentumNormalizer):
+    def __init__(self, momentum=0.99):
+        super().__init__()
+        self.log_ema = LogEMA(
+            momentum, gradient=True, ema_forward=False, ema_backward=False
+        )
 
 
 class LearnedNormalizer(nn.Module):
@@ -95,6 +108,7 @@ class ConstantNormalizer(nn.Module):
 
 NORMALIZERS = {
     "batch": BatchNormalizer,
+    "gradient_batch": GradientBatchNormalizer,
     "momentum": MomentumNormalizer,
     "gradient_momentum": GradientMomentumNormalizer,
     "learn": LearnedNormalizer,

@@ -48,9 +48,9 @@ from torch import diagonal
 import torch.nn.functional as F
 
 from selfsne.kernels import KERNELS
-from selfsne.discriminators import DISCRIMINATORS
+from selfsne.divergences import DIVERGENCES
 from selfsne.normalizers import NORMALIZERS
-from selfsne.utils import remove_diagonal, off_diagonal
+from selfsne.utils import remove_diagonal, off_diagonal, stop_gradient
 
 
 class NCE(nn.Module):
@@ -60,38 +60,41 @@ class NCE(nn.Module):
     that preserves local embedding structure by maximizing similarity
     for positive pairs and minimizing similarity for negative (noise) pairs.
 
-    A user-selected similarity kernel is used to calculate logits for each
-    pair, which are then optimized by a user-selected discriminator function
+    A user-selected similarity kernel is used to calculate the log density ratio ("logits")
+    for each pair, which are then optimized by a user-selected divergence function
     to maximize logits for positive pairs (attraction)
     and minimize logits for negative pairs (repulsion).
 
     Parameters
     ----------
     kernel: str
-        Similarity kernel used for calculating discriminator logits.
+        Similarity kernel used for calculating logits.
         Must be one of selfsne.kernels.KERNELS.
         For example, "studentt" can be used to produce t-SNE [4] or UMAP [5]
         embeddings, "normal" can be used to produce SNE [6] embeddings,
         and "vonmises" can be used for (hyper)spherical embeddings [7, 8].
 
-    discriminator: str
-        Discriminator function used for instance classification.
-        Must be one of selfsne.discriminators.DISCRIMINATORS.
-        For example, "nce" applies classic NCE [1],
-        "categorical" applies categorical cross entropy, or InfoNCE [2],
+    kernel_scale: float or str, default=1.0
+        Postive scale value for calculating logits.
+        For loc-scale family kernels sqrt(embedding_dims) is recommended,
+        which is calculated automatically when kernel_scale = "auto".
+
+    divergence: str
+        Divergence function used for instance classification.
+        Must be one of selfsne.divergences.DIVERGENCES.
+        For example, "categorical" applies categorical cross entropy, or InfoNCE [2],
         which can be used for t-SNE [4] and SimCLR [6] embeddings,
         while "binary" applies binary cross entropy, or NEG [4],
         which can be used for UMAP [5] embeddings.
 
-    kernel_scale: float, default=1.0
-        Postive scale value for calculating logits.
-        For loc-scale family kernels sqrt(embedding_dims) is recommended.
-
     log_normalizer : float or str, default = 0
-        The value of the log normalizer for calculating the logits.
-        Must be a float, "learn", which learns the
-        log partition function as a free parameter, or "momentum",
-        which uses an exponential moving average of the negative logits.
+        The type of log normalizer for calculating the log density ratio.
+        Must be a float or one of selfsne.normalizers.NORMALIZERS
+
+    conditional_log_normalizer : torch.nn.Module or None, default = None
+        A function for transforming embedding vectors to a conditional log normalizer,
+        i.e., log Z_i = a(y_i). Must take (batch size, embedding_dims) shaped inputs,
+        and output must be shaped (batch size, 1).
 
     remove_diagonal : bool, default = True
         Whether to remove the positive logits (the diagonal of the negative logits)
@@ -102,6 +105,10 @@ class NCE(nn.Module):
 
     repulsion_weight: float, default=1.0
         Weighting for the repulsion term
+
+    normalizer_weight: float, default=1.0
+        Weighting for the normalizer term,
+        where log_normalizer += log(normalizer_weight)
 
     References
     ----------
@@ -143,41 +150,57 @@ class NCE(nn.Module):
     def __init__(
         self,
         kernel="studentt",
-        discriminator="categorical",
         kernel_scale=1.0,
+        divergence="categorical",
         log_normalizer=0.0,
+        conditional_log_normalizer=None,
         remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
+        normalizer_weight=1.0,
     ):
         super().__init__()
         if isinstance(kernel, str):
             self.kernel = KERNELS[kernel]
         else:
             self.kernel = kernel
+
         self.kernel_scale = kernel_scale
 
-        if isinstance(discriminator, str):
-            self.discriminator = DISCRIMINATORS[discriminator]
+        if isinstance(divergence, str):
+            self.divergence = DIVERGENCES[divergence]
         else:
-            self.discriminator = discriminator
+            self.divergence = divergence
+
         if isinstance(log_normalizer, str):
             self.log_normalizer = NORMALIZERS[log_normalizer]()
         elif isinstance(log_normalizer, (int, float)):
             self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
         else:
             self.log_normalizer = log_normalizer
+
+        self.conditional_log_normalizer = conditional_log_normalizer
+
         self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
+        self.log_normalizer_weight = np.log(normalizer_weight)
 
-    def forward(self, x, y, log_baseline=0.0):
-        logits = self.kernel(x, self.kernel_scale).log_prob(y.unsqueeze(-2))
-        logits = self.log_normalizer(logits)
-        logits = logits - log_baseline
+    def forward(self, x, y):
+        if self.kernel_scale == "auto":
+            self.kernel_scale = np.sqrt(x.shape[1])
+
+        logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
+        log_normalizer = self.log_normalizer(logits) + (
+            self.conditional_log_normalizer(stop_gradient(y))
+            if self.conditional_log_normalizer is not None
+            else 0
+        )
+        logits = logits - (log_normalizer + self.log_normalizer_weight)
+
         pos_logits = diagonal(logits)
         neg_logits = remove_diagonal(logits) if self.remove_diagonal else logits
-        attraction, repulsion = self.discriminator(pos_logits, neg_logits)
+        attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
             attraction.mean() * self.attraction_weight
             + repulsion.mean() * self.repulsion_weight

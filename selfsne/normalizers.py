@@ -54,7 +54,10 @@ class LogEMA(nn.Module):
         self.logmeanexp = LogMeanExp.apply
 
     def forward(self, x):
-        return self.logmeanexp(x)
+        if self.training:
+            return self.logmeanexp(x)
+        else:
+            return self.log_moving_average
 
 
 class MomentumNormalizer(nn.Module):
@@ -63,9 +66,7 @@ class MomentumNormalizer(nn.Module):
         self.log_ema = LogEMA(momentum, gradient=False)
 
     def forward(self, logits):
-        return logits - self.log_ema(
-            off_diagonal(logits) if logits.dim() > 1 else logits
-        )
+        return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
 
 
 class GradientMomentumNormalizer(MomentumNormalizer):
@@ -94,7 +95,7 @@ class LearnedNormalizer(nn.Module):
         self.log_normalizer = nn.Parameter(torch.zeros(1))
 
     def forward(self, logits):
-        return logits - self.log_normalizer
+        return self.log_normalizer
 
 
 class ConstantNormalizer(nn.Module):
@@ -103,7 +104,7 @@ class ConstantNormalizer(nn.Module):
         self.register_buffer("log_normalizer", torch.zeros(1) + log_normalizer)
 
     def forward(self, logits):
-        return logits - self.log_normalizer
+        return self.log_normalizer
 
 
 NORMALIZERS = {

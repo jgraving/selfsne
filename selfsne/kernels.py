@@ -18,97 +18,51 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class LocScale(Module):
-    def __init__(self, loc, scale=1.0):
-        super().__init__()
-        self.loc = loc
-        self.scale = scale
-
-    def forward(self, value):
-        return (value - self.loc).div_(self.scale)
+def laplace(x, y, scale):
+    return -(x - y).div_(scale).abs_().sum(-1)
 
 
-class Laplace(LocScale):
-    def log_prob(self, value):
-        return -self(value).abs_().sum(-1)
+def cauchy(x, y, scale):
+    return -(x - y).div_(scale).pow_(2).sum(-1).log1p_()
 
 
-class LaplaceT(LocScale):
-    def log_prob(self, value):
-        return -self(value).abs_().sum(-1).log1p_()
+def inverse(x, y, scale):
+    return -(x - y).div_(scale).pow_(2).sum(-1).add(1e-5).log_()
 
 
-class StudentT(LocScale):
-    def log_prob(self, value):
-        return -self(value).pow_(2).sum(-1).log1p_()
+def normal(x, y, scale):
+    return -(x - y).div_(scale).pow_(2).div_(2).sum(-1)
 
 
-class Inverse(LocScale):
-    def log_prob(self, value):
-        return -self(value).pow_(2).sum(-1).add(1e-5).log_()
+def inner_product(x, y, scale):
+    return (x * y).div_(scale).sum(-1)
 
 
-class Normal(LocScale):
-    def log_prob(self, value):
-        return -self(value).pow_(2).div_(2).sum(-1)
+def von_mises(x, y, scale):
+    return inner_product(F.normalize(x, dim=-1), F.normalize(y, dim=-1), scale)
 
 
-class InnerProduct(LocScale):
-    def forward(self, value):
-        return (self.loc * value).div_(self.scale).sum(-1)
-
-    def log_prob(self, value):
-        return self(value)
+def wrapped_cauchy(x, y, scale):
+    return -(np.cosh(scale) - von_mises(x, y, 1)).log()
 
 
-class VonMises(InnerProduct):
-    def __init__(self, loc, scale=1.0):
-        super().__init__(F.normalize(loc, dim=-1), scale)
-
-    def log_prob(self, value):
-        return self(F.normalize(value, dim=-1))
+def joint_product(x, y, scale):
+    return (x.log_softmax(-1) + y.log_softmax(-1)).div_(scale).logsumexp(-1)
 
 
-class WrappedCauchy(VonMises):
-    def log_prob(self, value):
-        cos = (self.loc * F.normalize(value, dim=-1)).sum(-1)
-        return -(np.cosh(self.scale) - cos).log()
-
-
-class Categorical(Module):
-    def __init__(self, logits, temperature):
-        super().__init__()
-        self.logits = logits.log_softmax(-1)
-        self.temperature = temperature
-
-    def log_prob(self, value):
-        return (self.logits * value.softmax(-1)).div_(self.temperature).sum(-1)
-
-
-class JointProduct(Categorical):
-    def forward(self, value):
-        return (self.logits + value.log_softmax(-1)).div_(self.temperature)
-
-    def log_prob(self, value):
-        return self(value).logsumexp(-1)
-
-
-class Bhattacharyya(JointProduct):
-    def log_prob(self, value):
-        return self(value).mul_(0.5).logsumexp(-1)
+def bhattacharyya(x, y, scale):
+    return joint_product(x, y, scale * 2)
 
 
 KERNELS = {
-    "normal": Normal,
-    "studentt": StudentT,
-    "cauchy": StudentT,
-    "inverse": Inverse,
-    "categorical": Categorical,
-    "laplace": Laplace,
-    "vonmises": VonMises,
-    "wrapped_cauchy": WrappedCauchy,
-    "laplacet": LaplaceT,
-    "inner_product": InnerProduct,
-    "bhattacharyya": Bhattacharyya,
-    "joint_product": JointProduct,
+    "normal": normal,
+    "student_t": cauchy,
+    "cauchy": cauchy,
+    "inverse": inverse,
+    "laplace": laplace,
+    "von_mises": von_mises,
+    "wrapped_cauchy": wrapped_cauchy,
+    "inner_product": inner_product,
+    "bhattacharyya": bhattacharyya,
+    "joint_product": joint_product,
 }

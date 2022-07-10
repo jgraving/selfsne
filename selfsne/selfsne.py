@@ -31,8 +31,9 @@ class SelfSNE(pl.LightningModule):
     def __init__(
         self,
         encoder,
+        encoder_x=None,
+        projector_x=nn.Identity(),
         pair_sampler=None,
-        log_baseline=None,
         projector=nn.Identity(),
         prior=None,
         similarity_loss=None,
@@ -54,16 +55,19 @@ class SelfSNE(pl.LightningModule):
         self.kwargs = locals()
         super().__init__()
         self.encoder = encoder
+        self.encoder_x = encoder_x
+        self.projector_x = projector_x
         self.projector = projector
         self.pair_sampler = pair_sampler
         self.prior = prior
-        self.log_baseline = log_baseline
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
         self.save_hyperparameters(
             ignore=[
                 "encoder",
                 "projector",
+                "encoder_x",
+                "projector_x",
                 "pair_sampler",
                 "prior",
                 "baseline",
@@ -85,19 +89,15 @@ class SelfSNE(pl.LightningModule):
             x = batch
             y = batch
 
-        x = self(x)
+        if self.encoder_x is not None:
+            x = self.projector_x(self.encoder_x(x))
+        else:
+            x = self(x)
+
         y = self(y)
 
-        sg_y = stop_gradient(y)
-
         if self.similarity_loss is not None:
-            similarity = self.similarity_loss(
-                x,
-                y,
-                log_baseline=self.log_baseline(sg_y)
-                if self.log_baseline is not None
-                else 0,
-            )
+            similarity = self.similarity_loss(x, y)
             loss[mode + "similarity"] = similarity
 
         if self.redundancy_loss is not None:
@@ -105,7 +105,7 @@ class SelfSNE(pl.LightningModule):
             loss[mode + "redundancy"] = redundancy
 
         if self.prior is not None:
-            prior_log_prob = -self.prior.log_prob(sg_y).mean()
+            prior_log_prob = -self.prior.log_prob(stop_gradient(y)).mean()
             rate = -self.prior.rate(y).mean()
             loss[mode + "rate"] = rate
             loss[mode + "prior_entropy"] = self.prior.entropy()
@@ -152,12 +152,22 @@ class SelfSNE(pl.LightningModule):
     def configure_optimizers(self):
         params_list = [
             {"params": self.encoder.parameters()},
-            {"params": self.pair_sampler.parameters()},
             {
                 "params": self.projector.parameters(),
                 "weight_decay": self.hparams.projector_weight_decay,
             },
         ]
+        if self.encoder_x is not None:
+            params_list.append({"params": self.encoder_x.parameters()})
+            params_list.append(
+                {
+                    "params": self.projector_x.parameters(),
+                    "weight_decay": self.hparams.projector_weight_decay,
+                }
+            )
+
+        if self.pair_sampler is not None:
+            params_list.append({"params": self.pair_sampler.parameters()})
 
         if self.similarity_loss is not None:
             params_list.append({"params": self.similarity_loss.parameters()})
@@ -173,9 +183,6 @@ class SelfSNE(pl.LightningModule):
                     "lr": self.prior.hparams.lr,
                 }
             )
-
-        if self.log_baseline is not None:
-            params_list.append({"params": self.log_baseline.parameters()})
 
         optimizer = optim.AdamW(
             params_list,

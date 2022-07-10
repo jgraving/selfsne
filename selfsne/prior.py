@@ -73,21 +73,20 @@ class MixturePrior(pl.LightningModule):
     def mixture(self):
         return D.Categorical(logits=self.logits)
 
-    @property
-    def components(self):
-        return self.kernel(self.locs.unsqueeze(1), self.hparams.kernel_scale)
-
     def entropy(self):
         return -(self.mixture.probs * self._log_prob(self.locs)).sum()
 
     def weighted_log_prob(self, x):
-        return self.components.log_prob(x) + self.mixture.logits.unsqueeze(1)
+        return self.kernel(
+            self.locs.unsqueeze(1), x, self.hparams.kernel_scale
+        ) + self.mixture.logits.unsqueeze(1)
 
     def _log_prob(self, x):
         return self.weighted_log_prob(x).logsumexp(0)
 
     def log_prob(self, x):
-        return self.log_normalizer(self._log_prob(x))
+        log_prob = self._log_prob(x)
+        return log_prob - self.log_normalizer(log_prob)
 
     def rate(self, x):
         disable_grad(self)

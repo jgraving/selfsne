@@ -52,7 +52,9 @@ def reverse_kullback_leibler_divergence(pos_logits, neg_logits):
     return attraction, repulsion
 
 
-def interpolate_divergences(divergence_a, divergence_b, alpha=0.5):
+def interpolate_divergences(
+    divergence_a, divergence_b, pos_logits, neg_logits, alpha=0.5
+):
     attraction_a, repulsion_a = divergence_a(pos_logits, neg_logits)
     attraction_b, repulsion_b = divergence_b(pos_logits, neg_logits)
     return (
@@ -63,7 +65,11 @@ def interpolate_divergences(divergence_a, divergence_b, alpha=0.5):
 
 def interpolate_kullback_leibler_divergence(pos_logits, neg_logits, alpha=0.5):
     return interpolate_divergences(
-        kullback_leibler_divergence, reverse_kullback_leibler_divergence, alpha
+        kullback_leibler_divergence,
+        reverse_kullback_leibler_divergence,
+        pos_logits,
+        neg_logits,
+        alpha,
     )
 
 

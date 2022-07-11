@@ -52,11 +52,22 @@ def log_interpolate(log_a, log_b, alpha_logit):
     )
 
 
-def logmeanexp(x, dim=None):
+def interpolate(a, b, alpha):
+    return a * alpha + b * (1 - alpha)
+
+
+def logmeanexp(x, dim=None, keepdim=False):
     if dim is not None:
-        return x.logsumexp(dim) - np.log(x.shape[dim])
+        if isinstance(dim, tuple):
+            return x.logsumexp(dim=dim, keepdim=keepdim) - np.log(
+                np.sum([x.shape[dim] for dim in dim])
+            )
+        else:
+            return x.logsumexp(dim=dim, keepdim=keepdim) - np.log(np.sum(x.shape[dim]))
     else:
-        return x.logsumexp(tuple([dim for dim in range(x.dim())])) - np.log(x.numel())
+        return x.logsumexp(
+            dim=tuple([dim for dim in range(x.dim())]), keepdim=keepdim
+        ) - np.log(x.numel())
 
 
 def off_diagonal(x):

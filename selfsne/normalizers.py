@@ -18,7 +18,13 @@ from torch import nn
 
 import numpy as np
 
-from selfsne.utils import off_diagonal, logmeanexp, log_interpolate, stop_gradient
+from selfsne.utils import (
+    off_diagonal,
+    remove_diagonal,
+    logmeanexp,
+    log_interpolate,
+    stop_gradient,
+)
 
 
 class LogEMA(nn.Module):
@@ -65,7 +71,7 @@ class MomentumNormalizer(nn.Module):
         super().__init__()
         self.log_ema = LogEMA(momentum, gradient=False)
 
-    def forward(self, logits):
+    def forward(self, y, logits):
         return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
 
 
@@ -89,12 +95,22 @@ class GradientBatchNormalizer(MomentumNormalizer):
         )
 
 
+class ConditionalNormalizer(nn.Module):
+    def forward(self, y, logits):
+        return stop_gradient(logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True))
+
+
+class GradientConditionalNormalizer(nn.Module):
+    def forward(self, y, logits):
+        return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
+
+
 class LearnedNormalizer(nn.Module):
     def __init__(self):
         super().__init__()
         self.log_normalizer = nn.Parameter(torch.zeros(1))
 
-    def forward(self, logits):
+    def forward(self, y, logits):
         return self.log_normalizer
 
 
@@ -103,13 +119,63 @@ class ConstantNormalizer(nn.Module):
         super().__init__()
         self.register_buffer("log_normalizer", torch.zeros(1) + log_normalizer)
 
-    def forward(self, logits):
+    def forward(self, y, logits):
         return self.log_normalizer
+
+
+class LearnedConditionalNormalizer(nn.Module):
+    def __init__(self, encoder, gradient=False):
+        super().__init__()
+        self.encoder = encoder
+        self.gradient = gradient
+
+    def forward(self, y, logits):
+        return self.encoder(y if self.gradient else stop_gradient(y))
+
+
+class LogInterpolatedNormalizer(nn.Module):
+    def __init__(self, normalizer_a, normalizer_b, alpha=0.5):
+        super().__init__()
+        self.normalizer_a = normalizer_a
+        self.normalizer_b = normalizer_b
+        self.register_buffer("alpha_logit", torch.zeros(1).add(alpha).logit())
+
+    def forward(self, y, logits):
+        return log_interpolate(
+            self.normalizer_a(y, logits), self.normalizer_b(y, logits), self.alpha_logit
+        )
+
+
+class InterpolatedNormalizer(nn.Module):
+    def __init__(self, normalizer_a, normalizer_b, alpha=0.5):
+        super().__init__()
+        self.normalizer_a = normalizer_a
+        self.normalizer_b = normalizer_b
+        self.alpha = alpha
+
+    def forward(self, y, logits):
+        return interpolate(
+            self.normalizer_a(y, logits), self.normalizer_b(y, logits), self.alpha
+        )
+
+
+class AdditiveNormalizer(nn.Module):
+    def __init__(self, normalizers):
+        super().__init__()
+        self.normalizers = nn.ModuleList(normalizers)
+
+    def forward(self, y, logits):
+        log_normalizer = 0
+        for normalizer in self.normalizers:
+            log_normalizer = log_normalizer + normalizer(y, logits)
+        return log_normalizer
 
 
 NORMALIZERS = {
     "batch": BatchNormalizer,
     "gradient_batch": GradientBatchNormalizer,
+    "conditional": ConditionalNormalizer,
+    "gradient_conditional": GradientConditionalNormalizer,
     "momentum": MomentumNormalizer,
     "gradient_momentum": GradientMomentumNormalizer,
     "learn": LearnedNormalizer,

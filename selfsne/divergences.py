@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from selfsne.utils import logmeanexp
+from selfsne.utils import logmeanexp, interpolate
 
 
 def categorical_cross_entropy(pos_logits, neg_logits):
@@ -53,15 +53,13 @@ def reverse_kullback_leibler_divergence(pos_logits, neg_logits):
 
 
 def interpolate_kullback_leibler_divergence(pos_logits, neg_logits, alpha=0.5):
-    kld_attraction, kld_repulsion = kullback_leibler_divergence(
-        pos_logits, neg_logits
-    )
+    kld_attraction, kld_repulsion = kullback_leibler_divergence(pos_logits, neg_logits)
     rkld_attraction, rkld_repulsion = reverse_kullback_leibler_divergence(
         pos_logits, neg_logits
     )
     return (
-        alpha * kld_attraction + (1 - alpha) * rkld_attraction,
-        alpha * kld_repulsion + (1 - alpha) * rkld_repulsion,
+        interpolate(kld_attraction, rkld_attraction, alpha),
+        interpolate(kld_repulsion, rkld_repulsion, alpha),
     )
 
 

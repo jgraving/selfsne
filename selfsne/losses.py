@@ -87,14 +87,10 @@ class NCE(nn.Module):
         while "binary" applies binary cross entropy, or NEG [4],
         which can be used for UMAP [5] embeddings.
 
-    log_normalizer : float or str, default = 0
-        The type of log normalizer for calculating the log density ratio.
-        Must be a float or one of selfsne.normalizers.NORMALIZERS
-
-    conditional_log_normalizer : torch.nn.Module or None, default = None
-        A function for transforming embedding vectors to a conditional log normalizer,
-        i.e., log Z_i = a(y_i). Must take (batch size, embedding_dims) shaped inputs,
-        and output must be shaped (batch size, 1).
+    log_normalizer : float, str, or nn.Module, default = 0
+        The log normalizer for calculating the log density ratio.
+        Must be a float, one of selfsne.normalizers.NORMALIZERS,
+        or nn.Module such as from selfsne.normalizers
 
     remove_diagonal : bool, default = True
         Whether to remove the positive logits (the diagonal of the negative logits)
@@ -153,7 +149,6 @@ class NCE(nn.Module):
         kernel_scale=1.0,
         divergence="categorical",
         log_normalizer=0.0,
-        conditional_log_normalizer=None,
         remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
@@ -179,8 +174,6 @@ class NCE(nn.Module):
         else:
             self.log_normalizer = log_normalizer
 
-        self.conditional_log_normalizer = conditional_log_normalizer
-
         self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
@@ -191,11 +184,7 @@ class NCE(nn.Module):
             self.kernel_scale = np.sqrt(x.shape[1])
 
         logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
-        log_normalizer = self.log_normalizer(logits) + (
-            self.conditional_log_normalizer(stop_gradient(y))
-            if self.conditional_log_normalizer is not None
-            else 0
-        )
+        log_normalizer = self.log_normalizer(y, logits)
         logits = logits - (log_normalizer + self.log_normalizer_weight)
 
         pos_logits = diagonal(logits)

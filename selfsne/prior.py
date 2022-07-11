@@ -86,7 +86,7 @@ class MixturePrior(pl.LightningModule):
 
     def log_prob(self, x):
         log_prob = self._log_prob(x)
-        return log_prob - self.log_normalizer(log_prob)
+        return log_prob - self.log_normalizer(x, log_prob)
 
     def rate(self, x):
         disable_grad(self)

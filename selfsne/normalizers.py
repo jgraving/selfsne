@@ -27,7 +27,7 @@ from selfsne.utils import (
 )
 
 
-class LogEMA(nn.Module):
+class LogMovingAverage(nn.Module):
     def __init__(
         self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
     ):
@@ -49,13 +49,18 @@ class LogEMA(nn.Module):
 
             @staticmethod
             def backward(ctx, grad_output):
-                input, log_batch_average = ctx.saved_tensors
-                log_n = np.log(input.numel())
-                log_average = (
-                    self.log_moving_average if ema_backward else log_batch_average
-                )
-                grad_output = grad_output * input.exp() / log_average.add(log_n).exp()
-                return grad_output if gradient else None
+                if gradient:
+                    input, log_batch_average = ctx.saved_tensors
+                    log_n = np.log(input.numel())
+                    log_average = (
+                        self.log_moving_average if ema_backward else log_batch_average
+                    )
+                    grad_output = (
+                        grad_output * input.exp() / log_average.add(log_n).exp()
+                    )
+                    return grad_output
+                else:
+                    return None
 
         self.logmeanexp = LogMeanExp.apply
 
@@ -66,43 +71,50 @@ class LogEMA(nn.Module):
             return self.log_moving_average
 
 
-class MomentumNormalizer(nn.Module):
-    def __init__(self, momentum=0.99):
+class LogMovingAverageNormalizer(nn.Module):
+    def __init__(
+        self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
+    ):
         super().__init__()
-        self.log_ema = LogEMA(momentum, gradient=False)
+        self.log_ema = LogMovingAverage(
+            momentum=momentum,
+            gradient=gradient,
+            ema_forward=ema_forward,
+            ema_backward=ema_backward,
+        )
 
     def forward(self, y, logits):
         return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
 
 
-class GradientMomentumNormalizer(MomentumNormalizer):
-    def __init__(self, momentum=0.99):
-        super().__init__()
-        self.log_ema = LogEMA(momentum, gradient=True)
+def MomentumNormalizer(momentum=0.99):
+    return LogMovingAverageNormalizer(momentum=momentum, gradient=False)
 
 
-class BatchNormalizer(MomentumNormalizer):
-    def __init__(self, momentum=0.99):
-        super().__init__()
-        self.log_ema = LogEMA(momentum, gradient=False, ema_forward=False)
+def GradientMomentumNormalizer(momentum=0.99):
+    return LogMovingAverageNormalizer(momentum=momentum, gradient=True)
 
 
-class GradientBatchNormalizer(MomentumNormalizer):
-    def __init__(self, momentum=0.99):
-        super().__init__()
-        self.log_ema = LogEMA(
-            momentum, gradient=True, ema_forward=False, ema_backward=False
-        )
+def BatchNormalizer(momentum=0.99):
+    return LogMovingAverageNormalizer(
+        momentum=momentum, gradient=False, ema_forward=False
+    )
 
 
-class ConditionalNormalizer(nn.Module):
-    def forward(self, y, logits):
-        return stop_gradient(logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True))
+def GradientBatchNormalizer(momentum=0.99):
+    return LogMovingAverageNormalizer(
+        momentum=momentum, gradient=True, ema_forward=False, ema_backward=False
+    )
 
 
 class GradientConditionalNormalizer(nn.Module):
     def forward(self, y, logits):
         return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
+
+
+class ConditionalNormalizer(GradientConditionalNormalizer):
+    def forward(self, y, logits):
+        return logmeanexp(remove_diagonal(stop_gradient(logits)), dim=-1, keepdim=True)
 
 
 class LearnedNormalizer(nn.Module):
@@ -160,15 +172,25 @@ class InterpolatedNormalizer(nn.Module):
 
 
 class AdditiveNormalizer(nn.Module):
-    def __init__(self, normalizers):
+    def __init__(self, normalizers, mean=False):
         super().__init__()
         self.normalizers = nn.ModuleList(normalizers)
+        self.scale = len(normalizers) if mean else 1
+        self.log_scale = np.log(self.scale)
 
     def forward(self, y, logits):
         log_normalizer = 0
         for normalizer in self.normalizers:
             log_normalizer = log_normalizer + normalizer(y, logits)
-        return log_normalizer
+        return log_normalizer / self.scale
+
+
+class LogAdditiveNormalizer(AdditiveNormalizer):
+    def forward(self, y, logits):
+        log_normalizer = torch.zeros((1), device=y.device)
+        for normalizer in self.normalizers:
+            log_normalizer = torch.logaddexp(log_normalizer, normalizer(y, logits))
+        return log_normalizer - self.log_scale
 
 
 NORMALIZERS = {

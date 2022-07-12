@@ -58,8 +58,8 @@ def interpolate_divergences(
     attraction_a, repulsion_a = divergence_a(pos_logits, neg_logits)
     attraction_b, repulsion_b = divergence_b(pos_logits, neg_logits)
     return (
-        interpolate(attraction_a, attraction_b, alpha),
-        interpolate(repulsion_a, repulsion_b, alpha),
+        torch.lerp(attraction_a, attraction_b, alpha),
+        torch.lerp(repulsion_a, repulsion_b, alpha),
     )
 
 

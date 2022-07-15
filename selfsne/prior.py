@@ -23,7 +23,7 @@ import numpy as np
 import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
-from selfsne.normalizers import NORMALIZERS
+from selfsne.normalizers import LogMovingAverage
 from selfsne.utils import disable_grad, enable_grad, stop_gradient
 
 
@@ -35,7 +35,7 @@ class MixturePrior(pl.LightningModule):
         kernel="normal",
         logits="learn",
         kernel_scale=1.0,
-        log_normalizer=0.0,
+        normalizer="ema",
         lr=1.0,
         scheduler_kwargs={},
     ):
@@ -57,10 +57,12 @@ class MixturePrior(pl.LightningModule):
             logits = torch.zeros((num_components,))
             self.register_buffer("logits", logits)
 
-        if isinstance(log_normalizer, str):
-            self.log_normalizer = NORMALIZERS[log_normalizer]()
+        if normalizer == "momentum":
+            self.normalizer = LogMovingAverage(gradient=False)
+        elif normalizer == "batch":
+            self.normalizer = LogMovingAverage(gradient=False, forward_ema=False)
         else:
-            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
+            self.normalizer = lambda x: torch.zeros_like(x)
 
         self.watershed_locs = nn.Parameter(stop_gradient(self.locs))
         self.watershed_assignments = self.watershed_labels()
@@ -86,7 +88,7 @@ class MixturePrior(pl.LightningModule):
 
     def log_prob(self, x):
         log_prob = self._log_prob(x)
-        return log_prob - self.log_normalizer(x, log_prob)
+        return log_prob - self.normalizer(log_prob)
 
     def rate(self, x):
         disable_grad(self)

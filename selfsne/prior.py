@@ -35,7 +35,7 @@ class MixturePrior(pl.LightningModule):
         kernel="normal",
         logits="learn",
         kernel_scale=1.0,
-        log_normalizer=0.0,
+        normalizer=1,
         lr=1.0,
         scheduler_kwargs={},
     ):
@@ -57,10 +57,10 @@ class MixturePrior(pl.LightningModule):
             logits = torch.zeros((num_components,))
             self.register_buffer("logits", logits)
 
-        if isinstance(log_normalizer, str):
-            self.log_normalizer = NORMALIZERS[log_normalizer]()
+        if isinstance(normalizer, str):
+            self.normalizer = NORMALIZERS[normalizer]()
         else:
-            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
+            self.normalizer = NORMALIZERS["constant"](normalizer)
 
         self.watershed_locs = nn.Parameter(stop_gradient(self.locs))
         self.watershed_assignments = self.watershed_labels()
@@ -86,7 +86,7 @@ class MixturePrior(pl.LightningModule):
 
     def log_prob(self, x):
         log_prob = self._log_prob(x)
-        return log_prob - self.log_normalizer(x, log_prob)
+        return log_prob - self.normalizer(x, log_prob)
 
     def rate(self, x):
         disable_grad(self)

@@ -53,7 +53,7 @@ from selfsne.normalizers import NORMALIZERS
 from selfsne.utils import remove_diagonal, off_diagonal, stop_gradient
 
 
-class NCE(nn.Module):
+class DensityRatioEstimator(nn.Module):
     """
     A generalized multi-sample contrastive loss based on
     Noise Contrastive Estimation (NCE) [1] and its variants [2, 3]
@@ -87,14 +87,10 @@ class NCE(nn.Module):
         while "binary" applies binary cross entropy, or NEG [4],
         which can be used for UMAP [5] embeddings.
 
-    log_normalizer : float, str, or nn.Module, default = 0
+    normalizer : float, str, or nn.Module, default = 1
         The log normalizer for calculating the log density ratio.
-        Must be a float, one of selfsne.normalizers.NORMALIZERS,
+        Must be a float, string (one of selfsne.normalizers.NORMALIZERS),
         or nn.Module such as from selfsne.normalizers
-
-    remove_diagonal : bool, default = True
-        Whether to remove the positive logits (the diagonal of the negative logits)
-        when calculating the repulsion term. The diagonal is removed when set to True.
 
     attraction_weight: float, default=1.0
         Weighting for the attraction term
@@ -148,7 +144,7 @@ class NCE(nn.Module):
         kernel="studentt",
         kernel_scale=1.0,
         divergence="categorical",
-        log_normalizer=0.0,
+        normalizer=1,
         remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
@@ -167,14 +163,13 @@ class NCE(nn.Module):
         else:
             self.divergence = divergence
 
-        if isinstance(log_normalizer, str):
-            self.log_normalizer = NORMALIZERS[log_normalizer]()
-        elif isinstance(log_normalizer, (int, float)):
-            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
+        if isinstance(normalizer, str):
+            self.normalizer = NORMALIZERS[normalizer]()
+        elif isinstance(normalizer, (int, float)):
+            self.normalizer = NORMALIZERS["constant"](normalizer)
         else:
-            self.log_normalizer = log_normalizer
+            self.normalizer = normalizer
 
-        self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
         self.log_normalizer_weight = np.log(normalizer_weight)
@@ -184,11 +179,11 @@ class NCE(nn.Module):
             self.kernel_scale = np.sqrt(x.shape[1])
 
         logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
-        log_normalizer = self.log_normalizer(y, logits)
+        log_normalizer = self.normalizer(y, logits)
         logits = logits - (log_normalizer + self.log_normalizer_weight)
 
         pos_logits = diagonal(logits)
-        neg_logits = remove_diagonal(logits) if self.remove_diagonal else logits
+        neg_logits = remove_diagonal(logits)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
             attraction.mean() * self.attraction_weight

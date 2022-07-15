@@ -127,9 +127,9 @@ class LearnedNormalizer(nn.Module):
 
 
 class ConstantNormalizer(nn.Module):
-    def __init__(self, log_normalizer=0.0):
+    def __init__(self, normalizer=1):
         super().__init__()
-        self.register_buffer("log_normalizer", torch.zeros(1) + log_normalizer)
+        self.register_buffer("log_normalizer", torch.zeros(1) + np.log(normalizer))
 
     def forward(self, y, logits):
         return self.log_normalizer

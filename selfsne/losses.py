@@ -42,8 +42,6 @@
 # SOFTWARE.
 
 import numpy as np
-import copy
-
 import torch
 from torch import nn
 from torch import diagonal
@@ -55,7 +53,7 @@ from selfsne.normalizers import NORMALIZERS
 from selfsne.utils import remove_diagonal, off_diagonal, stop_gradient
 
 
-class DensityRatioEstimator(nn.Module):
+class NCE(nn.Module):
     """
     A generalized multi-sample contrastive loss based on
     Noise Contrastive Estimation (NCE) [1] and its variants [2, 3]
@@ -89,10 +87,14 @@ class DensityRatioEstimator(nn.Module):
         while "binary" applies binary cross entropy, or NEG [4],
         which can be used for UMAP [5] embeddings.
 
-    normalizer : float, str, or nn.Module, default = 1
-        The normalizer for calculating the log density ratio.
-        Must be a float, string (one of selfsne.normalizers.NORMALIZERS),
+    log_normalizer : float, str, or nn.Module, default = 0
+        The log normalizer for calculating the log density ratio.
+        Must be a float, one of selfsne.normalizers.NORMALIZERS,
         or nn.Module such as from selfsne.normalizers
+
+    remove_diagonal : bool, default = True
+        Whether to remove the positive logits (the diagonal of the negative logits)
+        when calculating the repulsion term. The diagonal is removed when set to True.
 
     attraction_weight: float, default=1.0
         Weighting for the attraction term
@@ -145,8 +147,9 @@ class DensityRatioEstimator(nn.Module):
         self,
         kernel="studentt",
         kernel_scale=1.0,
-        divergence="kld",
-        normalizer=1,
+        divergence="categorical",
+        log_normalizer=0.0,
+        remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
         normalizer_weight=1.0,
@@ -164,13 +167,14 @@ class DensityRatioEstimator(nn.Module):
         else:
             self.divergence = divergence
 
-        if isinstance(normalizer, str):
-            self.normalizer = NORMALIZERS[normalizer]()
-        elif isinstance(normalizer, (int, float)):
-            self.normalizer = NORMALIZERS["constant"](normalizer)
+        if isinstance(log_normalizer, str):
+            self.log_normalizer = NORMALIZERS[log_normalizer]()
+        elif isinstance(log_normalizer, (int, float)):
+            self.log_normalizer = NORMALIZERS["constant"](log_normalizer)
         else:
-            self.normalizer = normalizer
+            self.log_normalizer = log_normalizer
 
+        self.remove_diagonal = remove_diagonal
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
         self.log_normalizer_weight = np.log(normalizer_weight)
@@ -180,12 +184,11 @@ class DensityRatioEstimator(nn.Module):
             self.kernel_scale = np.sqrt(x.shape[1])
 
         logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
-        pos_logits = diagonal(logits).unsqueeze(1)
-        neg_logits = remove_diagonal(logits)
+        log_normalizer = self.log_normalizer(y, logits)
+        logits = logits - (log_normalizer + self.log_normalizer_weight)
 
-        pos_log_normalizer, neg_log_normalizer = self.normalizer(y, logits, neg_logits)
-        pos_logits = pos_logits - (pos_log_normalizer + self.log_normalizer_weight)
-        neg_logits = neg_logits - (neg_log_normalizer + self.log_normalizer_weight)
+        pos_logits = diagonal(logits)
+        neg_logits = remove_diagonal(logits) if self.remove_diagonal else logits
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
             attraction.mean() * self.attraction_weight

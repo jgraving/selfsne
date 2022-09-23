@@ -86,7 +86,9 @@ class MixturePrior(pl.LightningModule):
 
     def log_prob(self, x):
         log_prob = self._log_prob(x)
-        return log_prob - self.normalizer(x, log_prob)
+        return log_prob.unsqueeze(1) - self.normalizer(
+            x, torch.repeat_interleave(log_prob.unsqueeze(0), log_prob.shape[0], dim=0)
+        )
 
     def rate(self, x):
         disable_grad(self)

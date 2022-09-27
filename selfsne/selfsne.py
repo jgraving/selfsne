@@ -109,6 +109,7 @@ class SelfSNE(pl.LightningModule):
             rate = -self.prior.rate(y).mean()
             loss[mode + "rate"] = rate
             loss[mode + "prior_entropy"] = self.prior.entropy()
+            loss[mode + "cluster_perplexity"] = self.prior.mixture.entropy().exp()
 
         loss[mode + "loss"] = (
             (prior_log_prob if self.prior is not None else 0)

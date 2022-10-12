@@ -41,7 +41,11 @@ class MixturePrior(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        self.kernel = KERNELS[kernel]
+
+        if isinstance(kernel, str):
+            self.kernel = KERNELS[kernel]
+        else:
+            self.kernel = kernel
 
         if num_components == 1:
             locs = torch.zeros((num_components, num_dims))

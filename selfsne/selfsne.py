@@ -42,6 +42,10 @@ class SelfSNE(pl.LightningModule):
         redundancy_weight=1.0,
         rate_weight=0.0,
         learning_rate=1e-3,
+        optimizer="adam",
+        momentum=0,
+        dampening=0,
+        nesterov=False,
         weight_decay=0.0,
         projector_weight_decay=0.0,
         lr_scheduler=False,
@@ -90,23 +94,26 @@ class SelfSNE(pl.LightningModule):
             y = batch
 
         if self.encoder_x is not None:
-            x = self.projector_x(self.encoder_x(x))
+            h_x = self.encoder_x(x)
+            z_x = self.projector_x(h_x)
         else:
-            x = self(x)
+            h_x = self.encoder(x)
+            z_x = self.projector(h_x)
 
-        y = self(y)
+        h_y = self.encoder(y)
+        z_y = self.projector(h_y)
 
         if self.similarity_loss is not None:
-            similarity = self.similarity_loss(x, y)
+            similarity = self.similarity_loss(z_x, z_y)
             loss[mode + "similarity"] = similarity
 
         if self.redundancy_loss is not None:
-            redundancy = self.redundancy_loss(x, y)
+            redundancy = self.redundancy_loss(z_x, z_y)
             loss[mode + "redundancy"] = redundancy
 
         if self.prior is not None:
-            prior_log_prob = -self.prior.log_prob(stop_gradient(y)).mean()
-            rate = -self.prior.rate(y).mean()
+            prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
+            rate = -self.prior.rate(z_y).mean()
             loss[mode + "rate"] = rate
             loss[mode + "prior_entropy"] = self.prior.entropy()
             loss[mode + "cluster_perplexity"] = self.prior.mixture.entropy().exp()
@@ -184,12 +191,21 @@ class SelfSNE(pl.LightningModule):
                     "lr": self.prior.hparams.lr,
                 }
             )
-
-        optimizer = optim.AdamW(
-            params_list,
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-        )
+        if self.hparams.optimizer.lower() == "adam":
+            optimizer = optim.AdamW(
+                params_list,
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+            )
+        elif self.hparams.optimizer.lower() == "sgd":
+            optimizer = optim.SGD(
+                params_list,
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay,
+                momentum=self.hparams.momentum,
+                dampening=self.hparams.dampening,
+                nesterov=self.hparams.nesterov,
+            )
 
         if self.hparams.lr_scheduler:
 

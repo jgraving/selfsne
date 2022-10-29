@@ -118,6 +118,42 @@ class PairSampler(nn.Module):
         return self.x_sampler(x), self.y_sampler(x)
 
 
+class BatchCenter(nn.Module):
+    def __init__(self, num_features, momentum=0.9):
+        super().__init__()
+        self.register_buffer("running_mean", torch.zeros((1, num_features)))
+        self.momentum = momentum
+
+    def forward(self, x):
+        batch_mean = x.mean(dim=0, keepdim=True)
+        if self.training:
+            self.running_mean = torch.lerp(self.running_mean, batch_mean, self.momentum)
+            return x - batch_mean
+        else:
+            return x - self.running_mean
+
+
+class PairAugmenter(nn.Module):
+    def __init__(self, augmenter):
+        super().__init__()
+        self.augmenter = augmenter
+
+    def forward(self, x):
+        return torch.chunk(self.augmenter(torch.cat([x, x], dim=0)), 2, dim=0)
+
+
+class ImageNetNorm(nn.Module):
+    def __init__(self, num_features, momentum=0.9):
+        super().__init__()
+        loc = torch.tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
+        scale = torch.tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
+        self.register_buffer("loc", loc)
+        self.register_buffer("scale", loc)
+
+    def forward(self, x):
+        return (x - self.loc) / self.scale
+
+
 class CausalConv1d(nn.Conv1d):
     def __init__(
         self,

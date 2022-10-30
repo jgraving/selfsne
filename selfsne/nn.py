@@ -49,6 +49,8 @@ from functools import wraps
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
+from selfsne.utils import stop_gradient
+
 
 def lecun_normal_(x, mode="fan_in"):
     return init.kaiming_normal_(x, mode=mode, nonlinearity="linear")
@@ -143,7 +145,7 @@ class PairAugmenter(nn.Module):
 
 
 class ImageNetNorm(nn.Module):
-    def __init__(self, num_features, momentum=0.9):
+    def __init__(self,):
         super().__init__()
         loc = torch.tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
         scale = torch.tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
@@ -152,6 +154,11 @@ class ImageNetNorm(nn.Module):
 
     def forward(self, x):
         return (x - self.loc) / self.scale
+
+
+class StopGradient(nn.Module):
+    def forward(self, x):
+        return stop_gradient(x)
 
 
 class CausalConv1d(nn.Conv1d):

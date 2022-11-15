@@ -41,6 +41,8 @@ class SelfSNE(pl.LightningModule):
         similarity_weight=1.0,
         redundancy_weight=1.0,
         rate_weight=0.0,
+        rate_start_step=0,
+        rate_warmup_steps=0,
         learning_rate=1e-3,
         optimizer="adam",
         momentum=0,
@@ -117,10 +119,24 @@ class SelfSNE(pl.LightningModule):
             loss[mode + "rate"] = rate
             loss[mode + "prior_entropy"] = self.prior.entropy()
             loss[mode + "cluster_perplexity"] = self.prior.mixture.entropy().exp()
+            if (
+                self.hparams.rate_start_step
+                < self.current_epoch
+                < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
+            ):
+                rate_weight = self.hparams.rate_weight * (
+                    (self.current_epoch - self.hparams.rate_start_step)
+                    / self.hparams.rate_warmup_steps
+                )
+            elif self.current_epoch > self.hparams.rate_start_step:
+                rate_weight = self.hparams.rate_weight
+            else:
+                rate_weight = 0
+            loss[mode + "rate_weight"] = rate_weight
 
         loss[mode + "loss"] = (
             (prior_log_prob if self.prior is not None else 0)
-            + ((rate * self.hparams.rate_weight) if self.prior is not None else 0)
+            + ((rate * rate_weight) if self.prior is not None else 0)
             + (
                 (similarity * self.hparams.similarity_weight)
                 if self.similarity_loss is not None
@@ -152,7 +168,6 @@ class SelfSNE(pl.LightningModule):
 
         prediction["embedding"] = self(batch)
         if self.prior is not None:
-            prediction["prior_log_prob"] = self.prior.log_prob(prediction["embedding"])
             prediction["labels"] = self.prior.assign_labels(prediction["embedding"])
 
         return prediction

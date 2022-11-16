@@ -17,6 +17,7 @@
 # https://matplotlib.org/stable/gallery/mplot3d/lorenz_attractor.html
 
 import numpy as np
+
 from torch.utils.data import Dataset
 import h5py
 from sklearn.datasets import fetch_openml
@@ -100,7 +101,7 @@ class LorenzRandomProjection(Lorenz):
         return self.projection[:, idx : idx + self.window_size]
 
 
-class MemMap(Dataset):
+class MemMapSequence(Dataset):
     def __init__(self, file, window_size=100):
         super().__init__()
         self.data = np.load(file, mmap_mode="r")
@@ -113,17 +114,48 @@ class MemMap(Dataset):
         return np.array(self.data[idx : idx + self.window_size]).T
 
 
-class HDF5Video(Dataset):
-    def __init__(self, file, key="box", window_size=100):
-        super().__init__()
-        self.file = file
-        self.window_size = window_size
-        self.key = key
+class MemMap(Dataset):
+    def __init__(self, file):
+        super(MemMap, self).__init__()
+        self.data = np.load(file, mmap_mode="r")
 
     def __len__(self):
-        with h5py.File(self.file, mode="r") as h5file:
-            return h5file[self.key].shape[0] - self.window_size
+        return len(self.data)
 
     def __getitem__(self, idx):
-        with h5py.File(self.file, mode="r") as h5file:
-            return h5file[self.key][idx : idx + self.window_size]
+        return np.array(self.data[idx])
+
+
+class HDF5(Dataset):
+    def __init__(self, file, key):
+        self.file = file
+        self.key = key
+        self.h5file = None
+        with h5py.File(self.file, "r") as h5file:
+            self.len = len(h5file[self.key])
+
+    def __getitem__(self, index):
+        if self.h5file is None:
+            self.h5file = h5py.File(self.file, "r")
+        return self.h5file[self.key][index]
+
+    def __len__(self):
+        return self.len
+
+    def __del__(self):
+        if self.h5file is not None:
+            self.h5file.close()
+
+
+class HDF5Sequence(HDF5):
+    def __init__(self, file, key, window_size=100):
+        super().__init__(file, key)
+        self.window_size = window_size
+
+    def __len__(self):
+        return self.len - self.window_size
+
+    def __getitem__(self, idx):
+        if self.h5file is None:
+            self.h5file = h5py.File(self.file, "r")
+        return self.h5file[self.key][idx : idx + self.window_size]

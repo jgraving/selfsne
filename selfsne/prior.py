@@ -191,7 +191,7 @@ class MixturePrior(pl.LightningModule):
         early_stopping = pl.callbacks.EarlyStopping("entropy", patience=patience)
         trainer = pl.Trainer(
             max_epochs=max_epochs,
-            progress_bar_refresh_rate=verbose,
+            enable_progress_bar=verbose,
             enable_model_summary=False,
             callbacks=[early_stopping],
             gpus=gpus,

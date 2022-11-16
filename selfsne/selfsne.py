@@ -87,8 +87,6 @@ class SelfSNE(pl.LightningModule):
 
     def loss(self, batch, batch_idx, mode=""):
 
-        loss = {}
-
         if self.pair_sampler is not None:
             x, y = self.pair_sampler(batch)
         else:
@@ -107,18 +105,30 @@ class SelfSNE(pl.LightningModule):
 
         if self.similarity_loss is not None:
             similarity = self.similarity_loss(z_x, z_y)
-            loss[mode + "similarity"] = similarity
+            self.log(
+                mode + "similarity", similarity.item(), prog_bar=True
+            )
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)
-            loss[mode + "redundancy"] = redundancy
+            self.log(
+                mode + "redundancy", redundancy.item(), prog_bar=True
+            )
 
         if self.prior is not None:
             prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
             rate = -self.prior.rate(z_y).mean()
-            loss[mode + "rate"] = rate
-            loss[mode + "prior_entropy"] = self.prior.entropy()
-            loss[mode + "cluster_perplexity"] = self.prior.mixture.entropy().exp()
+            self.log(mode + "rate", rate.item(), prog_bar=True)
+            self.log(
+                mode + "prior_entropy",
+                self.prior.entropy().item(),
+                prog_bar=True,
+            )
+            self.log(
+                mode + "cluster_perplexity",
+                self.prior.mixture.entropy().exp().item(),
+                prog_bar=True,
+            )
             if (
                 self.hparams.rate_start_step
                 < self.current_epoch
@@ -132,9 +142,9 @@ class SelfSNE(pl.LightningModule):
                 rate_weight = self.hparams.rate_weight
             else:
                 rate_weight = 0
-            loss[mode + "rate_weight"] = rate_weight
+            self.log(mode + "rate_weight", rate_weight, prog_bar=True)
 
-        loss[mode + "loss"] = (
+        loss = (
             (prior_log_prob if self.prior is not None else 0)
             + ((rate * rate_weight) if self.prior is not None else 0)
             + (
@@ -149,13 +159,10 @@ class SelfSNE(pl.LightningModule):
             )
         )
 
-        for key in loss.keys():
-            self.log(key, loss[key], prog_bar=True)
-
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.loss(batch, batch_idx, mode="")["loss"]
+        return self.loss(batch, batch_idx, mode="")
 
     def validation_step(self, batch, batch_idx):
         self.loss(batch, batch_idx, mode="val_")

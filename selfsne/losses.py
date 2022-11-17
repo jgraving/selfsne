@@ -185,8 +185,9 @@ class DensityRatioEstimator(nn.Module):
         neg_logits = remove_diagonal(logits)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
+            pos_logits.mean(),
             attraction.mean() * self.attraction_weight
-            + repulsion.mean() * self.repulsion_weight
+            + repulsion.mean() * self.repulsion_weight,
         )
 
 

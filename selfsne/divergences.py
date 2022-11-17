@@ -21,9 +21,9 @@ import torch.nn.functional as F
 from selfsne.utils import logmeanexp, interpolate
 
 
-def categorical_cross_entropy(pos_logits, neg_logits):
+def density_ratio(pos_logits, neg_logits):
     attraction = -pos_logits.mean()
-    repulsion = logmeanexp(neg_logits)
+    repulsion = torch.zeros_like(attraction)
     return attraction, repulsion
 
 
@@ -113,7 +113,7 @@ def softened_reverse_kullback_leibler_divergence(pos_logits, neg_logits):
 
 
 DIVERGENCES = {
-    "categorical": categorical_cross_entropy,
+    "dr": density_ratio,
     "binary": binary_cross_entropy,
     "jsd": jensen_shannon_divergence,
     "rkld": reverse_kullback_leibler_divergence,

@@ -15,35 +15,64 @@
 
 from torch.nn import Module
 import torch.nn.functional as F
+import torch
 import numpy as np
 
 
 def laplace(x, y, scale):
-    return -(x - y).div_(scale).abs_().sum(-1)
+    return torch.pdist(x, y, p=1).div(scale).neg()
+
+
+def pairwise_laplace(x, y, scale):
+    return torch.cdist(x, y.squeeze(), p=1).div(scale).neg()
 
 
 def cauchy(x, y, scale):
-    return -(x - y).div_(scale).pow_(2).sum(-1).log1p_()
+    return torch.pdist(x, y).div(scale).pow(2).log1p().neg()
+
+
+def pairwise_cauchy(x, y, scale):
+    return torch.cdist(x, y.squeeze()).div(scale).pow(2).log1p().neg()
 
 
 def inverse(x, y, scale):
-    return -(x - y).div_(scale).pow_(2).sum(-1).add(1e-5).log_()
+    return torch.pdist(x, y).div(scale).pow(2).add(1e-5).log()
+
+
+def pairwise_inverse(x, y, scale):
+    return torch.cdist(x, y.squeeze()).div(scale).pow(2).add(1e-5).log()
 
 
 def normal(x, y, scale):
-    return -(x - y).div_(scale).pow_(2).div_(2).sum(-1)
+    return torch.pdist(x - y).div(scale).pow(2).div(2).neg()
+
+
+def pairwise_normal(x, y, scale):
+    return torch.cdist(x, y.squeeze()).div(scale).pow(2).neg()
 
 
 def inner_product(x, y, scale):
-    return (x * y).div_(scale).sum(-1)
+    return (x * y).sum(-1).div(scale)
+
+
+def pairwise_inner_product(x, y, scale):
+    return (x @ y.squeeze().T).div(scale)
 
 
 def von_mises(x, y, scale):
     return inner_product(F.normalize(x, dim=-1), F.normalize(y, dim=-1), scale)
 
 
+def pairwise_von_mises(x, y, scale):
+    return pairwise_inner_product(F.normalize(x, dim=-1), F.normalize(y, dim=-1), scale)
+
+
 def wrapped_cauchy(x, y, scale):
-    return -(np.cosh(scale) - von_mises(x, y, 1)).log()
+    return (np.cosh(scale) - von_mises(x, y, 1)).log().neg()
+
+
+def pairwise_wrapped_cauchy(x, y, scale):
+    return (np.cosh(scale) - pairwise_von_mises(x, y, 1)).log().neg()
 
 
 def joint_product(x, y, scale):
@@ -56,13 +85,21 @@ def bhattacharyya(x, y, scale):
 
 KERNELS = {
     "normal": normal,
+    "pairwise_normal": pairwise_normal,
     "student_t": cauchy,
+    "pairwise_student_t": pairwise_cauchy,
     "cauchy": cauchy,
+    "pairwise_cauchy": pairwise_cauchy,
     "inverse": inverse,
+    "pairwise_inverse": pairwise_inverse,
     "laplace": laplace,
+    "pairwise_laplace": pairwise_laplace,
     "von_mises": von_mises,
+    "pairwise_von_mises": pairwise_von_mises,
     "wrapped_cauchy": wrapped_cauchy,
+    "pairwise_wrapped_cauchy": pairwise_wrapped_cauchy,
     "inner_product": inner_product,
+    "pairwise_inner_product": pairwise_inner_product,
     "bhattacharyya": bhattacharyya,
     "joint_product": joint_product,
 }

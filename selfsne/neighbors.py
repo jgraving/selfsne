@@ -78,11 +78,13 @@ class NearestNeighborSampler(Module):
         num_features,
         queue_size=2 ** 15,
         metric="euclidean",
+        perplexity=1,
         freeze_queue_on_full=False,
     ):
         super().__init__()
         self.queue = Queue(num_features, queue_size, freeze_queue_on_full)
         self.metric = METRICS[metric]
+        self.perplexity = perplexity
 
     @torch.no_grad()
     def forward(self, x):
@@ -93,7 +95,18 @@ class NearestNeighborSampler(Module):
                 # set self distances to inf
                 index = torch.arange(x.shape[0], device=x.device)
                 distances[index, index] = np.inf
-            values, indices = torch.topk(distances, 1, dim=-1, largest=False)
-            return queue[indices[:, 0]]
+            perplexity = np.minimum(self.perplexity, queue.shape[0])
+            values, indices = torch.topk(distances, perplexity, dim=-1, largest=False)
+
+            if self.perplexity > 1:
+                idx = torch.arange(indices.shape[0], device=indices.device)
+                jdx = torch.randint(
+                    0, perplexity, (indices.shape[0],), device=indices.device
+                )
+                knn_idx = indices[idx, jdx]
+            else:
+                knn_idx = indices[:, 0]
+            return queue[knn_idx]
+
         else:
             return x

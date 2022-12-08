@@ -49,7 +49,7 @@ import torch.nn.functional as F
 
 from selfsne.kernels import KERNELS
 from selfsne.divergences import DIVERGENCES
-from selfsne.normalizers import NORMALIZERS
+from selfsne.baselines import BASELINES
 from selfsne.utils import remove_diagonal, off_diagonal, stop_gradient
 
 
@@ -84,13 +84,13 @@ class DensityRatioEstimator(nn.Module):
         Must be one of selfsne.divergences.DIVERGENCES.
         For example, "categorical" applies categorical cross entropy, or InfoNCE [2],
         which can be used for t-SNE [4] and SimCLR [6] embeddings,
-        while "binary" applies binary cross entropy, or NEG [4],
+        while "binary" applies binary cross entropy
         which can be used for UMAP [5] embeddings.
 
-    normalizer : float, str, or nn.Module, default = 1
-        The log normalizer for calculating the log density ratio.
-        Must be a float, string (one of selfsne.normalizers.NORMALIZERS),
-        or nn.Module such as from selfsne.normalizers
+    baseline : float, str, or nn.Module, default = 0
+        The baseline for calculating the log density ratio.
+        Must be a float, string (one of selfsne.baselines.BASELINES),
+        or nn.Module such as from selfsne.baselines
 
     attraction_weight: float, default=1.0
         Weighting for the attraction term
@@ -98,9 +98,9 @@ class DensityRatioEstimator(nn.Module):
     repulsion_weight: float, default=1.0
         Weighting for the repulsion term
 
-    normalizer_weight: float, default=1.0
-        Weighting for the normalizer term,
-        where log_normalizer += log(normalizer_weight)
+    baseline_weight: float, default=1.0
+        Weighting for the baseline term,
+        where log_baseline += log(baseline_weight)
 
     References
     ----------
@@ -114,26 +114,22 @@ class DensityRatioEstimator(nn.Module):
         Representation learning with contrastive predictive coding.
         arXiv preprint arXiv:1807.03748.
 
-    [3] Mikolov, T., Sutskever, I., Chen, K., Corrado, G. S., & Dean, J. (2013).
-        Distributed representations of words and phrases and their compositionality.
-        Advances in neural information processing systems, 26.
-
-    [4] Van Der Maaten, L. (2009). Learning a parametric embedding
+    [3] Van Der Maaten, L. (2009). Learning a parametric embedding
         by preserving local structure. In Artificial intelligence
         and statistics (pp. 384-391). PMLR.
 
-    [5] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
+    [4] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
         Parametric UMAP Embeddings for Representation and Semisupervised
         Learning. Neural Computation, 33(11), 2881-2907.
 
-    [6] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
+    [5] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
         Advances in neural information processing systems, 15.
 
-    [7] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020).
+    [6] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020).
         A simple framework for contrastive learning of visual representations.
         In International conference on machine learning (pp. 1597-1607). PMLR.
 
-    [8] Wang, M., & Wang, D. (2016). Vmf-sne: Embedding for spherical
+    [7] Wang, M., & Wang, D. (2016). Vmf-sne: Embedding for spherical
         data. In 2016 IEEE International Conference on Acoustics, Speech
         and Signal Processing (ICASSP) (pp. 2344-2348). IEEE.
 
@@ -144,11 +140,11 @@ class DensityRatioEstimator(nn.Module):
         kernel="studentt",
         kernel_scale=1.0,
         divergence="categorical",
-        normalizer=1,
+        baseline=0,
         remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
-        normalizer_weight=1.0,
+        baseline_weight=1.0,
     ):
         super().__init__()
         if isinstance(kernel, str):
@@ -163,24 +159,24 @@ class DensityRatioEstimator(nn.Module):
         else:
             self.divergence = divergence
 
-        if isinstance(normalizer, str):
-            self.normalizer = NORMALIZERS[normalizer]()
-        elif isinstance(normalizer, (int, float)):
-            self.normalizer = NORMALIZERS["constant"](normalizer)
+        if isinstance(baseline, str):
+            self.baseline = BASELINES[baseline]()
+        elif isinstance(baseline, (int, float)):
+            self.baseline = BASELINES["constant"](baseline)
         else:
-            self.normalizer = normalizer
+            self.baseline = baseline
 
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
-        self.log_normalizer_weight = np.log(normalizer_weight)
+        self.log_baseline_weight = np.log(baseline_weight)
 
     def forward(self, x, y):
         if self.kernel_scale == "auto":
             self.kernel_scale = np.sqrt(x.shape[1])
 
         logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
-        log_normalizer = self.normalizer(y, logits)
-        logits = logits - (log_normalizer + self.log_normalizer_weight)
+        log_baseline = self.baseline(y, logits)
+        logits = logits - (log_baseline + self.log_baseline_weight)
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
@@ -229,14 +225,14 @@ class RedundancyReduction(nn.Module):
 
     def __init__(self, num_features=2, invariance_weight=1.0, redundancy_weight=1.0):
         super().__init__()
-        self.normalizer = nn.BatchNorm1d(num_features, affine=False)
+        self.baseline = nn.BatchNorm1d(num_features, affine=False)
         self.invariance_weight = invariance_weight
         self.redundancy_weight = redundancy_weight
 
     def forward(self, x, y):
         n, d = x.shape
 
-        correlation = self.normalizer(x).T @ self.normalizer(y) / n
+        correlation = self.baseline(x).T @ self.baseline(y) / n
         invariance = diagonal(correlation).add_(-1).pow_(2).mean()  # .sum() / d
         redundancy = off_diagonal(correlation).pow_(2).mean()  # .sum() / (d * d - d)
 

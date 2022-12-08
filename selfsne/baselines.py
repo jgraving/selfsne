@@ -71,7 +71,7 @@ class LogMovingAverage(nn.Module):
             return self.log_moving_average
 
 
-class LogMovingAverageNormalizer(nn.Module):
+class LogMovingAverageBaseline(nn.Module):
     def __init__(
         self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
     ):
@@ -87,55 +87,55 @@ class LogMovingAverageNormalizer(nn.Module):
         return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
 
 
-def MomentumNormalizer(momentum=0.99):
-    return LogMovingAverageNormalizer(momentum=momentum, gradient=False)
+def MomentumBaseline(momentum=0.99):
+    return LogMovingAverageBaseline(momentum=momentum, gradient=False)
 
 
-def GradientMomentumNormalizer(momentum=0.99):
-    return LogMovingAverageNormalizer(momentum=momentum, gradient=True)
+def GradientMomentumBaseline(momentum=0.99):
+    return LogMovingAverageBaseline(momentum=momentum, gradient=True)
 
 
-def BatchNormalizer(momentum=0.99):
-    return LogMovingAverageNormalizer(
+def BatchBaseline(momentum=0.99):
+    return LogMovingAverageBaseline(
         momentum=momentum, gradient=False, ema_forward=False
     )
 
 
-def GradientBatchNormalizer(momentum=0.99):
-    return LogMovingAverageNormalizer(
+def GradientBatchBaseline(momentum=0.99):
+    return LogMovingAverageBaseline(
         momentum=momentum, gradient=True, ema_forward=False, ema_backward=False
     )
 
 
-class GradientConditionalNormalizer(nn.Module):
+class GradientConditionalBaseline(nn.Module):
     def forward(self, y, logits):
         return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
 
 
-class ConditionalNormalizer(GradientConditionalNormalizer):
+class ConditionalBaseline(GradientConditionalBaseline):
     def forward(self, y, logits):
         return logmeanexp(remove_diagonal(stop_gradient(logits)), dim=-1, keepdim=True)
 
 
-class LearnedNormalizer(nn.Module):
+class LearnedBaseline(nn.Module):
     def __init__(self):
         super().__init__()
-        self.log_normalizer = nn.Parameter(torch.zeros(1))
+        self.log_baseline = nn.Parameter(torch.zeros(1))
 
     def forward(self, y, logits):
-        return self.log_normalizer
+        return self.log_baseline
 
 
-class ConstantNormalizer(nn.Module):
-    def __init__(self, normalizer=1):
+class ConstantBaseline(nn.Module):
+    def __init__(self, baseline=1):
         super().__init__()
-        self.register_buffer("log_normalizer", torch.zeros(1) + np.log(normalizer))
+        self.register_buffer("baseline", baseline)
 
     def forward(self, y, logits):
-        return self.log_normalizer
+        return self.baseline
 
 
-class LearnedConditionalNormalizer(nn.Module):
+class LearnedConditionalBaseline(nn.Module):
     def __init__(self, encoder, gradient=False):
         super().__init__()
         self.encoder = encoder
@@ -145,61 +145,61 @@ class LearnedConditionalNormalizer(nn.Module):
         return self.encoder(y if self.gradient else stop_gradient(y))
 
 
-class LogInterpolatedNormalizer(nn.Module):
-    def __init__(self, normalizer_a, normalizer_b, alpha=0.5):
+class LogInterpolatedBaseline(nn.Module):
+    def __init__(self, baseline_a, baseline_b, alpha=0.5):
         super().__init__()
-        self.normalizer_a = normalizer_a
-        self.normalizer_b = normalizer_b
+        self.baseline_a = baseline_a
+        self.baseline_b = baseline_b
         self.register_buffer("alpha_logit", torch.zeros(1).add(alpha).logit())
 
     def forward(self, y, logits):
         return log_interpolate(
-            self.normalizer_a(y, logits), self.normalizer_b(y, logits), self.alpha_logit
+            self.baseline_a(y, logits), self.baseline_b(y, logits), self.alpha_logit
         )
 
 
-class InterpolatedNormalizer(nn.Module):
-    def __init__(self, normalizer_a, normalizer_b, alpha=0.5):
+class InterpolatedBaseline(nn.Module):
+    def __init__(self, baseline_a, baseline_b, alpha=0.5):
         super().__init__()
-        self.normalizer_a = normalizer_a
-        self.normalizer_b = normalizer_b
+        self.baseline_a = baseline_a
+        self.baseline_b = baseline_b
         self.alpha = alpha
 
     def forward(self, y, logits):
         return interpolate(
-            self.normalizer_a(y, logits), self.normalizer_b(y, logits), self.alpha
+            self.baseline_a(y, logits), self.baseline_b(y, logits), self.alpha
         )
 
 
-class AdditiveNormalizer(nn.Module):
-    def __init__(self, normalizers, mean=False):
+class AdditiveBaseline(nn.Module):
+    def __init__(self, baselines, mean=False):
         super().__init__()
-        self.normalizers = nn.ModuleList(normalizers)
-        self.scale = len(normalizers) if mean else 1
+        self.baselines = nn.ModuleList(baselines)
+        self.scale = len(baselines) if mean else 1
         self.log_scale = np.log(self.scale)
 
     def forward(self, y, logits):
-        log_normalizer = 0
-        for normalizer in self.normalizers:
-            log_normalizer = log_normalizer + normalizer(y, logits)
-        return log_normalizer / self.scale
+        log_baseline = 0
+        for baseline in self.baselines:
+            log_baseline = log_baseline + baseline(y, logits)
+        return log_baseline / self.scale
 
 
-class LogAdditiveNormalizer(AdditiveNormalizer):
+class LogAdditiveBaseline(AdditiveBaseline):
     def forward(self, y, logits):
-        log_normalizer = torch.zeros((1), device=y.device)
-        for normalizer in self.normalizers:
-            log_normalizer = torch.logaddexp(log_normalizer, normalizer(y, logits))
-        return log_normalizer - self.log_scale
+        log_baseline = torch.zeros((1), device=y.device)
+        for baseline in self.baselines:
+            log_baseline = torch.logaddexp(log_baseline, baseline(y, logits))
+        return log_baseline - self.log_scale
 
 
-NORMALIZERS = {
-    "batch": BatchNormalizer,
-    "gradient_batch": GradientBatchNormalizer,
-    "conditional": ConditionalNormalizer,
-    "gradient_conditional": GradientConditionalNormalizer,
-    "momentum": MomentumNormalizer,
-    "gradient_momentum": GradientMomentumNormalizer,
-    "learn": LearnedNormalizer,
-    "constant": ConstantNormalizer,
+BASELINES = {
+    "batch": BatchBaseline,
+    "gradient_batch": GradientBatchBaseline,
+    "conditional": ConditionalBaseline,
+    "gradient_conditional": GradientConditionalBaseline,
+    "momentum": MomentumBaseline,
+    "gradient_momentum": GradientMomentumBaseline,
+    "learn": LearnedBaseline,
+    "constant": ConstantBaseline,
 }

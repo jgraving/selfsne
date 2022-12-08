@@ -23,7 +23,7 @@ import numpy as np
 import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
-from selfsne.normalizers import NORMALIZERS
+from selfsne.baselines import BASELINES
 from selfsne.utils import disable_grad, enable_grad, stop_gradient
 
 
@@ -35,7 +35,7 @@ class MixturePrior(pl.LightningModule):
         kernel="normal",
         logits="learn",
         kernel_scale=1.0,
-        normalizer=1,
+        baseline=0,
         lr=1.0,
         scheduler_kwargs={},
     ):
@@ -61,10 +61,10 @@ class MixturePrior(pl.LightningModule):
             logits = torch.zeros((num_components,))
             self.register_buffer("logits", logits)
 
-        if isinstance(normalizer, str):
-            self.normalizer = NORMALIZERS[normalizer]()
+        if isinstance(baseline, str):
+            self.baseline = BASELINES[baseline]()
         else:
-            self.normalizer = NORMALIZERS["constant"](normalizer)
+            self.baseline = BASELINES["constant"](baseline)
 
         self.watershed_locs = nn.Parameter(stop_gradient(self.locs))
         self.watershed_assignments = self.watershed_labels()
@@ -90,7 +90,7 @@ class MixturePrior(pl.LightningModule):
 
     def log_prob(self, x):
         log_prob = self._log_prob(x)
-        return log_prob.unsqueeze(1) - self.normalizer(
+        return log_prob.unsqueeze(1) - self.baseline(
             x, torch.repeat_interleave(log_prob.unsqueeze(0), log_prob.shape[0], dim=0)
         )
 

@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import torch
 from torch.nn import Module
 import torch.nn.functional as F
-import torch
 import numpy as np
 
 
 def laplace(x, y, scale):
-    return torch.pdist(x, y, p=1).div(scale).neg()
+    return (x - y).abs().sum(-1).div(scale).neg()
 
 
 def pairwise_laplace(x, y, scale):
@@ -28,7 +28,7 @@ def pairwise_laplace(x, y, scale):
 
 
 def cauchy(x, y, scale):
-    return torch.pdist(x, y).div(scale).pow(2).log1p().neg()
+    return (x - y).div(scale).pow(2).sum(-1).log1p().neg()
 
 
 def pairwise_cauchy(x, y, scale):
@@ -36,7 +36,7 @@ def pairwise_cauchy(x, y, scale):
 
 
 def inverse(x, y, scale):
-    return torch.pdist(x, y).div(scale).pow(2).add(1e-5).log()
+    return (x - y).div(scale).pow(2).sum(-1).add(1e-5).log()
 
 
 def pairwise_inverse(x, y, scale):
@@ -44,7 +44,7 @@ def pairwise_inverse(x, y, scale):
 
 
 def normal(x, y, scale):
-    return torch.pdist(x - y).div(scale).pow(2).div(2).neg()
+    return (x - y).div(scale).pow(2).sum(-1).div(2).neg()
 
 
 def pairwise_normal(x, y, scale):

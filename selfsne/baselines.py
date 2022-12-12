@@ -127,7 +127,7 @@ class LearnedBaseline(nn.Module):
 
 
 class ConstantBaseline(nn.Module):
-    def __init__(self, baseline=1):
+    def __init__(self, baseline=0):
         super().__init__()
         self.register_buffer("baseline", baseline)
 

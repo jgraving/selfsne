@@ -39,7 +39,11 @@ class SelfSNE(pl.LightningModule):
         similarity_loss=None,
         redundancy_loss=None,
         similarity_weight=1.0,
+        similarity_start_step=0,
+        similarity_warmup_steps=0,
         redundancy_weight=1.0,
+        redundancy_cooldown_steps=0,
+        redundancy_steps=0,
         rate_weight=0.0,
         rate_start_step=0,
         rate_warmup_steps=0,
@@ -105,12 +109,46 @@ class SelfSNE(pl.LightningModule):
 
         if self.similarity_loss is not None:
             density_ratio, similarity = self.similarity_loss(z_x, z_y)
+            if (
+                self.hparams.similarity_start_step
+                < self.current_epoch
+                < self.hparams.similarity_start_step
+                + self.hparams.similarity_warmup_steps
+            ):
+                similarity_weight = self.hparams.similarity_weight * (
+                    (self.current_epoch - self.hparams.similarity_start_step)
+                    / self.hparams.similarity_warmup_steps
+                )
+            elif self.current_epoch > self.hparams.similarity_start_step:
+                similarity_weight = self.hparams.similarity_weight
+            else:
+                similarity_weight = 0
+            self.log(
+                mode + "similarity_weight", float(similarity_weight), prog_bar=True
+            )
+
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
             self.log(mode + "density_ratio", density_ratio.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)
+            if self.current_epoch < self.hparams.redundancy_steps:
+                redundancy_weight = self.hparams.redundancy_weight
+            elif (
+                self.hparams.redundancy_steps
+                < self.current_epoch
+                < self.hparams.redundancy_steps + self.hparams.redundancy_cooldown_steps
+            ):
+                redundancy_weight = 1 - (
+                    (self.current_epoch - self.hparams.redundancy_steps)
+                    / self.hparams.redundancy_cooldown_steps
+                )
+            else:
+                redundancy_weight = 0
             self.log(mode + "redundancy", redundancy.item(), prog_bar=True)
+            self.log(
+                mode + "redundancy_weight", float(redundancy_weight), prog_bar=True
+            )
 
         if self.prior is not None:
             prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
@@ -139,18 +177,18 @@ class SelfSNE(pl.LightningModule):
                 rate_weight = self.hparams.rate_weight
             else:
                 rate_weight = 0
-            self.log(mode + "rate_weight", rate_weight, prog_bar=True)
+            self.log(mode + "rate_weight", float(rate_weight), prog_bar=True)
 
         loss = (
             (prior_log_prob if self.prior is not None else 0)
             + ((rate * rate_weight) if self.prior is not None else 0)
             + (
-                (similarity * self.hparams.similarity_weight)
+                (similarity * similarity_weight)
                 if self.similarity_loss is not None
                 else 0
             )
             + (
-                (redundancy * self.hparams.redundancy_weight)
+                (redundancy * redundancy_weight)
                 if self.redundancy_loss is not None
                 else 0
             )

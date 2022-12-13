@@ -111,12 +111,12 @@ class SelfSNE(pl.LightningModule):
             density_ratio, similarity = self.similarity_loss(z_x, z_y)
             if (
                 self.hparams.similarity_start_step
-                < self.current_epoch
+                <= self.current_epoch
                 < self.hparams.similarity_start_step
                 + self.hparams.similarity_warmup_steps
             ):
                 similarity_weight = self.hparams.similarity_weight * (
-                    (self.current_epoch - self.hparams.similarity_start_step)
+                    (self.current_epoch - self.hparams.similarity_start_step + 1)
                     / self.hparams.similarity_warmup_steps
                 )
             elif self.current_epoch > self.hparams.similarity_start_step:
@@ -132,15 +132,15 @@ class SelfSNE(pl.LightningModule):
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)
-            if self.current_epoch < self.hparams.redundancy_steps:
+            if self.current_epoch <= self.hparams.redundancy_steps:
                 redundancy_weight = self.hparams.redundancy_weight
             elif (
                 self.hparams.redundancy_steps
-                < self.current_epoch
+                <= self.current_epoch
                 < self.hparams.redundancy_steps + self.hparams.redundancy_cooldown_steps
             ):
                 redundancy_weight = 1 - (
-                    (self.current_epoch - self.hparams.redundancy_steps)
+                    (self.current_epoch - self.hparams.redundancy_steps + 1)
                     / self.hparams.redundancy_cooldown_steps
                 )
             else:
@@ -166,11 +166,11 @@ class SelfSNE(pl.LightningModule):
             )
             if (
                 self.hparams.rate_start_step
-                < self.current_epoch
+                <= self.current_epoch
                 < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
             ):
                 rate_weight = self.hparams.rate_weight * (
-                    (self.current_epoch - self.hparams.rate_start_step)
+                    (self.current_epoch - self.hparams.rate_start_step + 1)
                     / self.hparams.rate_warmup_steps
                 )
             elif self.current_epoch > self.hparams.rate_start_step:

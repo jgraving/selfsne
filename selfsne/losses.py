@@ -176,12 +176,12 @@ class DensityRatioEstimator(nn.Module):
 
         logits = self.kernel(x, y.unsqueeze(1), self.kernel_scale)
         log_baseline = self.baseline(y, logits)
-        logits = logits - (log_baseline + self.log_baseline_weight)
+        logits = logits - log_baseline - self.log_baseline_weight
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
-            pos_logits.mean(),
+            pos_logits.mean() + self.log_baseline_weight,
             attraction.mean() * self.attraction_weight
             + repulsion.mean() * self.repulsion_weight,
         )

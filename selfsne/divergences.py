@@ -115,6 +115,7 @@ def softened_reverse_kullback_leibler_divergence(pos_logits, neg_logits):
 DIVERGENCES = {
     "dr": density_ratio,
     "binary": binary_cross_entropy,
+    "bce": binary_cross_entropy,
     "jsd": jensen_shannon_divergence,
     "rkld": reverse_kullback_leibler_divergence,
     "kld": kullback_leibler_divergence,

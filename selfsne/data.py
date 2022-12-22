@@ -23,6 +23,38 @@ import h5py
 from sklearn.datasets import fetch_openml
 
 
+class PairedDataset(Dataset):
+    """A dataset that pairs dataset_a and dataset_b together.
+
+    Parameters
+    dataset_a : iter
+        The dataset_a to be paired with dataset_b.
+    dataset_b : iter
+        The dataset_b to be paired with dataset_a.
+    shuffle : bool, optional
+        Whether to shuffle the dataset_a and dataset_b before returning them in the getitem method. Default is False.
+
+    """
+
+    def __init__(self, dataset_a, dataset_b, shuffle=False):
+        self.dataset_a = dataset_a
+        self.dataset_b = dataset_b
+        self.shuffle = shuffle
+        self.dataset_a_indices = np.arange(len(dataset_a))
+        self.dataset_b_indices = np.arange(len(dataset_b))
+        if shuffle:
+            np.random.shuffle(self.dataset_a_indices)
+            np.random.shuffle(self.dataset_b_indices)
+
+    def __len__(self):
+        return len(self.dataset_a)
+
+    def __getitem__(self, idx):
+        dataset_a_idx = self.dataset_a_indices[idx]
+        dataset_b_idx = self.dataset_b_indices[idx]
+        return self.dataset_a[dataset_a_idx], self.dataset_b[dataset_b_idx]
+
+
 class MNIST(Dataset):
     def __init__(self, return_images=False):
         super().__init__()

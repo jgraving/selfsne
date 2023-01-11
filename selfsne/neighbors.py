@@ -60,8 +60,11 @@ def cross_entropy(x, y):
     return inner_product(x.log().softmax(-1), y.log().log_softmax(-1))
 
 
-def cosine(x, y):
-    return inner_product(F.normalize(x, dim=-1), F.normalize(y, dim=-1))
+def cosine(x, y, eps=1e-8):
+    dot = inner_product(x, y)
+    x_norm = x.norm(dim=-1, keepdim=True)
+    y_norm = y.norm(dim=-1, keepdim=True)
+    return dot / (x_norm * y_norm.T + eps)
 
 
 METRICS = {

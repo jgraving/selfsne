@@ -57,7 +57,7 @@ class EmbeddingDensity:
 
     def embedding_density(self, embedding=None, kernel_scale=1):
         histogram = self.embedding_histogram(embedding)
-        sigma = kernel_scale * self.grid_size_y / self.y_range
+        sigma = kernel_scale  # * self.grid_size_y / self.y_range
         density = gaussian_filter(histogram, sigma=sigma, mode="constant", cval=0)
         return density
 
@@ -105,20 +105,20 @@ class EmbeddingDensity:
 
 def density_colormaps(embedding_densities, colormap="tab10"):
     # Get the colormap
-    cm = plt.get_cmap(colormap)
+    cmap = plt.get_cmap(colormap)
 
     # Initialize the list of density colormaps
     density_colormaps = []
 
     # Iterate over the embedding densities
-    for i, embedding_density in enumerate(embedding_densities):
+    for idx, embedding_density in enumerate(embedding_densities):
         # Normalize the embedding density
         normalized_density = (embedding_density - embedding_density.min()) / (
             embedding_density.max() - embedding_density.min()
         )
 
         # Get the color for the embedding density
-        color = cm(i)[:4]
+        color = cmap(idx)[:4]
 
         # Convert the embedding density to a 4-channel color array by multiplying it by the color
         density_colormap = normalized_density[:, :, np.newaxis] * color
@@ -129,23 +129,22 @@ def density_colormaps(embedding_densities, colormap="tab10"):
     return density_colormaps
 
 
-def highest_density_contours(embedding_densities, largest_contour=True):
+def highest_density_contours(embedding_densities, level=0.9, largest_contour=True):
     # Initialize the list of highest density contours
     highest_density_contours = []
 
     # Iterate over the embedding densities
     for embedding_density in embedding_densities:
         # Calculate the highest density contour for the embedding density
-        highest_density = np.max(embedding_density)
-        contours = find_contours(embedding_density, highest_density)
+        contours = find_contours(embedding_density, level=level)
 
         # Select the largest contour by area, if requested
         if largest_contour and len(contours) > 1:
             areas = [geometry.Polygon(contour).area for contour in contours]
             largest_contour_index = np.argmax(areas)
-            contours = contours[largest_contour_index]
+            contours = [contours[largest_contour_index]]
 
         # Add the selected contours to the list
-        highest_density_contours.append(contours)
+        highest_density_contours.extend(contours)
 
     return highest_density_contours

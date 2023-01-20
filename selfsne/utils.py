@@ -39,6 +39,16 @@ def enable_grad(module):
     set_grad(module, True)
 
 
+def reassign_labels(labels, label_dict):
+    # Create a new array of the same shape as labels
+    new_labels = np.zeros_like(labels)
+
+    for key, value in label_dict.items():
+        # Assign new labels based on the dictionary
+        new_labels[labels == key] = value
+    return new_labels
+
+
 def straight_through_estimator(gradient, estimator):
     return stop_gradient(estimator - gradient) + gradient
 
@@ -50,10 +60,6 @@ def log_interpolate(log_a, log_b, alpha_logit):
         log_a + log_alpha,
         log_b + log1m_alpha,
     )
-
-
-def interpolate(a, b, alpha):
-    return a * alpha + b * (1 - alpha)
 
 
 def logmeanexp(x, dim=None, keepdim=False):

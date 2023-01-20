@@ -52,29 +52,25 @@ def reverse_kullback_leibler_divergence(pos_logits, neg_logits):
     return attraction, repulsion
 
 
-def interpolate_divergences(
-    divergence_a, divergence_b, pos_logits, neg_logits, alpha=0.5
-):
-    attraction_a, repulsion_a = divergence_a(pos_logits, neg_logits)
-    attraction_b, repulsion_b = divergence_b(pos_logits, neg_logits)
-    return (
-        torch.lerp(attraction_a, attraction_b, alpha),
-        torch.lerp(repulsion_a, repulsion_b, alpha),
-    )
+class InterpolateDivergences(nn.Module):
+    def __init__(self, divergence_a, divergence_b, alpha=0.5):
+        super(InterpolateDivergences, self).__init__()
+        self.divergence_a = divergence_a
+        self.divergence_b = divergence_b
+        self.alpha = alpha
+
+    def forward(self, pos_logits, neg_logits):
+        attraction_a, repulsion_a = self.divergence_a(pos_logits, neg_logits)
+        attraction_b, repulsion_b = self.divergence_b(pos_logits, neg_logits)
+        return (
+            torch.lerp(attraction_a, attraction_b, self.alpha),
+            torch.lerp(repulsion_a, repulsion_b, self.alpha),
+        )
 
 
-def interpolate_kullback_leibler_divergence(pos_logits, neg_logits, alpha=0.5):
-    return interpolate_divergences(
-        kullback_leibler_divergence,
-        reverse_kullback_leibler_divergence,
-        pos_logits,
-        neg_logits,
-        alpha,
-    )
-
-
-def jeffreys_divergence(pos_logits, neg_logits):
-    return interpolate_kullback_leibler_divergence(pos_logits, neg_logits, 0.5)
+jeffreys_divergence = InterpolateDivergences(
+    kullback_leibler_divergence, reverse_kullback_leibler_divergence, alpha=0.5
+)
 
 
 def squared_hellinger(pos_logits, neg_logits):

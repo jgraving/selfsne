@@ -20,6 +20,47 @@ from scipy.ndimage import gaussian_filter
 from skimage.measure import find_contours
 import shapely.geometry as geometry
 
+from scipy.optimize import minimize
+from sklearn.decomposition import PCA
+from sklearn.base import BaseEstimator, TransformerMixin
+
+
+class PCAAlign(BaseEstimator, TransformerMixin):
+    def __init__(self, n_components=2, copy=True):
+        self.pca = PCA(n_components, copy=copy)
+
+    def fit(self, X, y=None):
+        self.pca.fit(X)
+        eigenvectors = self.pca.components_
+        signs = np.sign(eigenvectors[0])
+        self.pca.components_ = eigenvectors * signs
+        return self
+
+    def transform(self, X):
+        return self.pca.transform(X)
+
+
+def align_embeddings(reference_embedding, embedding):
+    def cost_function(params):
+        theta = params[0]
+        rotation_matrix = np.array(
+            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+        )
+        rotated_embedding = np.matmul(embedding, rotation_matrix)
+        return np.linalg.norm(
+            rotated_embedding / np.linalg.norm(rotated_embedding)
+            - reference_embedding / np.linalg.norm(reference_embedding)
+        )
+
+    initial_guess = [0]
+    result = minimize(cost_function, initial_guess, method="BFGS")
+    theta = result.x[0]
+    rotation_matrix = np.array(
+        [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+    )
+    rotated_embedding = np.matmul(embedding, rotation_matrix)
+    return rotated_embedding
+
 
 class EmbeddingDensity:
     def __init__(self, embedding, limit_margin=0.1, grid_size=100):

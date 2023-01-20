@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from selfsne.utils import logmeanexp, interpolate
+from selfsne.utils import logmeanexp
 
 
 def density_ratio(pos_logits, neg_logits):

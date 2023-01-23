@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
@@ -23,9 +22,34 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import spearmanr
 from sklearn.neighbors import KDTree
 from sklearn.metrics import r2_score, f1_score
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 
 from selfsne.data import PairedDataset
+
+
+class R2Score:
+    def __init__(self):
+        self.mean_ = None
+
+    def fit(self, X):
+        self.mean_ = np.mean(X, axis=0)
+
+    def transform(self, y_true, y_pred):
+        ss_res = np.sum((y_true - y_pred) ** 2, axis=1, keepdims=True)
+        ss_tot = np.sum((y_true - self.mean_) ** 2, axis=1, keepdims=True)
+        r2 = 1 - (ss_res / ss_tot)
+        return r2
+
+
+class GibbsR2Score(R2Score):
+    def __init__(self):
+        super().__init__()
+
+    def transform(self, y_true, y_pred):
+        ss_res = np.sum((y_true * np.log(y_true) - y_true * np.log(y_pred)), axis=1)
+        ss_tot = np.sum((y_true * np.log(y_true) - y_true * np.log(self.mean_)), axis=1)
+        r2 = 1 - (ss_res / ss_tot)
+        return r2
 
 
 def calculate_pairwise_distance_correlation(
@@ -76,7 +100,14 @@ def calculate_pairwise_distance_correlation(
 
 
 def knn_probe_reconstruction(
-    dataset, embedding, k=10, batch_size=1000, verbose=True, shuffle=False
+    dataset,
+    embedding,
+    metric,
+    k=1,
+    batch_size=1000,
+    verbose=True,
+    shuffle=False,
+    num_workers=1,
 ):
     """Calculate the mean R^2 score for a KNN model trained on high dimensional data and an embedding, assessing the ability of the embedding to reconstruct the data using the K nearest neighbors.
 
@@ -86,6 +117,8 @@ def knn_probe_reconstruction(
         The high dimensional data.
     embedding : np.ndarray
         The low dimensional embedding of the data.
+    metric : class
+        Initialized class with transform method accepting y_true, y_pred
     k : int, optional
         The number of nearest neighbors to consider. Default is 10.
     batch_size : int, optional
@@ -101,23 +134,29 @@ def knn_probe_reconstruction(
         The mean R^2 score of the KNN model.
     """
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    dataloader = DataLoader(
+        paired_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=True,
+    )
     embedding_tree = KDTree(embedding)
-    knn_r2 = []
+
     if verbose:
-        dataloader = tqdm(dataloader)
+        prog_bar = tqdm(total=len(dataloader))
+    knn_metric = []
     for data, embedding_batch in dataloader:
         data = data.numpy()
         embedding_batch = embedding_batch.numpy()
-        knn_indices = embedding_tree.query(embedding_batch, k=k, return_distance=False)
-        knn_means = []
-        for i, point in enumerate(embedding_batch):
-            point_knn_indices = knn_indices[i]
-            knn_data = np.array([dataset[idx] for idx in point_knn_indices])
-            knn_means.append(np.mean(knn_data, axis=0))
-        knn_means = np.array(knn_means)
-        knn_r2.append(r2_score(data, knn_means))
-    return np.mean(knn_r2)
+        knn_indices = embedding_tree.query(
+            embedding_batch, k=k + 1, return_distance=False
+        )[:, 1:]
+        knn_data = dataset[knn_indices]
+        knn = np.mean(knn_data, axis=1)
+        knn_metric.append(metric.transform(data, knn))
+        if verbose:
+            prog_bar.update(1)
+    return np.array(knn_metric)
 
 
 def linear_probe_reconstruction(

@@ -35,16 +35,14 @@ class SelfSNE(pl.LightningModule):
         projector_x=nn.Identity(),
         pair_sampler=None,
         projector=nn.Identity(),
+        decoder=nn.Identity(),
         prior=None,
         similarity_loss=None,
         redundancy_loss=None,
+        reconstruction_loss=None,
         similarity_weight=1.0,
-        similarity_start_step=0,
-        similarity_warmup_steps=0,
         redundancy_weight=1.0,
-        redundancy_cooldown_steps=0,
-        redundancy_steps=0,
-        rate_weight=0.0,
+        rate_weight=1.0,
         rate_start_step=0,
         rate_warmup_steps=0,
         learning_rate=1e-3,
@@ -54,6 +52,7 @@ class SelfSNE(pl.LightningModule):
         nesterov=False,
         weight_decay=0.0,
         projector_weight_decay=0.0,
+        decoder_weight_decay=0.0,
         lr_scheduler=False,
         lr_warmup_steps=10,
         lr_target_steps=10,
@@ -65,19 +64,22 @@ class SelfSNE(pl.LightningModule):
         self.kwargs = locals()
         super().__init__()
         self.encoder = encoder
+        self.projector = projector
         self.encoder_x = encoder_x
         self.projector_x = projector_x
-        self.projector = projector
+        self.decoder = decoder
         self.pair_sampler = pair_sampler
         self.prior = prior
         self.similarity_loss = similarity_loss
         self.redundancy_loss = redundancy_loss
+        self.reconstruction_loss = reconstruction_loss
         self.save_hyperparameters(
             ignore=[
                 "encoder",
                 "projector",
                 "encoder_x",
                 "projector_x",
+                "decoder",
                 "pair_sampler",
                 "prior",
                 "baseline",
@@ -109,46 +111,17 @@ class SelfSNE(pl.LightningModule):
 
         if self.similarity_loss is not None:
             density_ratio, similarity = self.similarity_loss(z_x, z_y)
-            if (
-                self.hparams.similarity_start_step
-                <= self.current_epoch
-                < self.hparams.similarity_start_step
-                + self.hparams.similarity_warmup_steps
-            ):
-                similarity_weight = self.hparams.similarity_weight * (
-                    (self.current_epoch - self.hparams.similarity_start_step + 1)
-                    / self.hparams.similarity_warmup_steps
-                )
-            elif self.current_epoch > self.hparams.similarity_start_step:
-                similarity_weight = self.hparams.similarity_weight
-            else:
-                similarity_weight = 0
-            self.log(
-                mode + "similarity_weight", float(similarity_weight), prog_bar=True
-            )
-
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
             self.log(mode + "density_ratio", density_ratio.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)
-            if self.current_epoch <= self.hparams.redundancy_steps:
-                redundancy_weight = self.hparams.redundancy_weight
-            elif (
-                self.hparams.redundancy_steps
-                <= self.current_epoch
-                < self.hparams.redundancy_steps + self.hparams.redundancy_cooldown_steps
-            ):
-                redundancy_weight = 1 - (
-                    (self.current_epoch - self.hparams.redundancy_steps + 1)
-                    / self.hparams.redundancy_cooldown_steps
-                )
-            else:
-                redundancy_weight = 0
             self.log(mode + "redundancy", redundancy.item(), prog_bar=True)
-            self.log(
-                mode + "redundancy_weight", float(redundancy_weight), prog_bar=True
-            )
+
+        if self.reconstruction_loss is not None:
+            y_hat = self.decoder(stop_gradient(z_y))
+            reconstruction = self.reconstruction_loss(y_hat, y).mean()
+            self.log(mode + "reconstruction", reconstruction.item(), prog_bar=True)
 
         if self.prior is not None:
             prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
@@ -183,15 +156,16 @@ class SelfSNE(pl.LightningModule):
             (prior_log_prob if self.prior is not None else 0)
             + ((rate * rate_weight) if self.prior is not None else 0)
             + (
-                (similarity * similarity_weight)
+                (similarity * self.hparams.similarity_weight)
                 if self.similarity_loss is not None
                 else 0
             )
             + (
-                (redundancy * redundancy_weight)
+                (redundancy * self.hparams.redundancy_weight)
                 if self.redundancy_loss is not None
                 else 0
             )
+            + (reconstruction if self.reconstruction_loss is not None else 0)
         )
 
         return loss
@@ -239,6 +213,14 @@ class SelfSNE(pl.LightningModule):
 
         if self.redundancy_loss is not None:
             params_list.append({"params": self.redundancy_loss.parameters()})
+
+        if self.reconstruction_loss is not None:
+            params_list.append(
+                {
+                    "params": self.decoder.parameters(),
+                    "weight_decay": self.hparams.decoder_weight_decay,
+                }
+            )
 
         if self.prior is not None:
             params_list.append(

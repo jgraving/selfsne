@@ -70,7 +70,7 @@ class DensityRatioEstimator(nn.Module):
     kernel: str
         Similarity kernel used for calculating logits.
         Must be one of selfsne.kernels.KERNELS.
-        For example, "studentt" can be used to produce t-SNE [4] or UMAP [5]
+        For example, "cauchy" can be used to produce t-SNE [4] or UMAP [5]
         embeddings, "normal" can be used to produce SNE [6] embeddings,
         and "vonmises" can be used for (hyper)spherical embeddings [7, 8].
 
@@ -82,10 +82,6 @@ class DensityRatioEstimator(nn.Module):
     divergence: str
         Divergence function used for instance classification.
         Must be one of selfsne.divergences.DIVERGENCES.
-        For example, "categorical" applies categorical cross entropy, or InfoNCE [2],
-        which can be used for t-SNE [4] and SimCLR [6] embeddings,
-        while "binary" applies binary cross entropy
-        which can be used for UMAP [5] embeddings.
 
     baseline : float, str, or nn.Module, default = 0
         The baseline for calculating the log density ratio.
@@ -137,11 +133,10 @@ class DensityRatioEstimator(nn.Module):
 
     def __init__(
         self,
-        kernel="studentt",
+        kernel="cauchy",
         kernel_scale=1.0,
-        divergence="categorical",
+        divergence="kld",
         baseline=0,
-        remove_diagonal=True,
         attraction_weight=1.0,
         repulsion_weight=1.0,
         baseline_weight=1.0,

@@ -92,14 +92,18 @@ class EmbeddingDensity:
 
         # Create a 2D histogram of the embedding using the x_grid and y_grid
         histogram, _, _ = np.histogram2d(
-            embedding[:, 0], embedding[:, 1], bins=[self.x_grid, self.y_grid]
+            embedding[:, 0],
+            embedding[:, 1],
+            bins=[self.x_grid, self.y_grid],
+            density=True,
         )
         return histogram
 
     def embedding_density(self, embedding=None, kernel_scale=1):
         histogram = self.embedding_histogram(embedding)
-        sigma = kernel_scale  # * self.grid_size_y / self.y_range
-        density = gaussian_filter(histogram, sigma=sigma, mode="constant", cval=0)
+        density = gaussian_filter(
+            histogram, sigma=kernel_scale, mode="constant", cval=0
+        )
         return density
 
     def conditional_embedding_density(
@@ -144,7 +148,9 @@ class EmbeddingDensity:
         return conditional_densities
 
 
-def density_colormaps(embedding_densities, colormap="tab10"):
+def density_colormaps(
+    embedding_densities, conditional_normalize=True, colormap="tab10"
+):
     # Get the colormap
     cmap = plt.get_cmap(colormap)
 
@@ -154,9 +160,10 @@ def density_colormaps(embedding_densities, colormap="tab10"):
     # Iterate over the embedding densities
     for idx, embedding_density in enumerate(embedding_densities):
         # Normalize the embedding density
-        normalized_density = (embedding_density - embedding_density.min()) / (
-            embedding_density.max() - embedding_density.min()
-        )
+        if conditional_normalize:
+            normalized_density = embedding_density / embedding_density.max()
+        else:
+            normalized_density = embedding_density / np.max(embedding_densities)
 
         # Get the color for the embedding density
         color = cmap(idx)[:4]

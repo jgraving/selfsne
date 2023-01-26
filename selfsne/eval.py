@@ -13,138 +13,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.optim as optim
 
-from scipy.spatial.distance import pdist, squareform
-from scipy.stats import spearmanr
+from scipy.spatial.distance import pdist, cdist
+from scipy.stats import spearmanr, pearsonr, mode
 from sklearn.neighbors import KDTree
-from sklearn.metrics import r2_score, f1_score
+from sklearn.metrics import f1_score, balanced_accuracy_score
 from tqdm.autonotebook import tqdm
 
 from selfsne.data import PairedDataset
 
 
-class R2Score:
-    def __init__(self):
-        self.mean_ = None
-
-    def fit(self, X):
-        self.mean_ = np.mean(X, axis=0)
-
-    def transform(self, y_true, y_pred):
-        ss_res = np.sum((y_true - y_pred) ** 2, axis=1, keepdims=True)
-        ss_tot = np.sum((y_true - self.mean_) ** 2, axis=1, keepdims=True)
-        r2 = 1 - (ss_res / ss_tot)
-        return r2
-
-
-class GibbsR2Score(R2Score):
-    def __init__(self):
+class R2Score(nn.Module):
+    def __init__(self, error):
         super().__init__()
+        self.mean_ = None
+        self.error = error
 
-    def transform(self, y_true, y_pred):
-        ss_res = np.sum((y_true * np.log(y_true) - y_true * np.log(y_pred)), axis=1)
-        ss_tot = np.sum((y_true * np.log(y_true) - y_true * np.log(self.mean_)), axis=1)
-        r2 = 1 - (ss_res / ss_tot)
-        return r2
+    def fit(self, x):
+        self.mean_ = np.mean(x, axis=0)
+
+    def forward(self, y_true, y_pred):
+        res_error = self.error(y_true, y_pred)
+        total_error = self.error(y_true, self.mean_)
+        return np.mean(1 - (res_error / total_error))
 
 
-def calculate_pairwise_distance_correlation(
-    dataset,
-    embedding,
-    batch_size=1000,
-    correlation_type="spearman",
-    verbose=True,
-    shuffle=False,
-):
-    """Calculate the mean pairwise distance correlation between the original data and the embedding.
+def kl_divergence(y_true, y_pred):
+    return np.sum((y_true * np.log(y_true) - y_true * np.log(y_pred)), axis=1)
 
-    Parameters
-    ----------
-    dataset : np.ndarray
-        The original high dimensional data.
-    embedding : np.ndarray
-        The low dimensional embedding of the data.
-    batch_size : int, optional
-        The size of the batches to use when calculating the correlations. Default is 1000.
-    correlation_type : str, optional
-        The type of correlation to use. Can be 'spearman' or 'pearson'. Default is 'spearman'.
-    verbose : bool, optional
-        Whether to display a progress bar. Default is True.
-    shuffle : bool, optional
-        Whether to shuffle the data before creating the batches. Default is False.
 
-    Returns
-    -------
-    float
-        The mean pairwise distance correlation.
-    """
-    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-    correlations = []
-    if verbose:
-        dataloader = tqdm(dataloader)
-    for data, embedding_batch in dataloader:
-        data = data.numpy()
-        data_distances = pdist(data)
-        embedding_distances = pdist(embedding_batch)
-        if correlation_type == "spearman":
-            rho, p = spearmanr(data_distances, embedding_distances)
-        elif correlation_type == "pearson":
-            rho, p = pearsonr(data_distances, embedding_distances)
-        correlations.append(rho)
-    return np.mean(correlations)
+class CrossEntropy(nn.Module):
+    def forward(self, input, target):
+        return -target.mul(input.log()).sum(-1).mean()
 
 
 def knn_probe_reconstruction(
     dataset,
     embedding,
-    metric,
+    error,
     k=1,
     batch_size=1000,
     verbose=True,
     shuffle=False,
-    num_workers=1,
 ):
-    """Calculate the mean R^2 score for a KNN model trained on high dimensional data and an embedding, assessing the ability of the embedding to reconstruct the data using the K nearest neighbors.
-
-    Parameters
-    ----------
-    dataset : np.ndarray
-        The high dimensional data.
-    embedding : np.ndarray
-        The low dimensional embedding of the data.
-    metric : class
-        Initialized class with transform method accepting y_true, y_pred
-    k : int, optional
-        The number of nearest neighbors to consider. Default is 10.
-    batch_size : int, optional
-        The batch size for training. Default is 1000.
-    verbose : bool, optional
-        Whether to display a progress bar during training. Default is True.
-    shuffle : bool, optional
-        Whether to shuffle the data and embedding before training. Default is False.
-
-    Returns
-    -------
-    float
-        The mean R^2 score of the KNN model.
-    """
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(
-        paired_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        shuffle=True,
-    )
+    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
     embedding_tree = KDTree(embedding)
-
+    r2_score = R2Score(error)
+    r2_score.fit(dataset)
     if verbose:
         prog_bar = tqdm(total=len(dataloader))
-    knn_metric = []
+    y_pred = []
     for data, embedding_batch in dataloader:
         data = data.numpy()
         embedding_batch = embedding_batch.numpy()
@@ -153,221 +77,303 @@ def knn_probe_reconstruction(
         )[:, 1:]
         knn_data = dataset[knn_indices]
         knn = np.mean(knn_data, axis=1)
-        knn_metric.append(metric.transform(data, knn))
+        y_pred.append(knn)
         if verbose:
             prog_bar.update(1)
-    return np.array(knn_metric)
+    return r2_score(dataset, np.concatenate(y_pred))
+
+
+def knn_probe_classification(
+    labels,
+    embedding,
+    k=1,
+    batch_size=1000,
+    verbose=True,
+    shuffle=False,
+):
+    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
+    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    embedding_tree = KDTree(embedding)
+    if verbose:
+        prog_bar = tqdm(total=len(dataloader))
+    y_pred = []
+    for data, embedding_batch in dataloader:
+        data = data.numpy()
+        embedding_batch = embedding_batch.numpy()
+        knn_indices = embedding_tree.query(
+            embedding_batch, k=k + 1, return_distance=False
+        )[:, 1:]
+        knn_labels = labels[knn_indices]
+        knn = mode(knn_labels, axis=1)[0]
+        y_pred.append(knn)
+        if verbose:
+            prog_bar.update(1)
+    y_pred = np.concatenate(y_pred)
+    f1 = f1_score(labels, y_pred, average="weighted")
+    acc = balanced_accuracy_score(labels, y_pred, adjusted=True)
+    return acc, f1
 
 
 def linear_probe_reconstruction(
     dataset,
     embedding,
+    loss,
+    error,
+    link=nn.Identity(),
     epochs=100,
     batch_size=1000,
     verbose=True,
     shuffle=False,
-    tol=1e-10,
+    tol=1e-3,
 ):
-    """Calculate the mean R^2 score for a linear regression model trained on high dimensional data and an embedding, assessing the ability of the embedding to linearly reconstruct the data.
-
-    Parameters
-    ----------
-    dataset : np.ndarray
-        The high dimensional data.
-    embedding : np.ndarray
-        The low dimensional embedding of the data.
-    epochs : int, optional
-        The number of training epochs. Default is 5.
-    batch_size : int, optional
-        The batch size for training. Default is 1000.
-    verbose : bool, optional
-        Whether to display a progress bar during training. Default is True.
-    shuffle : bool, optional
-        Whether to shuffle the data and embedding before training. Default is False.
-    tol : float, optional
-        The tolerance threshold for early stopping. The training loop will stop if the change in mean loss between epochs is less than this threshold. Default is 1e-10.
-
-    Returns
-    -------
-    float
-        The mean R^2 score of the linear regression model.
-    """
-    model = nn.Linear(embedding.shape[1], dataset.shape[1])
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1)
+    model = nn.Sequential(
+        nn.BatchNorm1d(embedding.shape[1], momentum=None, affine=False),
+        nn.Linear(embedding.shape[1], dataset.shape[1]),
+        link,
+    )
+    optimizer = optim.Adam(model.parameters(), lr=0.1)
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    dataloader = DataLoader(
+        paired_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=True,
+        drop_last=True,
+    )
+
+    r2_score = R2Score(error)
+    r2_score.fit(dataset)
 
     mean_loss_values = []
-    for epoch in tqdm(range(epochs)):
+
+    epoch_prog_bar = tqdm(total=len(dataloader), desc="Batch", leave=False, position=1)
+
+    patience = 0
+    for epoch in tqdm(range(epochs), desc="Epoch"):
         mean_loss = 0
         for data, embedding_batch in dataloader:
             data = data.float()
             embedding_batch = embedding_batch.float()
             optimizer.zero_grad()
             output = model(embedding_batch)
-            loss = criterion(output, data)
-            loss.backward()
+            batch_loss = loss(output, data)
+            batch_loss.backward()
             optimizer.step()
-            loss = loss.item()
-            mean_loss += loss
+            batch_loss = batch_loss.item()
+            mean_loss += batch_loss
+            epoch_prog_bar.update(1)
+            epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+        epoch_prog_bar.refresh()
+
+        epoch_prog_bar.reset()
         mean_loss /= len(dataloader)
         mean_loss_values.append(mean_loss)
+        if epoch > 1:
+            if np.abs((mean_loss - mean_loss_values[-1]) / mean_loss_values[-1]) < tol:
+                patience += 1
+            else:
+                patience = 0
+            if patience > 2:
+                break
+    epoch_prog_bar.close()
 
-    r2_scores = []
+    metric_values = []
+    model.eval()
+    if verbose:
+        prog_bar = tqdm(total=len(dataloader))
+        print("running eval")
+    y_true = []
+    y_pred = []
     for data, embedding_batch in dataloader:
         data = data.float()
         embedding_batch = embedding_batch.float()
-        model.eval()
-        output = model(embedding_batch).detach().numpy()
-        r2_scores.append(r2_score(data.detach().numpy(), output))
+        y_pred.append(model(embedding_batch).detach().numpy())
+        y_true.append(data.numpy())
+        prog_bar.update(1)
+    return r2_score(np.concatenate(y_true), np.concatenate(y_pred))
 
-    return np.mean(r2_scores)
 
-
-def linear_probe_classification_accuracy(
-    embedding,
+def linear_probe_classification(
     labels,
+    embedding,
     epochs=100,
     batch_size=1000,
     verbose=True,
     shuffle=False,
-    tol=1e-10,
+    tol=1e-3,
 ):
-    """Calculate the classification accuracy for a linear classifier trained on an embedding and class labels.
-
-    Parameters
-    ----------
-    labels : np.ndarray
-        The class labels for the data.
-    embedding : np.ndarray
-        The low dimensional embedding of the data.
-    epochs : int, optional
-        The number of training epochs. Default is 5.
-    batch_size : int, optional
-        The batch size for training. Default is 1000.
-    verbose : bool, optional
-        Whether to display a progress bar during training. Default is True.
-    shuffle : bool, optional
-        Whether to shuffle the data and embedding before training. Default is False.
-    tol : float, optional
-        The tolerance threshold for early stopping. The training loop will stop if the change in mean loss between epochs is less than this threshold. Default is 1e-10.
-
-    Returns
-    -------
-    float
-        The classification accuracy of the linear classifier.
-    """
     # Get number of classes
     num_classes = np.unique(labels).shape[0]
+    loss = nn.CrossEntropyLoss()
+    model = nn.Sequential(
+        nn.BatchNorm1d(embedding.shape[1], momentum=None, affine=False),
+        nn.Linear(embedding.shape[1], num_classes),
+    )
+    optimizer = optim.Adam(model.parameters(), lr=0.1)
+    paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
+    dataloader = DataLoader(
+        paired_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=True,
+        drop_last=True,
+    )
 
-    # Define the model
-    model = nn.Linear(embedding.shape[1], num_classes)
+    mean_loss_values = []
 
-    # Define the loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1)
+    epoch_prog_bar = tqdm(total=len(dataloader), desc="Batch", leave=False, position=1)
 
-    # Create a paired dataset of embedding and labels
-    paired_dataset = PairedDataset(embedding, labels, shuffle=shuffle)
-
-    # Create a data loader from the paired dataset
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-
-    # Training loop
-    for epoch in tqdm(range(epochs)):
-        for embedding_batch, label_batch in dataloader:
-            embedding_batch = embedding_batch.float()
+    patience = 0
+    for epoch in tqdm(range(epochs), desc="Epoch"):
+        mean_loss = 0
+        for label_batch, embedding_batch in dataloader:
             label_batch = label_batch.long()
+            embedding_batch = embedding_batch.float()
             optimizer.zero_grad()
             output = model(embedding_batch)
-            loss = criterion(output, label_batch)
-            loss.backward()
+            batch_loss = loss(output, label_batch)
+            batch_loss.backward()
             optimizer.step()
+            batch_loss = batch_loss.item()
+            mean_loss += batch_loss
+            epoch_prog_bar.update(1)
+            epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+        epoch_prog_bar.refresh()
 
-    # Calculate the accuracy of the linear classifier on the entire dataset
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for embedding_batch, label_batch in dataloader:
-            embedding_batch = embedding_batch.float()
-            label_batch = label_batch.long()
-            output = model(embedding_batch)
-            _, predicted = torch.max(output.data, 1)
-            total += label_batch.size(0)
-            correct += (predicted == label_batch).sum().item()
+        epoch_prog_bar.reset()
+        mean_loss /= len(dataloader)
+        mean_loss_values.append(mean_loss)
+        if epoch > 1:
+            if np.abs((mean_loss - mean_loss_values[-1]) / mean_loss_values[-1]) < tol:
+                patience += 1
+            else:
+                patience = 0
+            if patience > 2:
+                break
+    epoch_prog_bar.close()
 
-    return correct / total
+    model.eval()
+    if verbose:
+        prog_bar = tqdm(total=len(dataloader))
+        print("running eval")
+
+    y_true = []
+    y_pred = []
+    for label_batch, embedding_batch in dataloader:
+        label_batch = label_batch.long()
+        embedding_batch = embedding_batch.float()
+        output = model(embedding_batch)
+        _, predicted = torch.max(output, 1)
+        y_true.extend(label_batch.tolist())
+        y_pred.extend(predicted.tolist())
+        if verbose:
+            prog_bar.update(1)
+    f1 = f1_score(y_true, y_pred, average="weighted")
+    acc = balanced_accuracy_score(y_true, y_pred, adjusted=True)
+    return acc, f1
 
 
-def linear_probe_classification_f1_score(
+def pdist_no_diag(data):
+    # compute pairwise distances
+    distances = pdist(data)
+    n = data.shape[0]
+    # create a boolean mask of self-distances
+    mask = (np.arange(len(distances)) % n) != ((np.arange(len(distances)) // n))
+    # remove self-distance values
+    distances = distances[mask]
+    return distances
+
+
+def pairwise_distance_correlation(
+    dataset,
     embedding,
-    labels,
-    epochs=100,
     batch_size=1000,
+    num_batches=None,
+    correlation="spearman",
+    transform=lambda x: x,
     verbose=True,
     shuffle=False,
-    tol=1e-10,
 ):
-    """Calculate the F1 score for a linear classifier trained on an embedding and class labels.
-
-    Parameters
-        labels : np.ndarray
-    The class labels for the data.
-    embedding : np.ndarray
-        The low dimensional embedding of the data.
-    epochs : int, optional
-        The number of training epochs. Default is 5.
-    batch_size : int, optional
-        The batch size for training. Default is 1000.
-    verbose : bool, optional
-        Whether to display a progress bar during training. Default is True.
-    shuffle : bool, optional
-        Whether to shuffle the data and embedding before training. Default is False.
-    tol : float, optional
-        The tolerance threshold for early stopping. The training loop will stop if the change in mean loss between epochs is less than this threshold. Default is 1e-10.
-
-    Returns
-    float
-    The F1 score of the linear classifier.
-    """
-    # Get number of classes
-    num_classes = np.unique(labels).shape[0]
-
-    # Define the model
-    model = nn.Linear(embedding.shape[1], num_classes)
-
-    # Define the loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1)
-
-    # Create a paired dataset of embedding and labels
-    paired_dataset = PairedDataset(embedding, labels, shuffle=shuffle)
-
-    # Create a data loader from the paired dataset
+    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    if num_batches is None:
+        num_batches = len(dataloader)
+    if verbose:
+        prog_bar = tqdm(total=num_batches)
+    data_distances = []
+    embedding_distances = []
+    for idx, (data, embedding_batch) in enumerate(dataloader):
+        data = data.numpy()
+        data_distances_ = transform(pdist_no_diag(data))
+        embedding_distances_ = transform(pdist_no_diag(embedding_batch))
+        data_distances.append(data_distances_)
+        embedding_distances.append(embedding_distances_)
+        if verbose:
+            prog_bar.update(1)
+        if idx >= num_batches - 1:
+            prog_bar.refresh()
+            prog_bar.close()
+            break
+    if correlation == "spearman":
+        rho, p = spearmanr(
+            np.concatenate(data_distances), np.concatenate(embedding_distances)
+        )
+    elif correlation == "pearson":
+        rho, p = pearsonr(
+            np.concatenate(data_distances), np.concatenate(embedding_distances)
+        )
 
-    # Training loop
-    for epoch in tqdm(range(epochs)):
-        for embedding_batch, label_batch in dataloader:
-            embedding_batch = embedding_batch.float()
-            label_batch = label_batch.long()
-            optimizer.zero_grad()
-            output = model(embedding_batch)
-            loss = criterion(output, label_batch)
-            loss.backward()
-            optimizer.step()
+    return rho
 
-    # Calculate the F1 score of the linear classifier on the entire dataset
-    predicted_labels = []
-    true_labels = []
-    with torch.no_grad():
-        for embedding_batch, label_batch in dataloader:
-            embedding_batch = embedding_batch.float()
-            label_batch = label_batch.long()
-            output = model(embedding_batch)
-            _, predicted = torch.max(output.data, 1)
-            predicted_labels.extend(predicted.tolist())
-            true_labels.extend(label_batch.tolist())
 
-    return f1_score(true_labels, predicted_labels, average="weighted")
+def knn_distance_correlation(
+    dataset,
+    embedding,
+    k=1,
+    batch_size=1000,
+    num_batches=None,
+    correlation="pearson",
+    transform=lambda x: x,
+    verbose=True,
+    shuffle=False,
+):
+    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
+    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    embedding_tree = KDTree(embedding)
+    if num_batches is None:
+        num_batches = len(dataloader)
+    if verbose:
+        prog_bar = tqdm(total=num_batches)
+    data_distances = []
+    embedding_distances = []
+    for idx, (data, embedding_batch) in enumerate(dataloader):
+        data = data.numpy()
+        embedding_batch = embedding_batch.numpy()
+        knn_indices = embedding_tree.query(
+            embedding_batch, k=k + 1, return_distance=False
+        )[:, 1:]
+        knn_embedding = embedding[knn_indices]
+        knn_data = dataset[knn_indices]
+        data_distances_ = transform(
+            np.linalg.norm(data[:, np.newaxis] - knn_data, axis=-1)
+        ).ravel()
+        embedding_distances_ = transform(
+            np.linalg.norm(embedding_batch[:, np.newaxis] - knn_embedding, axis=-1)
+        ).ravel()
+        data_distances.append(data_distances_)
+        embedding_distances.append(embedding_distances_)
+        if verbose:
+            prog_bar.update(1)
+        if idx >= num_batches - 1:
+            prog_bar.refresh()
+            prog_bar.close()
+            break
+    if correlation == "spearman":
+        rho, p = spearmanr(
+            np.concatenate(data_distances), np.concatenate(embedding_distances)
+        )
+    if correlation == "pearson":
+        rho, p = pearsonr(
+            np.concatenate(data_distances), np.concatenate(embedding_distances)
+        )
+    return rho

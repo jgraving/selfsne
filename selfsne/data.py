@@ -149,12 +149,15 @@ class MemMapSequence(Dataset):
 class MemMap(Dataset):
     def __init__(self, file):
         super(MemMap, self).__init__()
-        self.data = np.load(file, mmap_mode="r")
+        self.file = file
+        self.data = None
 
     def __len__(self):
-        return len(self.data)
+        return np.load(self.file, mmap_mode="r").shape[0]
 
     def __getitem__(self, idx):
+        if self.data is None:
+            self.data = np.load(self.file, mmap_mode="r")
         return np.array(self.data[idx])
 
 

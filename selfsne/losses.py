@@ -182,9 +182,6 @@ class DensityRatioEstimator(nn.Module):
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
         if self.num_negatives:
-            assert (
-                self.num_negatives < neg_logits.shape[1]
-            ), "num_negatives must be less than the number of available negative samples"
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (

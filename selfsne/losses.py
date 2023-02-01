@@ -50,7 +50,12 @@ import torch.nn.functional as F
 from selfsne.kernels import KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
-from selfsne.utils import remove_diagonal, off_diagonal, stop_gradient
+from selfsne.utils import (
+    remove_diagonal,
+    off_diagonal,
+    stop_gradient,
+    random_sample_columns,
+)
 
 
 class DensityRatioEstimator(nn.Module):
@@ -140,6 +145,7 @@ class DensityRatioEstimator(nn.Module):
         attraction_weight=1.0,
         repulsion_weight=1.0,
         baseline_weight=1.0,
+        num_negatives=None,
     ):
         super().__init__()
         if isinstance(kernel, str):
@@ -164,6 +170,7 @@ class DensityRatioEstimator(nn.Module):
         self.attraction_weight = attraction_weight
         self.repulsion_weight = repulsion_weight
         self.log_baseline_weight = np.log(baseline_weight)
+        self.num_negatives = num_negatives
 
     def forward(self, x, y):
         if self.kernel_scale == "auto":
@@ -174,12 +181,23 @@ class DensityRatioEstimator(nn.Module):
         logits = logits - log_baseline - self.log_baseline_weight
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
+        if self.num_negatives:
+            assert (
+                self.num_negatives < neg_logits.shape[1]
+            ), "num_negatives must be less than the number of available negative samples"
+            neg_logits = random_sample_columns(neg_logits, self.num_negatives)
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
         return (
             pos_logits.mean() + self.log_baseline_weight,
             attraction.mean() * self.attraction_weight
             + repulsion.mean() * self.repulsion_weight,
         )
+
+
+def random_sample_columns(x, num_samples):
+    idx = torch.arange(x.shape[0], device=x.device).unsqueeze(1).repeat(1, num_samples)
+    jdx = torch.randint(0, x.shape[1], (x.shape[0], num_samples), device=x.device)
+    return x[idx, jdx]
 
 
 class RedundancyReduction(nn.Module):

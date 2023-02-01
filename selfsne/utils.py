@@ -29,6 +29,12 @@ def set_grad(module, requires_grad):
         param.requires_grad = requires_grad
 
 
+def random_sample_columns(x, num_samples):
+    idx = torch.arange(x.shape[0], device=x.device).unsqueeze(1).repeat(1, num_samples)
+    jdx = torch.randint(0, x.shape[1], (x.shape[0], num_samples), device=x.device)
+    return x[idx, jdx]
+
+
 def disable_grad(module):
     module.eval()
     set_grad(module, False)

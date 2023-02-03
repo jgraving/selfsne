@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.optim as optim
 
-from scipy.spatial.distance import pdist, cdist
+from scipy.spatial.distance import pdist
 from scipy.stats import spearmanr, pearsonr, mode
 from sklearn.neighbors import KDTree
 from sklearn.metrics import f1_score, balanced_accuracy_score

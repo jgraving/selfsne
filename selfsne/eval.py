@@ -91,14 +91,14 @@ def knn_probe_classification(
     verbose=True,
     shuffle=False,
 ):
-    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
+    paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
     embedding_tree = KDTree(embedding)
     if verbose:
         prog_bar = tqdm(total=len(dataloader))
     y_pred = []
-    for data, embedding_batch in dataloader:
-        data = data.numpy()
+    for labels_batch, embedding_batch in dataloader:
+        labels_batch = labels_batch.numpy()
         embedding_batch = embedding_batch.numpy()
         knn_indices = embedding_tree.query(
             embedding_batch, k=k + 1, return_distance=False

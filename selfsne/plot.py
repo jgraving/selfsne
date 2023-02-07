@@ -63,9 +63,13 @@ def align_embeddings(reference_embedding, embedding):
 
 
 class EmbeddingDensity:
-    def __init__(self, embedding, limit_margin=0.1, grid_size=100):
+    def __init__(
+        self, embedding, limit_margin=0.1, limit_percentile=100, grid_size=100
+    ):
         self.embedding = np.array(embedding)
-        embedding_range = np.percentile(self.embedding, [0, 100], axis=0)
+        percentile_offset = (100 - limit_percentile) / 2
+        percentile_range = [0 + percentile_offset, 100 - percentile_offset]
+        embedding_range = np.percentile(self.embedding, percentile_range, axis=0)
         self.x_min, self.x_max = embedding_range[0, 0], embedding_range[1, 0]
         self.y_min, self.y_max = embedding_range[0, 1], embedding_range[1, 1]
 

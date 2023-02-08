@@ -118,12 +118,13 @@ class ConditionalBaseline(GradientConditionalBaseline):
 
 
 class LearnedBaseline(nn.Module):
-    def __init__(self):
+    def __init__(self, activation=nn.LogSigmoid()):
         super().__init__()
         self.log_baseline = nn.Parameter(torch.zeros(1))
+        self.activation = activation
 
     def forward(self, y, logits):
-        return self.log_baseline
+        return self.activation(self.log_baseline)
 
 
 class ConstantBaseline(nn.Module):

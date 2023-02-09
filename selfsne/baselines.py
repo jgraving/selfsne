@@ -29,7 +29,7 @@ from selfsne.utils import (
 
 class LogMovingAverage(nn.Module):
     def __init__(
-        self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
+        self, momentum=0.9, gradient=True, ema_forward=True, ema_backward=True
     ):
         super().__init__()
         self.register_buffer("log_moving_average", torch.zeros(1))
@@ -87,21 +87,21 @@ class LogMovingAverageBaseline(nn.Module):
         return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
 
 
-def MomentumBaseline(momentum=0.99):
+def MomentumBaseline(momentum=0.9):
     return LogMovingAverageBaseline(momentum=momentum, gradient=False)
 
 
-def GradientMomentumBaseline(momentum=0.99):
+def GradientMomentumBaseline(momentum=0.9):
     return LogMovingAverageBaseline(momentum=momentum, gradient=True)
 
 
-def BatchBaseline(momentum=0.99):
+def BatchBaseline(momentum=0.9):
     return LogMovingAverageBaseline(
         momentum=momentum, gradient=False, ema_forward=False
     )
 
 
-def GradientBatchBaseline(momentum=0.99):
+def GradientBatchBaseline(momentum=0.9):
     return LogMovingAverageBaseline(
         momentum=momentum, gradient=True, ema_forward=False, ema_backward=False
     )

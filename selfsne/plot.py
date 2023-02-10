@@ -62,6 +62,41 @@ def align_embeddings(reference_embedding, embedding):
     return rotated_embedding
 
 
+def equalize_axes_limits(ax: plt.Axes) -> None:
+    """
+    Adjust the limits of the x and y axes of a Matplotlib Axes object so that they have equal ranges, and
+    set the aspect ratio to 1.
+
+    Parameters:
+    -----------
+    ax : plt.Axes
+        The Matplotlib Axes object to adjust.
+
+    Returns:
+    --------
+    None
+    """
+    # Get the limits of the x and y axes
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+
+    # Determine the aspect ratio
+    aspect = np.diff(xlim) / np.diff(ylim)
+
+    # Adjust the axis with the smaller range to have a range equal to the other axis
+    if aspect > 1:
+        ax.set_ylim(
+            np.mean(ylim) - 0.5 * np.diff(ylim) * aspect,
+            np.mean(ylim) + 0.5 * np.diff(ylim) * aspect,
+        )
+    else:
+        ax.set_xlim(
+            np.mean(xlim) - 0.5 * np.diff(xlim) / aspect,
+            np.mean(xlim) + 0.5 * np.diff(xlim) / aspect,
+        )
+    ax.set_aspect(1.0)
+
+
 class EmbeddingDensity:
     def __init__(
         self, embedding, limit_margin=0.1, limit_percentile=100, grid_size=100

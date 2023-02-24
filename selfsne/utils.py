@@ -106,6 +106,10 @@ def concat_dicts(dicts):
     }
 
 
+def config_to_filename(config):
+    filename = "_".join([f"{k}_{v}" for k, v in config.items()])
+    return filename
+
 class Trainer(pl.Trainer):
     def predict(
         self,

@@ -41,13 +41,15 @@ class R2Score(nn.Module):
         input = torch.tensor(input)
         target = torch.tensor(target)
         res_error = self.error(input, target)
-        total_error = self.error(input, self.mean_.expand(input.shape[0], -1))
-        return torch.mean(1 - (res_error / total_error)).numpy()
+        total_error = self.error(self.mean_.expand(input.shape[0], -1), target)
+        return torch.mean(1 - (res_error / total_error))
 
 
-class SoftmaxCrossEntropy(nn.Module):
+class SoftBCELoss(nn.CrossEntropyLoss):
     def forward(self, input, target):
-        return -target.mul(input.log()).sum(-1).mean()
+        input = torch.stack([input, 1 - input], dim=1)
+        target = torch.stack([target, 1 - target], dim=1)
+        return super().forward(input, target)
 
 
 def knn_probe_reconstruction(
@@ -78,7 +80,7 @@ def knn_probe_reconstruction(
         y_pred.append(knn)
         if verbose:
             prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), dataset)
+    return r2_score(np.concatenate(y_pred), dataset).numpy()
 
 
 def knn_probe_classification(
@@ -188,7 +190,7 @@ def linear_probe_reconstruction(
         y_pred.append(model(embedding_batch).detach().numpy())
         y_true.append(data.numpy())
         prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), np.concatenate(y_true))
+    return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).numpy()
 
 
 def linear_probe_classification(

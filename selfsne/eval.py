@@ -26,6 +26,7 @@ from sklearn.metrics import f1_score, balanced_accuracy_score
 from tqdm.autonotebook import tqdm
 
 from selfsne.data import PairedDataset
+from selfsne.nn import init_selu
 
 
 class R2Score(nn.Module):
@@ -125,13 +126,14 @@ def linear_probe_reconstruction(
     verbose=True,
     shuffle=False,
     tol=1e-3,
+    lr=0.1,
 ):
     model = nn.Sequential(
-        nn.BatchNorm1d(embedding.shape[1], momentum=None, affine=False),
-        nn.Linear(embedding.shape[1], dataset.shape[1]),
+        nn.BatchNorm1d(embedding.shape[1], momentum=None),
+        init_selu(nn.Linear(embedding.shape[1], dataset.shape[1])),
         link,
     )
-    optimizer = optim.Adam(model.parameters(), lr=0.1)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(
         paired_dataset,
@@ -145,11 +147,16 @@ def linear_probe_reconstruction(
     r2_score.fit(dataset)
 
     mean_loss_values = []
-
-    epoch_prog_bar = tqdm(total=len(dataloader), desc="Batch", leave=False, position=1)
+    if verbose:
+        epoch_iter = tqdm(range(epochs), desc="Epoch")
+        epoch_prog_bar = tqdm(
+            total=len(dataloader), desc="Batch", leave=False, position=1
+        )
+    else:
+        epoch_iter = range(epochs)
 
     patience = 0
-    for epoch in tqdm(range(epochs), desc="Epoch"):
+    for epoch in epoch_iter:
         mean_loss = 0
         for data, embedding_batch in dataloader:
             data = data.float()
@@ -161,11 +168,12 @@ def linear_probe_reconstruction(
             optimizer.step()
             batch_loss = batch_loss.item()
             mean_loss += batch_loss
-            epoch_prog_bar.update(1)
-            epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
-        epoch_prog_bar.refresh()
-
-        epoch_prog_bar.reset()
+            if verbose:
+                epoch_prog_bar.update(1)
+                epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+        if verbose:
+            epoch_prog_bar.refresh()
+            epoch_prog_bar.reset()
         mean_loss /= len(dataloader)
         mean_loss_values.append(mean_loss)
         if epoch > 1:
@@ -175,13 +183,13 @@ def linear_probe_reconstruction(
                 patience = 0
             if patience > 2:
                 break
-    epoch_prog_bar.close()
+    if verbose:
+        epoch_prog_bar.close()
 
     metric_values = []
     model.eval()
     if verbose:
-        prog_bar = tqdm(total=len(dataloader))
-        print("running eval")
+        prog_bar = tqdm(total=len(dataloader), desc="Eval")
     y_true = []
     y_pred = []
     for data, embedding_batch in dataloader:
@@ -189,7 +197,8 @@ def linear_probe_reconstruction(
         embedding_batch = embedding_batch.float()
         y_pred.append(model(embedding_batch).detach().numpy())
         y_true.append(data.numpy())
-        prog_bar.update(1)
+        if verbose:
+            prog_bar.update(1)
     return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).numpy()
 
 
@@ -201,15 +210,16 @@ def linear_probe_classification(
     verbose=True,
     shuffle=False,
     tol=1e-3,
+    lr=0.1,
 ):
     # Get number of classes
     num_classes = np.unique(labels).shape[0]
     loss = nn.CrossEntropyLoss()
     model = nn.Sequential(
-        nn.BatchNorm1d(embedding.shape[1], momentum=None, affine=False),
-        nn.Linear(embedding.shape[1], num_classes),
+        nn.BatchNorm1d(embedding.shape[1], momentum=None),
+        init_selu(nn.Linear(embedding.shape[1], num_classes)),
     )
-    optimizer = optim.Adam(model.parameters(), lr=0.1)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
     dataloader = DataLoader(
         paired_dataset,
@@ -221,10 +231,16 @@ def linear_probe_classification(
 
     mean_loss_values = []
 
-    epoch_prog_bar = tqdm(total=len(dataloader), desc="Batch", leave=False, position=1)
+    if verbose:
+        epoch_iter = tqdm(range(epochs), desc="Epoch")
+        epoch_prog_bar = tqdm(
+            total=len(dataloader), desc="Batch", leave=False, position=1
+        )
+    else:
+        epoch_iter = range(epochs)
 
     patience = 0
-    for epoch in tqdm(range(epochs), desc="Epoch"):
+    for epoch in epoch_iter:
         mean_loss = 0
         for label_batch, embedding_batch in dataloader:
             label_batch = label_batch.long()
@@ -236,9 +252,12 @@ def linear_probe_classification(
             optimizer.step()
             batch_loss = batch_loss.item()
             mean_loss += batch_loss
-            epoch_prog_bar.update(1)
-            epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
-        epoch_prog_bar.refresh()
+            if verbose:
+                epoch_prog_bar.update(1)
+                epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+        if verbose:
+            epoch_prog_bar.refresh()
+            epoch_prog_bar.reset()
 
         epoch_prog_bar.reset()
         mean_loss /= len(dataloader)
@@ -250,12 +269,12 @@ def linear_probe_classification(
                 patience = 0
             if patience > 2:
                 break
-    epoch_prog_bar.close()
+    if verbose:
+        epoch_prog_bar.close()
 
     model.eval()
     if verbose:
-        prog_bar = tqdm(total=len(dataloader))
-        print("running eval")
+        prog_bar = tqdm(total=len(dataloader), desc="Eval")
 
     y_true = []
     y_pred = []
@@ -296,7 +315,7 @@ def pairwise_distance_correlation(
 ):
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-    if num_batches is None:
+    if num_batches is None or num_batches > len(dataloader):
         num_batches = len(dataloader)
     if verbose:
         prog_bar = tqdm(total=num_batches)
@@ -311,8 +330,9 @@ def pairwise_distance_correlation(
         if verbose:
             prog_bar.update(1)
         if idx >= num_batches - 1:
-            prog_bar.refresh()
-            prog_bar.close()
+            if verbose:
+                prog_bar.refresh()
+                prog_bar.close()
             break
     if correlation == "spearman":
         rho, p = spearmanr(
@@ -340,7 +360,7 @@ def knn_distance_correlation(
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
     embedding_tree = KDTree(embedding)
-    if num_batches is None:
+    if num_batches is None or num_batches > len(dataloader):
         num_batches = len(dataloader)
     if verbose:
         prog_bar = tqdm(total=num_batches)
@@ -365,8 +385,9 @@ def knn_distance_correlation(
         if verbose:
             prog_bar.update(1)
         if idx >= num_batches - 1:
-            prog_bar.refresh()
-            prog_bar.close()
+            if verbose:
+                prog_bar.refresh()
+                prog_bar.close()
             break
     if correlation == "spearman":
         rho, p = spearmanr(

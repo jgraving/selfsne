@@ -24,8 +24,9 @@ from scipy.spatial.distance import pdist
 from scipy.stats import spearmanr, pearsonr, mode
 from sklearn.neighbors import KDTree
 from sklearn.metrics import f1_score, balanced_accuracy_score
+from sklearn.preprocessing import StandardScaler
 from tqdm.autonotebook import tqdm
-
+from copy import deepcopy
 from selfsne.data import PairedDataset
 from selfsne.nn import init_selu
 
@@ -52,6 +53,11 @@ class SoftBCELoss(nn.CrossEntropyLoss):
         input = torch.stack([input, 1 - input], dim=1)
         target = torch.stack([target, 1 - target], dim=1)
         return super().forward(input, target)
+
+
+class SoftBCEWithLogitsLoss(SoftBCELoss):
+    def forward(self, input, target):
+        return super().forward(input.sigmoid(), target)
 
 
 def knn_probe_reconstruction(
@@ -82,7 +88,7 @@ def knn_probe_reconstruction(
         y_pred.append(knn)
         if verbose:
             prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), dataset).numpy()
+    return r2_score(np.concatenate(y_pred), dataset).item()
 
 
 def knn_probe_classification(
@@ -123,25 +129,34 @@ def linear_probe_reconstruction(
     error,
     link=nn.Identity(),
     epochs=100,
-    batch_size=1000,
+    batch_size=1024,
     verbose=True,
     shuffle=False,
-    tol=1e-3,
-    lr=0.1,
+    tol=1e-2,
+    lr=0.3,
+    patience=1,
 ):
     model = nn.Sequential(
-        nn.BatchNorm1d(embedding.shape[1], momentum=None),
-        init_selu(nn.Linear(embedding.shape[1], dataset.shape[1])),
+        nn.Linear(embedding.shape[1], dataset.shape[1]),
         link,
     )
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(
+
+    normalized_embedding = StandardScaler().fit_transform(embedding)
+    paired_dataset = PairedDataset(dataset, normalized_embedding, shuffle=shuffle)
+    train_dataloader = DataLoader(
         paired_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=True,
         drop_last=True,
+    )
+    eval_dataloader = DataLoader(
+        paired_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=False,
+        drop_last=False,
     )
 
     r2_score = R2Score(error)
@@ -151,15 +166,16 @@ def linear_probe_reconstruction(
     if verbose:
         epoch_iter = tqdm(range(epochs), desc="Epoch")
         epoch_prog_bar = tqdm(
-            total=len(dataloader), desc="Batch", leave=False, position=1
+            total=len(train_dataloader), desc="Batch", leave=False, position=1
         )
     else:
         epoch_iter = range(epochs)
 
-    patience = 0
+    no_improvement = 0
+    best_loss = np.inf
     for epoch in epoch_iter:
         mean_loss = 0
-        for data, embedding_batch in dataloader:
+        for data, embedding_batch in train_dataloader:
             data = data.float()
             embedding_batch = embedding_batch.float()
             optimizer.zero_grad()
@@ -171,63 +187,83 @@ def linear_probe_reconstruction(
             mean_loss += batch_loss
             if verbose:
                 epoch_prog_bar.update(1)
-                epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+                epoch_prog_bar.set_postfix(
+                    {
+                        "Loss": f"{batch_loss:.4f}",
+                        "Best": f"{best_loss:.4f}",
+                        "Patience": f"{no_improvement}/{patience}",
+                    }
+                )
         if verbose:
             epoch_prog_bar.refresh()
             epoch_prog_bar.reset()
-        mean_loss /= len(dataloader)
+        mean_loss /= len(train_dataloader)
         mean_loss_values.append(mean_loss)
-        if epoch > 1:
-            if np.abs((mean_loss - mean_loss_values[-1]) / mean_loss_values[-1]) < tol:
-                patience += 1
+        if epoch >= 1:
+            rel_improvement = np.abs(mean_loss - best_loss / best_loss)
+            if rel_improvement < tol or (
+                (mean_loss > best_loss) and (rel_improvement > tol)
+            ):
+                no_improvement += 1
             else:
-                patience = 0
-            if patience > 2:
+                no_improvement = 0
+            if no_improvement > patience:
                 break
+        if mean_loss < best_loss:
+            best_loss = mean_loss
+            best_model = deepcopy(model)
     if verbose:
         epoch_prog_bar.close()
 
     metric_values = []
     model.eval()
     if verbose:
-        prog_bar = tqdm(total=len(dataloader), desc="Eval")
+        prog_bar = tqdm(total=len(eval_dataloader), desc="Eval")
     y_true = []
     y_pred = []
-    for data, embedding_batch in dataloader:
+    for data, embedding_batch in eval_dataloader:
         data = data.float()
         embedding_batch = embedding_batch.float()
-        y_pred.append(model(embedding_batch).detach().numpy())
+        y_pred.append(best_model(embedding_batch).detach().numpy())
         y_true.append(data.numpy())
         if verbose:
             prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).numpy()
+    return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).item()
 
 
 def linear_probe_classification(
     labels,
     embedding,
     epochs=100,
-    batch_size=1000,
+    batch_size=1024,
     verbose=True,
     shuffle=False,
-    tol=1e-3,
-    lr=0.1,
+    tol=1e-2,
+    lr=0.3,
+    patience=1,
 ):
     # Get number of classes
-    num_classes = np.unique(labels).shape[0]
+    num_classes = np.unique(classes).shape[0]
+
     loss = nn.CrossEntropyLoss()
-    model = nn.Sequential(
-        nn.BatchNorm1d(embedding.shape[1], momentum=None),
-        init_selu(nn.Linear(embedding.shape[1], num_classes)),
-    )
+    model = init_selu(nn.Linear(embedding.shape[1], num_classes))
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
-    dataloader = DataLoader(
+
+    normalized_embedding = StandardScaler().fit_transform(embedding)
+    paired_dataset = PairedDataset(labels, normalized_embedding, shuffle=shuffle)
+    train_dataloader = DataLoader(
         paired_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=True,
         drop_last=True,
+    )
+    eval_dataloader = DataLoader(
+        paired_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=False,
+        drop_last=False,
     )
 
     mean_loss_values = []
@@ -235,15 +271,16 @@ def linear_probe_classification(
     if verbose:
         epoch_iter = tqdm(range(epochs), desc="Epoch")
         epoch_prog_bar = tqdm(
-            total=len(dataloader), desc="Batch", leave=False, position=1
+            total=len(train_dataloader), desc="Batch", leave=False, position=1
         )
     else:
         epoch_iter = range(epochs)
 
-    patience = 0
+    no_improvement = 0
+    best_loss = np.inf
     for epoch in epoch_iter:
         mean_loss = 0
-        for label_batch, embedding_batch in dataloader:
+        for label_batch, embedding_batch in train_dataloader:
             label_batch = label_batch.long()
             embedding_batch = embedding_batch.float()
             optimizer.zero_grad()
@@ -255,34 +292,46 @@ def linear_probe_classification(
             mean_loss += batch_loss
             if verbose:
                 epoch_prog_bar.update(1)
-                epoch_prog_bar.set_postfix({"Loss": f"{batch_loss:.4f}"})
+                epoch_prog_bar.set_postfix(
+                    {
+                        "Loss": f"{batch_loss:.4f}",
+                        "Best": f"{best_loss:.4f}",
+                        "Patience": f"{no_improvement}/{patience}",
+                    }
+                )
         if verbose:
             epoch_prog_bar.refresh()
             epoch_prog_bar.reset()
 
-        epoch_prog_bar.reset()
-        mean_loss /= len(dataloader)
+        mean_loss /= len(train_dataloader)
         mean_loss_values.append(mean_loss)
-        if epoch > 1:
-            if np.abs((mean_loss - mean_loss_values[-1]) / mean_loss_values[-1]) < tol:
-                patience += 1
+        if epoch >= 1:
+            rel_improvement = np.abs(mean_loss - best_loss / best_loss)
+            if rel_improvement < tol or (
+                (mean_loss > best_loss) and (rel_improvement > tol)
+            ):
+                no_improvement += 1
             else:
-                patience = 0
-            if patience > 2:
+                no_improvement = 0
+            if no_improvement > patience:
                 break
+        if mean_loss < best_loss:
+            best_loss = mean_loss
+            best_model = deepcopy(model)
+
     if verbose:
         epoch_prog_bar.close()
 
     model.eval()
     if verbose:
-        prog_bar = tqdm(total=len(dataloader), desc="Eval")
+        prog_bar = tqdm(total=len(eval_dataloader), desc="Eval")
 
     y_true = []
     y_pred = []
-    for label_batch, embedding_batch in dataloader:
+    for label_batch, embedding_batch in eval_dataloader:
         label_batch = label_batch.long()
         embedding_batch = embedding_batch.float()
-        output = model(embedding_batch)
+        output = best_model(embedding_batch)
         _, predicted = torch.max(output, 1)
         y_true.extend(label_batch.tolist())
         y_pred.extend(predicted.tolist())

@@ -448,3 +448,64 @@ def knn_distance_correlation(
             np.concatenate(data_distances), np.concatenate(embedding_distances)
         )
     return rho
+
+
+@numba.jit(nopython=True, parallel=True, fastmath=True)
+def set_intersection(x, y):
+    intersection = 0
+    for idx in numba.prange(x.shape[0]):
+        intersection += np.sum(np.isin(x[idx], y[idx]))
+    return intersection
+
+
+def neighborhood_preservation(
+    dataset,
+    embedding,
+    k=1,
+    batch_size=1000,
+    num_batches=None,
+    verbose=True,
+    shuffle=False,
+):
+    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
+    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    embedding_tree = NearestNeighbors(n_jobs=-1)
+    embedding_tree.fit(embedding)
+    dataset_tree = NearestNeighbors(n_jobs=-1)
+    dataset_tree.fit(dataset)
+    if num_batches is None or num_batches > len(dataloader):
+        num_batches = len(dataloader)
+    if verbose:
+        prog_bar = tqdm(total=num_batches)
+    true_positives = 0
+    false_positives = 0
+    false_negatives = 0
+    for idx, (data, embedding_batch) in enumerate(dataloader):
+        data = data.numpy()
+        embedding_batch = embedding_batch.numpy()
+        embedding_knn_indices = embedding_tree.kneighbors(
+            embedding_batch, n_neighbors=k + 1, return_distance=False
+        )[:, 1:]
+        dataset_knn_indices = dataset_tree.kneighbors(
+            data, n_neighbors=k + 1, return_distance=False
+        )[:, 1:]
+
+        # Perform set intersection for each row in the indices
+        intersection = set_intersection(embedding_knn_indices, dataset_knn_indices)
+        tp = intersection
+        fp = embedding_knn_indices.size - intersection
+        fn = dataset_knn_indices.size - intersection
+        true_positives += tp
+        false_positives += fp
+        false_negatives += fn
+
+        if verbose:
+            prog_bar.update(1)
+        if idx >= num_batches - 1:
+            if verbose:
+                prog_bar.refresh()
+                prog_bar.close()
+            break
+    precision = true_positives / (true_positives + false_positives)
+    recall = true_positives / (true_positives + false_negatives)
+    return precision, recall

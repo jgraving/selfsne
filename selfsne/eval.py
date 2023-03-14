@@ -22,7 +22,7 @@ import torch.optim as optim
 
 from scipy.spatial.distance import pdist
 from scipy.stats import spearmanr, pearsonr, mode
-from sklearn.neighbors import KDTree
+from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import f1_score, balanced_accuracy_score
 from sklearn.preprocessing import StandardScaler
 from tqdm.autonotebook import tqdm
@@ -71,7 +71,8 @@ def knn_probe_reconstruction(
 ):
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-    embedding_tree = KDTree(embedding)
+    embedding_tree = NearestNeighbors(n_jobs=-1)
+    embedding_tree.fit(embedding)
     r2_score = R2Score(error)
     r2_score.fit(dataset)
     if verbose:
@@ -80,8 +81,8 @@ def knn_probe_reconstruction(
     for data, embedding_batch in dataloader:
         data = data.numpy()
         embedding_batch = embedding_batch.numpy()
-        knn_indices = embedding_tree.query(
-            embedding_batch, k=k + 1, return_distance=False
+        knn_indices = embedding_tree.kneighbors(
+            embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
         knn_data = dataset[knn_indices]
         knn = np.mean(knn_data, axis=1)
@@ -101,15 +102,16 @@ def knn_probe_classification(
 ):
     paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-    embedding_tree = KDTree(embedding)
+    embedding_tree = NearestNeighbors(n_jobs=-1)
+    embedding_tree.fit(embedding)
     if verbose:
         prog_bar = tqdm(total=len(dataloader))
     y_pred = []
     for labels_batch, embedding_batch in dataloader:
         labels_batch = labels_batch.numpy()
         embedding_batch = embedding_batch.numpy()
-        knn_indices = embedding_tree.query(
-            embedding_batch, k=k + 1, return_distance=False
+        knn_indices = embedding_tree.kneighbors(
+            embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
         knn_labels = labels[knn_indices]
         knn = mode(knn_labels, axis=1)[0]
@@ -409,7 +411,8 @@ def knn_distance_correlation(
 ):
     paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
     dataloader = DataLoader(paired_dataset, batch_size=batch_size)
-    embedding_tree = KDTree(embedding)
+    embedding_tree = NearestNeighbors(n_jobs=-1)
+    embedding_tree.fit(embedding)
     if num_batches is None or num_batches > len(dataloader):
         num_batches = len(dataloader)
     if verbose:
@@ -419,8 +422,8 @@ def knn_distance_correlation(
     for idx, (data, embedding_batch) in enumerate(dataloader):
         data = data.numpy()
         embedding_batch = embedding_batch.numpy()
-        knn_indices = embedding_tree.query(
-            embedding_batch, k=k + 1, return_distance=False
+        knn_indices = embedding_tree.kneighbors(
+            embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
         knn_embedding = embedding[knn_indices]
         knn_data = dataset[knn_indices]

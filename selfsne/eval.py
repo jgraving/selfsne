@@ -23,7 +23,12 @@ import torch.optim as optim
 from scipy.spatial.distance import pdist
 from scipy.stats import spearmanr, pearsonr, mode
 from sklearn.neighbors import NearestNeighbors
-from sklearn.metrics import f1_score, balanced_accuracy_score
+from sklearn.metrics import (
+    f1_score,
+    balanced_accuracy_score,
+    precision_score,
+    recall_score,
+)
 from sklearn.preprocessing import StandardScaler
 from tqdm.autonotebook import tqdm
 from copy import deepcopy
@@ -121,7 +126,9 @@ def knn_probe_classification(
     y_pred = np.concatenate(y_pred)
     f1 = f1_score(labels, y_pred, average="weighted")
     acc = balanced_accuracy_score(labels, y_pred, adjusted=True)
-    return acc, f1
+    precision = precision_score(labels, y_pred, average="weighted")
+    recall = recall_score(labels, y_pred, average="weighted")
+    return acc, f1, precision, recall
 
 
 def linear_probe_reconstruction(
@@ -341,7 +348,9 @@ def linear_probe_classification(
             prog_bar.update(1)
     f1 = f1_score(y_true, y_pred, average="weighted")
     acc = balanced_accuracy_score(y_true, y_pred, adjusted=True)
-    return acc, f1
+    precision = precision_score(y_true, y_pred, average="weighted")
+    recall = recall_score(y_true, y_pred, average="weighted")
+    return acc, f1, precision, recall
 
 
 def pdist_no_diag(data):

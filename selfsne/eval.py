@@ -448,11 +448,20 @@ def knn_distance_correlation(
     return rho
 
 
-@numba.jit(nopython=True, parallel=True, fastmath=True)
+@numba.njit(fastmath=True)
+def sum_isin(x, y):
+    result = 0
+    for idx in range(x.shape[0]):
+        if x[idx] in y:
+            result += 1
+    return result
+
+
+@numba.njit(parallel=True, fastmath=True)
 def set_intersection(x, y):
     intersection = 0
     for idx in numba.prange(x.shape[0]):
-        intersection += np.sum(np.isin(x[idx], y[idx]))
+        intersection += sum_isin(x[idx], y[idx])
     return intersection
 
 

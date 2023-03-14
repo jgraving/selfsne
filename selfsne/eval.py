@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy as np
+import numba
 import torch
 
 from torch.utils.data import Dataset, DataLoader
@@ -53,19 +54,7 @@ class R2Score(nn.Module):
         return torch.mean(1 - (res_error / total_error))
 
 
-class SoftBCELoss(nn.CrossEntropyLoss):
-    def forward(self, input, target):
-        input = torch.stack([input, 1 - input], dim=1)
-        target = torch.stack([target, 1 - target], dim=1)
-        return super().forward(input, target)
-
-
-class SoftBCEWithLogitsLoss(SoftBCELoss):
-    def forward(self, input, target):
-        return super().forward(input.sigmoid(), target)
-
-
-def knn_probe_reconstruction(
+def knn_reconstruction(
     dataset,
     embedding,
     error,
@@ -97,7 +86,7 @@ def knn_probe_reconstruction(
     return r2_score(np.concatenate(y_pred), dataset).item()
 
 
-def knn_probe_classification(
+def knn_classification(
     labels,
     embedding,
     k=1,
@@ -119,8 +108,7 @@ def knn_probe_classification(
             embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
         knn_labels = labels[knn_indices]
-        knn = mode(knn_labels, axis=1)[0]
-        y_pred.append(knn)
+        y_pred.append(mode(knn_labels, axis=1)[0])
         if verbose:
             prog_bar.update(1)
     y_pred = np.concatenate(y_pred)
@@ -131,11 +119,12 @@ def knn_probe_classification(
     return acc, f1, precision, recall
 
 
-def linear_probe_reconstruction(
+def linear_reconstruction(
     dataset,
     embedding,
     loss,
     error,
+    model=None,
     link=nn.Identity(),
     epochs=100,
     batch_size=1024,
@@ -145,11 +134,9 @@ def linear_probe_reconstruction(
     lr=0.3,
     patience=1,
 ):
-    model = nn.Sequential(
-        nn.Linear(embedding.shape[1], dataset.shape[1]),
-        link,
-    )
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    if model is None:
+        model = init_selu(nn.Linear(embedding.shape[1], dataset.shape[1]))
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
 
     normalized_embedding = StandardScaler().fit_transform(embedding)
     paired_dataset = PairedDataset(dataset, normalized_embedding, shuffle=shuffle)
@@ -233,14 +220,14 @@ def linear_probe_reconstruction(
     for data, embedding_batch in eval_dataloader:
         data = data.float()
         embedding_batch = embedding_batch.float()
-        y_pred.append(best_model(embedding_batch).detach().numpy())
+        y_pred.append(link(best_model(embedding_batch)).detach().numpy())
         y_true.append(data.numpy())
         if verbose:
             prog_bar.update(1)
     return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).item()
 
 
-def linear_probe_classification(
+def linear_classification(
     labels,
     embedding,
     epochs=100,
@@ -252,11 +239,11 @@ def linear_probe_classification(
     patience=1,
 ):
     # Get number of classes
-    num_classes = np.unique(classes).shape[0]
+    num_classes = np.unique(labels).shape[0]
 
     loss = nn.CrossEntropyLoss()
     model = init_selu(nn.Linear(embedding.shape[1], num_classes))
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
 
     normalized_embedding = StandardScaler().fit_transform(embedding)
     paired_dataset = PairedDataset(labels, normalized_embedding, shuffle=shuffle)
@@ -360,8 +347,7 @@ def pdist_no_diag(data):
     # create a boolean mask of self-distances
     mask = (np.arange(len(distances)) % n) != ((np.arange(len(distances)) // n))
     # remove self-distance values
-    distances = distances[mask]
-    return distances
+    return distances[mask]
 
 
 def pairwise_distance_correlation(

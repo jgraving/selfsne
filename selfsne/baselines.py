@@ -137,14 +137,13 @@ class ConstantBaseline(nn.Module):
 
 
 class LearnedConditionalBaseline(nn.Module):
-    def __init__(self, encoder, gradient=False, activation=nn.LogSigmoid()):
+    def __init__(self, encoder, activation=nn.LogSigmoid()):
         super().__init__()
         self.encoder = encoder
-        self.gradient = gradient
         self.activation = activation
 
     def forward(self, y, logits):
-        return self.activation(self.encoder(y if self.gradient else stop_gradient(y)))
+        return self.activation(self.encoder(y))
 
 
 class LogInterpolatedBaseline(nn.Module):

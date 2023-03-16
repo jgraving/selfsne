@@ -110,9 +110,20 @@ class SelfSNE(pl.LightningModule):
         z_y = self.projector(h_y)
 
         if self.similarity_loss is not None:
-            density_ratio, similarity = self.similarity_loss(z_x, z_y)
+            (
+                pos_log_density_ratio,
+                neg_log_density_ratio,
+                log_baseline,
+                similarity,
+            ) = self.similarity_loss(z_x, z_y, y)
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
-            self.log(mode + "density_ratio", density_ratio.item(), prog_bar=True)
+            self.log(
+                mode + "pos_log_density_ratio", pos_log_density_ratio.item(), prog_bar=True
+            )
+            self.log(
+                mode + "neg_log_density_ratio", neg_log_density_ratio.item(), prog_bar=True
+            )
+            self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)

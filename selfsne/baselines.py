@@ -88,33 +88,18 @@ class LogMovingAverageBaseline(nn.Module):
 
 
 def MomentumBaseline(momentum=0.9):
-    return LogMovingAverageBaseline(momentum=momentum, gradient=False)
-
-
-def GradientMomentumBaseline(momentum=0.9):
     return LogMovingAverageBaseline(momentum=momentum, gradient=True)
 
 
 def BatchBaseline(momentum=0.9):
     return LogMovingAverageBaseline(
-        momentum=momentum, gradient=False, ema_forward=False
-    )
-
-
-def GradientBatchBaseline(momentum=0.9):
-    return LogMovingAverageBaseline(
         momentum=momentum, gradient=True, ema_forward=False, ema_backward=False
     )
 
 
-class GradientConditionalBaseline(nn.Module):
+class BatchConditionalBaseline(nn.Module):
     def forward(self, y, logits):
         return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
-
-
-class ConditionalBaseline(GradientConditionalBaseline):
-    def forward(self, y, logits):
-        return logmeanexp(remove_diagonal(stop_gradient(logits)), dim=-1, keepdim=True)
 
 
 class LearnedBaseline(nn.Module):
@@ -196,11 +181,8 @@ class LogAdditiveBaseline(AdditiveBaseline):
 
 BASELINES = {
     "batch": BatchBaseline,
-    "gradient_batch": GradientBatchBaseline,
-    "conditional": ConditionalBaseline,
-    "gradient_conditional": GradientConditionalBaseline,
+    "batch_conditional": BatchConditionalBaseline,
     "momentum": MomentumBaseline,
-    "gradient_momentum": GradientMomentumBaseline,
     "learn": LearnedBaseline,
     "constant": ConstantBaseline,
 }

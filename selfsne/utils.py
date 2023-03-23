@@ -21,7 +21,7 @@ import torch.nn.functional as F
 
 from einops import rearrange, repeat
 
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Union
 
 
 def stop_gradient(x: torch.Tensor) -> torch.Tensor:

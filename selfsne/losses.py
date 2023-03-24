@@ -47,7 +47,7 @@ from torch import nn
 from torch import diagonal
 import torch.nn.functional as F
 
-from selfsne.kernels import KERNELS
+from selfsne.kernels import PAIRWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
 from selfsne.utils import (
@@ -149,7 +149,7 @@ class DensityRatioEstimator(nn.Module):
     ):
         super().__init__()
         if isinstance(kernel, str):
-            self.kernel = KERNELS[kernel]
+            self.kernel = PAIRWISE_KERNELS[kernel]
         else:
             self.kernel = kernel
 
@@ -176,7 +176,7 @@ class DensityRatioEstimator(nn.Module):
         if self.kernel_scale == "auto":
             self.kernel_scale = np.sqrt(z_x.shape[1])
 
-        logits = self.kernel(z_x, z_y.unsqueeze(1), self.kernel_scale)
+        logits = self.kernel(z_y, z_x, self.kernel_scale)
         log_baseline = self.baseline(y, logits)
         logits = logits - log_baseline - self.log_baseline_weight
         pos_logits = diagonal(logits).unsqueeze(1)

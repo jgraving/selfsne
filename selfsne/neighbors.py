@@ -179,7 +179,7 @@ class NearestNeighborSampler(nn.Module):
 
     Args:
         num_features (int): The number of features in each data point.
-        queue_size (int): The maximum size of the buffer for the data points (default: 2 ** 15).
+        queue_size (int): The maximum size of the queue for the data points (default: 2 ** 15).
         kernel (str): The name of the kernel to use for calculating the distances (default: "euclidean").
         num_neighbors (int): The number of nearest neighbors to sample from (default: 1).
         freeze_queue_on_full (bool): Whether to stop updating the buffer once it is full (default: False).
@@ -234,25 +234,25 @@ class NearestNeighborSampler(nn.Module):
                 )
 
         if self.training:
+            batch_size = data.shape[0]
             if self.return_index:
                 index_queue = self.index_queue(index)
 
             data_queue = self.data_queue(data)
             distances = self.kernel(data, data_queue)
+            batch_index = torch.arange(batch_size, device=data.device)
             if not self.data_queue.freeze:
                 # set self distances to inf
-                batch_index = torch.arange(np.min(distances.shape), device=data.device)
                 distances[batch_index, batch_index] = np.inf
 
             num_neighbors = np.minimum(self.num_neighbors, data_queue.shape[0])
             _, knn_index = torch.topk(distances, num_neighbors, dim=-1)
 
             if self.num_neighbors > 1:
-                idx = torch.arange(knn_index.shape[0], device=knn_index.device)
                 jdx = torch.randint(
-                    0, num_neighbors, (knn_index.shape[0],), device=knn_index.device
+                    0, num_neighbors, (batch_size,), device=knn_index.device
                 )
-                neighbor_index = knn_index[idx, jdx]
+                neighbor_index = knn_index[batch_index, jdx]
             else:
                 neighbor_index = knn_index[:, 0]
 

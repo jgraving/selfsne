@@ -14,10 +14,11 @@
 # limitations under the License.
 
 import torch
+
 import torch.nn.functional as F
 import torch.distributions as D
 
-from torch.nn import Module
+from torch import nn
 from torch.utils.data import Dataset
 
 from selfsne.kernels import PAIRWISE_KERNELS
@@ -60,7 +61,7 @@ class IndexedDataset(Dataset):
         return len(self.dataset)
 
 
-class IndexParser(Module):
+class IndexParser(nn.Module):
     """
     Parses the index from a batch of data and returns it.
 
@@ -89,7 +90,7 @@ class IndexParser(Module):
         return index
 
 
-class Queue(Module):
+class Queue(nn.Module):
     """
     A first-in-first-out (FIFO) queue.
 
@@ -172,7 +173,7 @@ class Queue(Module):
         return self.full and self.freeze_on_full
 
 
-class NearestNeighborSampler(Module):
+class NearestNeighborSampler(nn.Module):
     """
     Performs nearest neighbor sampling on a given batch of data.
 

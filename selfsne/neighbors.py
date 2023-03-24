@@ -19,6 +19,7 @@ import torch.distributions as D
 from torch.nn import Module
 from torch.utils.data import Dataset
 
+from selfsne.kernels import PAIRWISE_KERNELS
 import numpy as np
 
 
@@ -113,14 +114,14 @@ class NearestNeighborSampler(Module):
         self,
         num_features,
         queue_size=2 ** 15,
-        metric="euclidean",
+        kernel: str = "euclidean",
         perplexity=1,
         freeze_queue_on_full=False,
         return_index=False,
     ):
         super().__init__()
         self.data_queue = Queue(num_features, queue_size, freeze_queue_on_full)
-        self.metric = METRICS[metric]
+        self.kernel = PAIRWISE_KERNELS[kernel]
         self.perplexity = perplexity
         self.return_index = return_index
         if self.return_index:
@@ -144,14 +145,14 @@ class NearestNeighborSampler(Module):
                 index_queue = self.index_queue(index)
 
             data_queue = self.data_queue(data)
-            distances = self.metric(data, data_queue)
+            distances = self.kernel(data, data_queue)
             if not self.data_queue.freeze:
                 # set self distances to inf
                 batch_index = torch.arange(np.min(distances.shape), device=data.device)
                 distances[batch_index, batch_index] = np.inf
 
             perplexity = np.minimum(self.perplexity, data_queue.shape[0])
-            _, knn_index = torch.topk(distances, perplexity, dim=-1, largest=False)
+            _, knn_index = torch.topk(distances, num_neighbors, dim=-1)
 
             if self.perplexity > 1:
                 idx = torch.arange(knn_index.shape[0], device=knn_index.device)

@@ -26,11 +26,26 @@ from selfsne.utils import (
     stop_gradient,
 )
 
+from typing import Optional, List, Union
+
 
 class LogMovingAverage(nn.Module):
     def __init__(
-        self, momentum=0.9, gradient=True, ema_forward=True, ema_backward=True
-    ):
+        self,
+        momentum: float = 0.9,
+        gradient: bool = True,
+        ema_forward: bool = True,
+        ema_backward: bool = True,
+    ) -> None:
+        """
+        LogMovingAverage module that calculates the running log-mean-exp of input tensor.
+
+        Args:
+            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
+            gradient (bool, optional): Whether to enable gradient calculation. Defaults to True.
+            ema_forward (bool, optional): Whether to use exponential moving average during forward pass. Defaults to True.
+            ema_backward (bool, optional): Whether to use exponential moving average during backward pass. Defaults to True.
+        """
         super().__init__()
         self.register_buffer("log_moving_average", torch.zeros(1))
         self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
@@ -38,6 +53,15 @@ class LogMovingAverage(nn.Module):
         class LogMeanExp(torch.autograd.Function):
             @staticmethod
             def forward(ctx, input):
+                """
+                Computes the log-mean-exp of the input tensor.
+
+                Args:
+                    input (torch.Tensor): Input tensor.
+
+                Returns:
+                    torch.Tensor: Log-mean-exp of the input tensor.
+                """
                 log_batch_average = logmeanexp(input)
                 ctx.save_for_backward(input, log_batch_average)
                 self.log_moving_average.data = stop_gradient(
@@ -49,6 +73,16 @@ class LogMovingAverage(nn.Module):
 
             @staticmethod
             def backward(ctx, grad_output):
+                """
+                Computes the gradients of the log-mean-exp with respect to the input tensor.
+
+                Args:
+                    ctx: Saved tensors from forward pass.
+                    grad_output (torch.Tensor): Gradient tensor.
+
+                Returns:
+                    torch.Tensor: Gradient of the log-mean-exp with respect to the input tensor.
+                """
                 if gradient:
                     input, log_batch_average = ctx.saved_tensors
                     log_n = np.log(input.numel())
@@ -64,118 +98,313 @@ class LogMovingAverage(nn.Module):
 
         self.logmeanexp = LogMeanExp.apply
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the log-mean-exp of the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Log-mean-exp of the input tensor.
+        """
         if self.training:
             return self.logmeanexp(x)
         else:
             return self.log_moving_average
 
 
-class LogMovingAverageBaseline(nn.Module):
+class MomentumBaseline(LogMovingAverage):
     def __init__(
-        self, momentum=0.99, gradient=True, ema_forward=True, ema_backward=True
-    ):
-        super().__init__()
-        self.log_ema = LogMovingAverage(
+        self,
+        momentum: float = 0.9,
+        gradient: bool = True,
+        ema_forward: bool = True,
+        ema_backward: bool = True,
+    ) -> None:
+        """
+        Calculates the momentum baseline for a given set of logits.
+
+        Args:
+            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
+        """
+        super().__init__(
             momentum=momentum,
-            gradient=gradient,
-            ema_forward=ema_forward,
-            ema_backward=ema_backward,
+            gradient=True,
+            ema_forward=True,
+            ema_backward=True,
         )
 
-    def forward(self, y, logits):
-        return self.log_ema(off_diagonal(logits) if logits.dim() > 1 else logits)
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the momentum baseline for a given set of logits.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Momentum baseline for the given set of logits.
+        """
+        return super().forward(off_diagonal(logits))
 
 
-def MomentumBaseline(momentum=0.9):
-    return LogMovingAverageBaseline(momentum=momentum, gradient=True)
+class BatchBaseline(nn.Module):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the batch baseline for a given set of logits.
 
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
-def BatchBaseline(momentum=0.9):
-    return LogMovingAverageBaseline(
-        momentum=momentum, gradient=True, ema_forward=False, ema_backward=False
-    )
+        Returns:
+            torch.Tensor: Batch baseline for the given set of logits.
+        """
+        return logmeanexp(off_diagonal(logits))
 
 
 class BatchConditionalBaseline(nn.Module):
-    def forward(self, y, logits):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the batch conditional baseline for a given set of logits.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Batch conditional baseline for the given set of logits.
+        """
         return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
 
 
 class LearnedBaseline(nn.Module):
-    def __init__(self, activation=nn.LogSigmoid()):
+    def __init__(self, activation: Optional[nn.Module] = nn.LogSigmoid()):
+        """
+        Initializes a learned baseline module.
+
+        Args:
+            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
+        """
         super().__init__()
         self.log_baseline = nn.Parameter(torch.zeros(1))
-        self.activation = activation
+        if activation is None:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activation
 
-    def forward(self, y, logits):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the learned baseline for a given set of logits.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Learned baseline for the given set of logits.
+        """
         return self.activation(self.log_baseline)
 
 
 class ConstantBaseline(nn.Module):
-    def __init__(self, baseline=0):
-        super().__init__()
-        self.register_buffer("baseline", baseline)
+    def __init__(self, baseline: float = 0.0):
+        """
+        Initializes a constant baseline module.
 
-    def forward(self, y, logits):
+        Args:
+            baseline (float, optional): Constant baseline value. Defaults to 0.0.
+        """
+        super().__init__()
+        self.register_buffer("baseline", torch.tensor(baseline))
+
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the constant baseline for a given set of logits.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Constant baseline for the given set of logits.
+        """
         return self.baseline
 
 
 class LearnedConditionalBaseline(nn.Module):
-    def __init__(self, encoder, activation=nn.LogSigmoid()):
+    def __init__(
+        self, encoder: nn.Module, activation: Optional[nn.Module] = nn.LogSigmoid()
+    ):
+        """
+        Initializes a learned conditional baseline module.
+
+        Args:
+            encoder (nn.Module): Encoder module to encode the input tensor y.
+            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
+        """
         super().__init__()
         self.encoder = encoder
-        self.activation = activation
+        if activation is None:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activation
 
-    def forward(self, y, logits):
+    def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the learned conditional baseline for a given set of logits and conditional data y.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data input to the encoder.
+
+        Returns:
+            torch.Tensor: Learned conditional baseline for the given set of logits and conditional data y.
+        """
         return self.activation(self.encoder(y))
 
 
 class LogInterpolatedBaseline(nn.Module):
-    def __init__(self, baseline_a, baseline_b, alpha=0.5):
+    def __init__(
+        self, baseline_a: nn.Module, baseline_b: nn.Module, alpha: float = 0.5
+    ):
+        """
+        Initializes a logarithmically interpolated baseline module.
+
+        Args:
+            baseline_a (nn.Module): First baseline module.
+            baseline_b (nn.Module): Second baseline module.
+            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
+        """
         super().__init__()
         self.baseline_a = baseline_a
         self.baseline_b = baseline_b
-        self.register_buffer("alpha_logit", torch.zeros(1).add(alpha).logit())
+        self.register_buffer("alpha_logit", torch.tensor(alpha).logit())
 
-    def forward(self, y, logits):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the logarithmically interpolated baseline for a given set of logits and optional data y.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Logarithmically interpolated baseline for the given set of logits and optional data y.
+        """
         return log_interpolate(
-            self.baseline_a(y, logits), self.baseline_b(y, logits), self.alpha_logit
+            self.baseline_a(logits, y), self.baseline_b(logits, y), self.alpha_logit
         )
 
 
 class InterpolatedBaseline(nn.Module):
-    def __init__(self, baseline_a, baseline_b, alpha=0.5):
+    def __init__(
+        self, baseline_a: nn.Module, baseline_b: nn.Module, alpha: float = 0.5
+    ):
+        """
+        Initializes an interpolated baseline module.
+
+        Args:
+            baseline_a (nn.Module): First baseline module.
+            baseline_b (nn.Module): Second baseline module.
+            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
+        """
         super().__init__()
         self.baseline_a = baseline_a
         self.baseline_b = baseline_b
         self.alpha = alpha
 
-    def forward(self, y, logits):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the interpolated baseline for a given set of logits and optional data y.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for conditional baselines. Used only for LearnedConditionalBaseline. Defaults to None.
+
+        Returns:
+            torch.Tensor: Interpolated baseline for the given set of logits and optional data y.
+        """
         return interpolate(
-            self.baseline_a(y, logits), self.baseline_b(y, logits), self.alpha
+            self.baseline_a(logits, y), self.baseline_b(logits, y), self.alpha
         )
 
 
 class AdditiveBaseline(nn.Module):
-    def __init__(self, baselines, mean=False):
+    def __init__(self, baselines: List[nn.Module], mean: bool = False):
+        """
+        Initializes an additive baseline module.
+
+        Args:
+            baselines (List[nn.Module]): List of baseline modules to be added together.
+            mean (bool, optional): Whether to take the mean of the baselines instead of summing them. Defaults to False.
+        """
         super().__init__()
         self.baselines = nn.ModuleList(baselines)
         self.scale = len(baselines) if mean else 1
         self.log_scale = np.log(self.scale)
 
-    def forward(self, y, logits):
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the additive baseline for a given set of logits and optional data y.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for conditional baselines. Unused for this function. Defaults to None.
+
+        Returns:
+            torch.Tensor: Additive baseline for the given set of logits and optional data y.
+        """
         log_baseline = 0
         for baseline in self.baselines:
-            log_baseline = log_baseline + baseline(y, logits)
+            log_baseline = log_baseline + baseline(logits, y)
         return log_baseline / self.scale
 
 
 class LogAdditiveBaseline(AdditiveBaseline):
-    def forward(self, y, logits):
-        log_baseline = torch.zeros((1), device=y.device)
+    def __init__(self, baselines: List[nn.Module], mean: bool = False):
+        """
+        Initializes a logarithmic additive baseline module.
+
+        Args:
+            baselines (List[nn.Module]): List of baseline modules to be added together.
+            mean (bool, optional): Whether to take the mean of the baselines instead of summing them. Defaults to False.
+        """
+        super().__init__(baselines, mean)
+
+    def forward(
+        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Calculates the logarithmic additive baseline for a given set of logits and optional data y.
+
+        Args:
+            logits (torch.Tensor): Logits tensor.
+            y (torch.Tensor, optional): Data for conditional baselines. Unused for this function. Defaults to None.
+
+        Returns:
+            torch.Tensor: Logarithmic additive baseline for the given set of logits and optional data y.
+        """
+        log_baseline = torch.zeros((1), device=logits.device)
         for baseline in self.baselines:
-            log_baseline = torch.logaddexp(log_baseline, baseline(y, logits))
+            log_baseline = torch.logaddexp(log_baseline, baseline(logits, y))
         return log_baseline - self.log_scale
 
 

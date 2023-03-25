@@ -72,14 +72,14 @@ class IndexParser(nn.Module):
     def forward(
         self,
         batch: Union[
-            Tuple[torch.Tensor, torch.Tensor], List[torch.Tensor, torch.Tensor]
+            Tuple[torch.Tensor], List[torch.Tensor]
         ],
     ) -> torch.Tensor:
         """
         Extracts the index from a batch of data.
 
         Args:
-            batch (Union[Tuple[torch.Tensor, torch.Tensor], List[torch.Tensor, torch.Tensor]]): The batch of data to parse.
+            batch (Union[Tuple[torch.Tensor], List[torch.Tensor]]): The batch of data to parse.
                 Should be a tuple or list containing two elements, where the first element is the
                 data and the second element is the index.
 
@@ -210,15 +210,15 @@ class NearestNeighborSampler(nn.Module):
         self,
         batch: Union[
             torch.Tensor,
-            Tuple[torch.Tensor, torch.Tensor],
-            List[torch.Tensor, torch.Tensor],
+            Tuple[torch.Tensor],
+            List[torch.Tensor],
         ],
     ) -> torch.Tensor:
         """
         Returns the nearest neighbors to the input data.
 
         Args:
-            batch (Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], List[torch.Tensor, torch.Tensor]])): The batch of data to sample from.
+            batch (Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]])): The batch of data to sample from.
                 Should be a tensor or a tuple of two tensors containing the data and their indices.
 
         Returns:

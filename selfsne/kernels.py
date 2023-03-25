@@ -22,7 +22,7 @@ from typing import Union
 
 
 def laplace(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log Laplace kernel between two sets of points x1 and x2, with a given scale.
@@ -43,7 +43,7 @@ def laplace(
 
 
 def pairwise_laplace(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log Laplace kernel between two sets of points x1 and x2, with a given scale.
@@ -64,7 +64,7 @@ def pairwise_laplace(
 
 
 def cauchy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log Cauchy kernel between two sets of points x1 and x2, with a given scale.
@@ -85,7 +85,7 @@ def cauchy(
 
 
 def pairwise_cauchy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log Cauchy kernel between two sets of points x1 and x2, with a given scale.
@@ -106,7 +106,7 @@ def pairwise_cauchy(
 
 
 def inverse(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log inverse kernel between two sets of points x1 and x2, with a given scale.
@@ -130,7 +130,7 @@ def inverse(
 
 
 def pairwise_inverse(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log inverse kernel between two sets of points x1 and x2, with a given scale.
@@ -154,7 +154,7 @@ def pairwise_inverse(
 
 
 def normal(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log normal kernel between two sets of points x1 and x2, with a given scale.
@@ -175,7 +175,7 @@ def normal(
 
 
 def pairwise_normal(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log normal kernel between two sets of points x1 and x2, with a given scale.
@@ -196,7 +196,7 @@ def pairwise_normal(
 
 
 def inner_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the inner product kernel between two sets of points x1 and x2, with a given scale.
@@ -217,7 +217,7 @@ def inner_product(
 
 
 def pairwise_inner_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise inner product kernel between two sets of points x1 and x2, with a given scale.
@@ -238,7 +238,7 @@ def pairwise_inner_product(
 
 
 def von_mises(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
@@ -265,7 +265,7 @@ def von_mises(
 def pairwise_von_mises(
     x1: torch.Tensor,
     x2: torch.Tensor,
-    scale: Union[float, torch.Tensor],
+    scale: Union[float, torch.Tensor] = 1.0,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """
@@ -294,7 +294,7 @@ def pairwise_von_mises(
 
 
 def wrapped_cauchy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log wrapped Cauchy kernel between two sets of points x1 and x2, with a given scale.
@@ -317,7 +317,7 @@ def wrapped_cauchy(
 
 
 def pairwise_wrapped_cauchy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log wrapped Cauchy kernel between two sets of points x1 and x2, with a given scale.
@@ -340,7 +340,7 @@ def pairwise_wrapped_cauchy(
 
 
 def joint_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the log joint product kernel between two sets of points x1 and x2, with a given scale.
@@ -361,7 +361,7 @@ def joint_product(
 
 
 def pairwise_joint_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise log joint product kernel between two sets of points x1 and x2, with a given scale.
@@ -395,7 +395,7 @@ def pairwise_joint_product(
 
 
 def cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the cross entropy between two sets of points x1 and x2.
@@ -415,7 +415,7 @@ def cross_entropy(
 
 
 def pairwise_cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise cross entropy between two sets of points x1 and x2.
@@ -435,7 +435,7 @@ def pairwise_cross_entropy(
 
 
 def kl_divergence(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the Kullback-Leibler divergence between two sets of points x1 and x2.
@@ -458,7 +458,7 @@ def kl_divergence(
 
 
 def pairwise_kl_divergence(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise Kullback-Leibler divergence between two sets of points x1 and x2.
@@ -481,7 +481,7 @@ def pairwise_kl_divergence(
 
 
 def bhattacharyya(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
@@ -502,7 +502,7 @@ def bhattacharyya(
 
 
 def pairwise_bhattacharyya(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor]
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
     """
     Computes the pairwise Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.

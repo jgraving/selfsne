@@ -238,7 +238,10 @@ def pairwise_inner_product(
 
 
 def von_mises(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    scale: Union[float, torch.Tensor] = 1.0,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
     """
     Computes the log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
@@ -259,7 +262,7 @@ def von_mises(
     """
     x1_norm = x1.norm(dim=-1)
     x2_norm = x2.norm(dim=-1)
-    return inner_product(x1, x2, scale) / (x_norm * y_norm).clamp(min=eps)
+    return inner_product(x1, x2, scale) / (x1_norm * x2_norm).clamp(min=eps)
 
 
 def pairwise_von_mises(
@@ -285,12 +288,11 @@ def pairwise_von_mises(
         torch.Tensor: The pairwise von Mises-Fisher kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    x1 = x1
     x1_norm = x1.norm(dim=-1, keepdim=True)
     x2_norm = x2.norm(dim=-1, keepdim=True)
-    return pairwise_inner_product(x1_norm, x2_norm, scale) / (x_norm * y_norm.T).clamp(
-        min=eps
-    )
+    return pairwise_inner_product(x1_norm, x2_norm, scale) / (
+        x1_norm @ x2_norm.T
+    ).clamp(min=eps)
 
 
 def wrapped_cauchy(
@@ -340,7 +342,10 @@ def pairwise_wrapped_cauchy(
 
 
 def joint_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    scale: Union[float, torch.Tensor] = 1.0,
+    apply_softmax: bool = True,
 ) -> torch.Tensor:
     """
     Computes the log joint product kernel between two sets of points x1 and x2, with a given scale.
@@ -357,11 +362,18 @@ def joint_product(
         torch.Tensor: The row-wise joint product kernel matrix, of shape (batch_size,).
 
     """
-    return (x1.log_softmax(-1) + x2.log_softmax(-1)).logsumexp(-1).div_(scale)
+    if apply_softmax:
+        x1 = x1.log_softmax(-1)
+        x2 = x2.log_softmax(-1)
+
+    return (x1 + x2).logsumexp(-1).div_(scale)
 
 
 def pairwise_joint_product(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    scale: Union[float, torch.Tensor] = 1.0,
+    apply_softmax: bool = True,
 ) -> torch.Tensor:
     """
     Computes the pairwise log joint product kernel between two sets of points x1 and x2, with a given scale.
@@ -379,19 +391,20 @@ def pairwise_joint_product(
         torch.Tensor: The pairwise joint product kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    x1_log_softmax = x1.log_softmax(-1)
-    x2_log_softmax = x2.log_softmax(-1)
+    if apply_softmax:
+        x1 = x1.log_softmax(-1)
+        x2 = x2.log_softmax(-1)
 
-    x1_max = x1_log_softmax.max(-1, keepdim=True)[0]
-    x2_max = x2_log_softmax.max(-1, keepdim=True)[0]
+    x1_max = x1.max(-1, keepdim=True)[0]
+    x2_max = x2.max(-1, keepdim=True)[0]
 
-    x1_stable = x1_log_softmax - x1_max
-    x2_stable = x2_log_softmax - x2_max
+    x1_stable = x1 - x1_max
+    x2_stable = x2 - x2_max
 
-    pairwise_matrix = torch.matmul(x1_stable.exp(), x2_stable.exp().T)
-    log_pairwise_matrix = torch.log(pairwise_matrix) + x1_max + x2_max.T
+    pairwise = torch.matmul(x1_stable.exp(), x2_stable.exp().T)
+    log_pairwise = pairwise.log() + x1_max + x2_max.T
 
-    return log_pairwise_matrix / scale
+    return log_pairwise / scale
 
 
 def cross_entropy(
@@ -454,7 +467,7 @@ def kl_divergence(
     log_p1 = x1.log_softmax(-1)
     log_p2 = x2.log_softmax(-1)
     p1 = log_p1.exp()
-    return ((p1 * (log_p1 - log_p2)).sum(-1)) / scale
+    return (p1 * (log_p1 - log_p2)).sum(-1).neg() / scale
 
 
 def pairwise_kl_divergence(
@@ -477,7 +490,9 @@ def pairwise_kl_divergence(
     log_p1 = x1.log_softmax(-1)
     log_p2 = x2.log_softmax(-1)
     p1 = log_p1.exp()
-    return (p1 @ (log_p1 - log_p2).T) / scale
+    entropy = (p1 @ log_p1.T).neg()
+    neg_cross_entropy = p1 @ log_p2.T
+    return (entropy + neg_cross_entropy) / scale
 
 
 def bhattacharyya(
@@ -487,7 +502,7 @@ def bhattacharyya(
     Computes the Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
 
     The Bhattacharyya kernel is defined as:
-    log(K(x1, x2)) = log(Σ (softmax(x1) * softmax(x2))) / 2 * scale
+    log(K(x1, x2)) = log(Σ (sqrt(softmax(x1)) * sqrt(softmax(x2))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -498,7 +513,12 @@ def bhattacharyya(
         torch.Tensor: The row-wise Bhattacharyya kernel matrix, of shape (batch_size,).
 
     """
-    return joint_product(x1, x2, scale * 2)
+    return joint_product(
+        x1.log_softmax(-1).mul(0.5),
+        x2.log_softmax(-1).mul(0.5),
+        scale,
+        apply_softmax=False,
+    )
 
 
 def pairwise_bhattacharyya(
@@ -508,7 +528,7 @@ def pairwise_bhattacharyya(
     Computes the pairwise Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
 
     The Bhattacharyya kernel is defined as:
-    log(K(x1_i, x2_j)) = log(Σ (softmax(x1_i) * softmax(x2_j))) / 2 * scale
+    log(K(x1_i, x2_j)) = log(Σ (sqrt(softmax(x1_i)) * sqrt(softmax(x2_j))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -519,7 +539,12 @@ def pairwise_bhattacharyya(
         torch.Tensor: The pairwise Bhattacharyya kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return pairwise_joint_product(x1, x2, scale * 2)
+    return pairwise_joint_product(
+        x1.log_softmax(-1).mul(0.5),
+        x2.log_softmax(-1).mul(0.5),
+        scale,
+        apply_softmax=False,
+    )
 
 
 ROWWISE_KERNELS = {

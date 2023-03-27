@@ -71,9 +71,7 @@ class IndexParser(nn.Module):
 
     def forward(
         self,
-        batch: Union[
-            Tuple[torch.Tensor], List[torch.Tensor]
-        ],
+        batch: Union[Tuple[torch.Tensor], List[torch.Tensor]],
     ) -> torch.Tensor:
         """
         Extracts the index from a batch of data.
@@ -180,10 +178,10 @@ class NearestNeighborSampler(nn.Module):
     Args:
         num_features (int): The number of features in each data point.
         queue_size (int): The maximum size of the queue for the data points (default: 2 ** 15).
-        kernel (str): The name of the kernel to use for calculating the distances (default: "euclidean").
-        num_neighbors (int): The number of nearest neighbors to sample from (default: 1).
-        freeze_queue_on_full (bool): Whether to stop updating the buffer once it is full (default: False).
-        return_index (bool): Whether to return the indices of the nearest neighbors (default: False).
+        kernel (str): The name of the kernel to use for calculating the similarity (default: "euclidean").
+        num_neighbors (int): The number of nearest neighbors to sample from. Equivalent to perplexity from t-SNE (default: 1).
+        freeze_queue_on_full (bool): Whether to stop updating the queue once it is full (default: False).
+        return_index (bool): Whether to return the indices of the nearest neighbors instead of the data (default: False).
     """
 
     def __init__(
@@ -218,7 +216,7 @@ class NearestNeighborSampler(nn.Module):
         Returns the nearest neighbors to the input data.
 
         Args:
-            batch (Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]])): The batch of data to sample from.
+            batch (Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]): The batch of data to sample from.
                 Should be a tensor or a tuple of two tensors containing the data and their indices.
 
         Returns:
@@ -240,26 +238,27 @@ class NearestNeighborSampler(nn.Module):
 
             data_queue = self.data_queue(data)
             distances = self.kernel(data, data_queue)
-            batch_index = torch.arange(batch_size, device=data.device)
+            batch_idx = torch.arange(batch_size, device=data.device)
+            
             if not self.data_queue.freeze:
-                # set self distances to inf
-                distances[batch_index, batch_index] = np.inf
-
+                # set self kernel to -inf
+                distances[batch_idx, batch_idx] = float("-inf")
+            
             num_neighbors = np.minimum(self.num_neighbors, data_queue.shape[0])
             _, knn_index = torch.topk(distances, num_neighbors, dim=-1)
 
             if self.num_neighbors > 1:
-                jdx = torch.randint(
+                neighbor_idx = torch.randint(
                     0, num_neighbors, (batch_size,), device=knn_index.device
                 )
-                neighbor_index = knn_index[batch_index, jdx]
+                sample_idx = knn_index[batch_idx, neighbor_idx]
             else:
-                neighbor_index = knn_index[:, 0]
+                sample_idx = knn_index[:, 0]
 
             if self.return_index:
-                return index_queue[neighbor_index]
+                return index_queue[sample_idx]
             else:
-                return data_queue[neighbor_index]
+                return data_queue[sample_idx]
 
         elif self.return_index:
             return index

@@ -26,6 +26,8 @@ import numpy as np
 
 from typing import Tuple, List, Any, Union
 
+NEG_INF = float("-inf")
+
 
 class IndexedDataset(Dataset):
     """
@@ -182,6 +184,8 @@ class NearestNeighborSampler(nn.Module):
         num_neighbors (int): The number of nearest neighbors to sample from. Equivalent to perplexity from t-SNE (default: 1).
         freeze_queue_on_full (bool): Whether to stop updating the queue once it is full (default: False).
         return_index (bool): Whether to return the indices of the nearest neighbors instead of the data (default: False).
+        max_similarity (float): The maximum similarity value to exclude from the selection when sampling neighbors. Defaults to 0.
+
     """
 
     def __init__(
@@ -192,6 +196,7 @@ class NearestNeighborSampler(nn.Module):
         num_neighbors: int = 1,
         freeze_queue_on_full: bool = False,
         return_index: bool = False,
+        max_similarity: float = 0.0,
     ):
         super().__init__()
         self.data_queue = Queue(num_features, queue_size, freeze_queue_on_full)
@@ -202,6 +207,7 @@ class NearestNeighborSampler(nn.Module):
             self.index_queue = Queue(
                 1, queue_size, freeze_queue_on_full, dtype=torch.long
             )
+        self.max_similarity = max_similarity
 
     @torch.no_grad()
     def forward(
@@ -237,23 +243,9 @@ class NearestNeighborSampler(nn.Module):
                 index_queue = self.index_queue(index)
 
             data_queue = self.data_queue(data)
-            distances = self.kernel(data, data_queue)
-            batch_idx = torch.arange(batch_size, device=data.device)
-            
-            if not self.data_queue.freeze:
-                # set self kernel to -inf
-                distances[batch_idx, batch_idx] = float("-inf")
-            
-            num_neighbors = np.minimum(self.num_neighbors, data_queue.shape[0])
-            _, knn_index = torch.topk(distances, num_neighbors, dim=-1)
-
-            if self.num_neighbors > 1:
-                neighbor_idx = torch.randint(
-                    0, num_neighbors, (batch_size,), device=knn_index.device
-                )
-                sample_idx = knn_index[batch_idx, neighbor_idx]
-            else:
-                sample_idx = knn_index[:, 0]
+            sample_idx = knn_sampler(
+                data, data_queue, self.kernel, self.num_neighbors, self.max_similarity
+            )
 
             if self.return_index:
                 return index_queue[sample_idx]
@@ -264,6 +256,49 @@ class NearestNeighborSampler(nn.Module):
             return index
         else:
             return x
+
+
+def knn_sampler(
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    kernel: callable,
+    num_neighbors: int,
+    max_similarity: float = 0.0,
+) -> torch.Tensor:
+    """
+    Performs K-nearest neighbors sampling given two input tensors x1 and x2, a kernel function to compute the similarity
+    between them, the number of neighbors to sample and an optional maximum similarity value to exclude from the selection.
+
+    Args:
+        x1 (torch.Tensor): The first input tensor of shape (batch_size, num_features).
+        x2 (torch.Tensor): The second input tensor of shape (num_samples, num_features).
+        kernel (callable): A callable function that computes the pairwise similarity between two tensors. It should take two
+            arguments of shape (batch_size, num_features) and (num_samples, num_features) respectively and return a tensor
+            of shape (batch_size, num_samples) representing the similarity between them.
+        num_neighbors (int): The number of neighbors to sample.
+        max_similarity (float): The maximum similarity value to exclude from the selection. Defaults to 0.
+
+    Returns:
+        torch.Tensor: A tensor of shape (batch_size,) representing the indices of the sampled neighbors for each batch element.
+    """
+    batch_size = x1.shape[0]
+    similarity = kernel(x1, x2)
+    batch_idx = torch.arange(batch_size, device=x1.device)
+
+    similarity = torch.where(similarity == max_similarity, NEG_INF, similarity)
+
+    num_neighbors = min(num_neighbors, x2.shape[0])
+    _, knn_index = torch.topk(similarity, num_neighbors, dim=-1)
+
+    if num_neighbors > 1:
+        neighbor_idx = torch.randint(
+            0, num_neighbors, (batch_size,), device=knn_index.device
+        )
+        sample_idx = knn_index[batch_idx, neighbor_idx]
+    else:
+        sample_idx = knn_index[:, 0]
+
+    return sample_idx
 
 
 def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:

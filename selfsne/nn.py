@@ -74,9 +74,9 @@ class Residual(nn.Module):
 
 
 class ParametricResidual(nn.Module):
-    def __init__(self, in_channels, out_channels, module):
+    def __init__(self, in_features, out_features, module):
         super().__init__()
-        self.proj = init_selu(nn.Linear(in_channels, out_channels))
+        self.proj = init_selu(nn.Linear(in_features, out_features))
         self.module = module
 
     def forward(self, x):
@@ -145,7 +145,9 @@ class PairAugmenter(nn.Module):
 
 
 class ImageNetNorm(nn.Module):
-    def __init__(self,):
+    def __init__(
+        self,
+    ):
         super().__init__()
         loc = torch.tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
         scale = torch.tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
@@ -203,11 +205,6 @@ class Conv1d(nn.Conv1d):
         )
 
 
-class GlobalAvgPool2d(nn.Module):
-    def forward(self, x):
-        return x.mean((-1, -2))
-
-
 def TCN(
     in_channels,
     out_channels,
@@ -217,13 +214,11 @@ def TCN(
     n_blocks=4,
     causal=False,
     causal_shift=False,
-    normalize_input=False,
     batch_norm=False,
 ):
     """Temporal Convolution Network (TCN)"""
     conv1d = CausalConv1d if causal else Conv1d
     return nn.Sequential(
-        nn.BatchNorm1d(in_channels) if normalize_input else nn.Identity(),
         PadShift() if causal and causal_shift else nn.Identity(),
         init_selu(nn.Conv1d(in_channels, hidden_channels, 1)),
         nn.SELU(),
@@ -271,13 +266,11 @@ def TCN2d(
     n_blocks=4,
     causal=False,
     causal_shift=False,
-    normalize_input=False,
     batch_norm=False,
 ):
     """Temporal Convolution Network (TCN)"""
     conv = nn.Conv2d
     return nn.Sequential(
-        nn.BatchNorm2d(in_channels) if normalize_input else nn.Identity(),
         init_selu(nn.Conv2d(in_channels, hidden_channels, (1, 1))),
         nn.SELU(),
         Residual(
@@ -328,14 +321,12 @@ def TCN3d(
     n_blocks=4,
     causal=False,
     causal_shift=False,
-    normalize_input=False,
     residual=False,
     batch_norm=False,
 ):
     """Temporal Convolution Network (TCN)"""
     conv = nn.Conv3d
     return nn.Sequential(
-        nn.BatchNorm3d(in_channels) if normalize_input else nn.Identity(),
         init_selu(nn.Conv3d(in_channels, hidden_channels, (1, 1, 1))),
         nn.SELU(),
         Residual(
@@ -385,13 +376,9 @@ def ResNet2d(
     n_layers=4,
     n_blocks=4,
     global_pooling=True,
-    normalize_input=False,
     batch_norm=False,
 ):
     return nn.Sequential(
-        nn.BatchNorm2d(in_channels, affine=False, momentum=None)
-        if normalize_input
-        else nn.Identity(),
         init_selu(nn.Conv2d(in_channels, hidden_channels, 7, stride=2, padding=3)),
         nn.SELU(),
         nn.Sequential(
@@ -427,45 +414,42 @@ def ResNet2d(
         ),
         nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
         init_selu(nn.Conv2d(hidden_channels, out_channels, 1)),
-        GlobalAvgPool2d() if global_pooling else nn.Identity(),
+        nn.AdaptiveAvgPool2d(1) if global_pooling else nn.Identity(),
     )
 
 
 def MLP(
-    in_channels,
-    out_channels,
-    hidden_channels=256,
+    in_features,
+    out_features,
+    hidden_features=256,
     n_layers=4,
-    normalize_input=False,
     batch_norm=False,
 ):
     net = nn.Sequential(
-        nn.BatchNorm1d(in_channels) if normalize_input else nn.Identity(),
-        init_selu(nn.Linear(in_channels, hidden_channels)),
+        init_selu(nn.Linear(in_features, hidden_features)),
         nn.SELU(),
         Residual(
             nn.Sequential(
                 *[
                     Residual(
                         nn.Sequential(
-                            nn.BatchNorm1d(hidden_channels)
+                            nn.BatchNorm1d(hidden_features)
                             if batch_norm
                             else nn.Identity(),
-                            init_selu(nn.Linear(hidden_channels, hidden_channels)),
-                            nn.SELU(),
+                            init_selu(nn.Linear(hidden_features, hidden_features)),
                         )
                     )
                     for _ in range(n_layers)
                 ]
             )
         ),
-        nn.BatchNorm1d(hidden_channels) if batch_norm else nn.Identity(),
-        init_selu(nn.Linear(hidden_channels, out_channels)),
+        nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
+        init_selu(nn.Linear(hidden_features, out_features)),
     )
     return (
         Residual(net)
-        if in_channels == out_channels
-        else ParametricResidual(in_channels, out_channels, net)
+        if in_features == out_features
+        else ParametricResidual(in_features, out_features, net)
     )
 
 

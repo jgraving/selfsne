@@ -234,40 +234,6 @@ def logmeanexp(
         ) - np.log(x.numel())
 
 
-# def logmeanexp(
-#     x: torch.Tensor, dim: Optional[Tuple[int]] = None, keepdim: bool = False
-# ) -> torch.Tensor:
-#     r"""
-#     Computes the log of the mean of exponentials of input tensor along a given dimension.
-
-#     Args:
-#         x (torch.Tensor): The input tensor of shape :math:`(*, D)`.
-#         dim (tuple of ints, optional): The dimension or dimensions along which to perform the logmeanexp operation.
-#             If dim is None, logmeanexp will be calculated over all dimensions of the input tensor. Default: None.
-#         keepdim (bool, optional): Whether the output tensor has dim retained or not. Default: False.
-
-#     Returns:
-#         The tensor with the log of the mean of exponentials of input tensor along a given dimension. If dim is None, it will be a scalar tensor.
-
-#     Examples::
-#         >>> x = torch.randn(2, 3, 4)
-#         >>> logmeanexp(x, dim=(1,))
-#         tensor([[-0.5457, -0.0862, -0.5162, -0.4415],
-#                 [-0.2969, -0.4067, -0.2293, -0.3733]])
-#     """
-#     if dim is not None:
-#         if isinstance(dim, tuple):
-#             dim_size = torch.sum(torch.tensor(x.shape)[list(dim)])
-#             return x.logsumexp(dim=dim, keepdim=keepdim) - torch.log(dim_size)
-#         else:
-#             dim_size = x.shape[dim]
-#             return x.logsumexp(dim=dim, keepdim=keepdim) - torch.log(dim_size)
-#     else:
-#         return x.logsumexp(dim=tuple(range(x.dim())), keepdim=keepdim) - torch.log(
-#             torch.tensor(x.numel())
-#         )
-
-
 def off_diagonal(x: torch.Tensor) -> torch.Tensor:
     r"""
     Returns a flattened view of the off-diagonal elements of a square matrix.
@@ -374,15 +340,15 @@ def config_to_filename(config: Dict) -> str:
         config (Dict): A dictionary of configuration parameters.
 
     Returns:
-        A string where each key-value pair in the input dictionary is formatted as "key_value", with each pair separated by an underscore.
+        A string where each key-value pair in the input dictionary is formatted as "key=value", with each pair separated by a vertical bar (|).
 
     Examples::
         >>> config = {'batch_size': 64, 'learning_rate': 0.001, 'dropout': 0.5}
         >>> config_to_filename(config)
-        'batch_size_64_learning_rate_0.001_dropout_0.5'
+        'batch_size=64|learning_rate=0.001|dropout=0.5'
     """
-    filename = "_".join([f"{k}_{v}" for k, v in config.items()])
-    return filename
+    items = [f"{k}={v}" for k, v in config.items()]
+    return "|".join(items)
 
 
 class Trainer(pl.Trainer):

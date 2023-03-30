@@ -25,6 +25,37 @@ import numpy as np
 from selfsne.utils import stop_gradient
 
 
+def get_lr_scheduler(
+    optimizer,
+    warmup_steps,
+    target_steps,
+    cosine_steps,
+):
+    milestones = np.cumsum(
+        [
+            warmup_steps,
+            target_steps,
+        ]
+    )
+
+    linear_warmup = (
+        lr_scheduler.LinearLR(optimizer, start_factor=1e-8, total_iters=warmup_steps)
+        if warmup_steps > 0
+        else lr_scheduler.ConstantLR(optimizer, factor=1.0)
+    )
+    target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
+
+    cosine_annealing = lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cosine_steps, eta_min=0
+    )
+
+    scheduler = lr_scheduler.SequentialLR(
+        optimizer, [linear_warmup, target_lr, cosine_annealing], milestones
+    )
+
+    return scheduler
+
+
 class SelfSNE(pl.LightningModule):
     """Self-Supervised Noise Embedding"""
 
@@ -57,9 +88,6 @@ class SelfSNE(pl.LightningModule):
         lr_warmup_steps=0,
         lr_target_steps=0,
         lr_cosine_steps=0,
-        lr_cosine_steps_per_cycle=0,
-        lr_warm_restarts=False,
-        lr_decay_rate=0.9,
     ):
         self.kwargs = locals()
         super().__init__()
@@ -271,40 +299,11 @@ class SelfSNE(pl.LightningModule):
             )
 
         if self.hparams.lr_scheduler:
-
-            lr_warmup_steps = self.hparams.lr_warmup_steps
-            lr_target_steps = self.hparams.lr_target_steps
-            lr_cosine_steps = self.hparams.lr_cosine_steps
-            lr_cosine_steps_per_cycle = self.hparams.lr_cosine_steps_per_cycle
-
-            milestones = np.cumsum(
-                [
-                    lr_warmup_steps,
-                    lr_target_steps,
-                    lr_cosine_steps + (lr_warmup_steps == 0 and lr_target_steps == 0),
-                ]
-            )
-            linear_warmup = (
-                lr_scheduler.LinearLR(
-                    optimizer, start_factor=1e-8, total_iters=lr_warmup_steps
-                )
-                if lr_warmup_steps > 0
-                else lr_scheduler.ConstantLR(optimizer, factor=1.0)
-            )
-            target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
-            if self.hparams.lr_warm_restarts:
-                cosine_annealing = lr_scheduler.CosineAnnealingWarmRestarts(
-                    optimizer, T_0=lr_cosine_steps_per_cycle, eta_min=0
-                )
-            else:
-                cosine_annealing = lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=lr_cosine_steps_per_cycle, eta_min=0
-                )
-
-            scheduler = lr_scheduler.SequentialLR(
+            scheduler = get_lr_scheduler(
                 optimizer,
-                [linear_warmup, target_lr, cosine_annealing],
-                milestones,
+                warmup_steps=self.hparams.lr_warmup_steps,
+                target_steps=self.hparams.lr_target_steps,
+                cosine_steps=self.hparams.lr_cosine_steps,
             )
 
             return [optimizer], [

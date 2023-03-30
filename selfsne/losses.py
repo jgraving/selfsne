@@ -86,6 +86,7 @@ class DensityRatioEstimator(nn.Module):
             Must be a float, string (one of selfsne.baselines.BASELINES), or nn.Module such as from selfsne.baselines.
             Default is 0.
         num_negatives (Optional[int]): Number of negative samples to use. Default is None.
+        embedding_decay (float): Weight decay for the embeddings. Default is 1e-5.
 
     Returns:
         Tuple[torch.Tensor]: A tuple containing four tensors:
@@ -94,7 +95,7 @@ class DensityRatioEstimator(nn.Module):
             [1] The mean of the negative logits, i.e., the off-diagonal entries of
                 the kernel matrix (shape: (1,))
             [2] The mean of the log-baseline (shape: (1,))
-            [3] The similarity loss, the sum of the mean attraction and mean repulsion terms (shape: (1,))
+            [3] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
 
     References:
         [1] Gutmann, M., & Hyvärinen, A. (2010). Noise-contrastive estimation:
@@ -129,6 +130,7 @@ class DensityRatioEstimator(nn.Module):
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = 0,
         num_negatives: Optional[int] = None,
+        embedding_decay: float = 1e-5,
     ) -> None:
 
         super().__init__()
@@ -152,6 +154,7 @@ class DensityRatioEstimator(nn.Module):
             self.baseline = baseline
 
         self.num_negatives = num_negatives
+        self.embedding_decay = embedding_decay
 
     def forward(
         self, z_x: torch.Tensor, z_y: torch.Tensor, y: Optional[torch.Tensor] = None
@@ -175,8 +178,11 @@ class DensityRatioEstimator(nn.Module):
                 [1] The mean of the negative logits, i.e., the off-diagonal entries of
                     the kernel matrix (shape: (1,))
                 [2] The mean of the log-baseline (shape: (1,))
-                [3] The similarity loss, the sum of the mean attraction and mean repulsion terms (shape: (1,))
+                [3] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
         """
+
+        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+
         if self.kernel_scale == "auto":
             embedding_features = z_x.shape[1]
             self.kernel_scale = np.sqrt(embedding_features)
@@ -193,7 +199,7 @@ class DensityRatioEstimator(nn.Module):
             pos_logits.mean(),
             neg_logits.mean(),
             log_baseline.mean(),
-            attraction.mean() + repulsion.mean(),
+            attraction.mean() + repulsion.mean() + embedding_decay,
         )
 
 

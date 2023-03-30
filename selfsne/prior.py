@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 import pytorch_lightning as pl
 
-from selfsne.kernels import KERNELS
+from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.baselines import BASELINES
 from selfsne.utils import disable_grad, enable_grad, stop_gradient, inverse_softplus
 

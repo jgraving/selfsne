@@ -16,6 +16,7 @@
 import torch
 import torch.distributions as D
 from torch import nn
+import torch.nn.functional as F
 from torch.nn import init
 from torch import optim
 from torch.utils.data import DataLoader
@@ -24,13 +25,34 @@ import pytorch_lightning as pl
 
 from selfsne.kernels import KERNELS
 from selfsne.baselines import BASELINES
-from selfsne.utils import disable_grad, enable_grad, stop_gradient
+from selfsne.utils import disable_grad, enable_grad, stop_gradient, inverse_softplus
+
+
+class NormalPrior(pl.LightningModule):
+    def __init__(
+        self,
+        num_features=2,
+        lr=1.0,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        self.log_scale = nn.Parameter(inverse_softplus(torch.ones((1, num_features))))
+        self.register_buffer("loc", torch.zeros((1, num_features)))
+
+    def log_prob(self, x):
+        return D.Normal(self.loc, F.softplus(self.log_scale)).log_prob(x)
+
+    def rate(self, x):
+        disable_grad(self)
+        rate = self.log_prob(x)
+        enable_grad(self)
+        return rate
 
 
 class MixturePrior(pl.LightningModule):
     def __init__(
         self,
-        num_dims=2,
+        num_features=2,
         num_components=2048,
         kernel="normal",
         logits="learn",
@@ -48,10 +70,10 @@ class MixturePrior(pl.LightningModule):
             self.kernel = kernel
 
         if num_components == 1:
-            locs = torch.zeros((num_components, num_dims))
+            locs = torch.zeros((num_components, num_features))
             self.register_buffer("locs", locs)
         else:
-            self.locs = nn.Parameter(torch.Tensor(num_components, num_dims))
+            self.locs = nn.Parameter(torch.Tensor(num_components, num_features))
             init.normal_(self.locs)
 
         if logits == "learn":

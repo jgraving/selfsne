@@ -24,6 +24,23 @@ from einops import rearrange, repeat
 from typing import Optional, Tuple, List, Dict, Union
 
 
+def inverse_softplus(x):
+    """
+    Computes the inverse of the softplus function for a given output value.
+
+    Args:
+        x (Tensor): A tensor containing the output value(s) of the softplus function.
+
+    Returns:
+        Tensor: A tensor containing the inverse of the softplus function for the input `x`.
+
+    Notes:
+        The softplus function is defined as `log(1 + exp(x))`, and the inverse softplus
+        function is defined as `log(exp(x) - 1)`.
+    """
+    return x.expm1().log()
+
+
 def stop_gradient(x: torch.Tensor) -> torch.Tensor:
     r"""
     Creates a new tensor from the input tensor with detached gradient.

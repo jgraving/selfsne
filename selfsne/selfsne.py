@@ -54,10 +54,10 @@ class SelfSNE(pl.LightningModule):
         projector_weight_decay=0.0,
         decoder_weight_decay=0.0,
         lr_scheduler=False,
-        lr_warmup_steps=10,
-        lr_target_steps=10,
-        lr_cosine_steps=30,
-        lr_cosine_steps_per_cycle=10,
+        lr_warmup_steps=0,
+        lr_target_steps=0,
+        lr_cosine_steps=0,
+        lr_cosine_steps_per_cycle=0,
         lr_warm_restarts=False,
         lr_decay_rate=0.9,
     ):
@@ -118,10 +118,14 @@ class SelfSNE(pl.LightningModule):
             ) = self.similarity_loss(z_x, z_y, y)
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
             self.log(
-                mode + "pos_log_density_ratio", pos_log_density_ratio.item(), prog_bar=True
+                mode + "pos_log_density_ratio",
+                pos_log_density_ratio.item(),
+                prog_bar=True,
             )
             self.log(
-                mode + "neg_log_density_ratio", neg_log_density_ratio.item(), prog_bar=True
+                mode + "neg_log_density_ratio",
+                neg_log_density_ratio.item(),
+                prog_bar=True,
             )
             self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
 
@@ -138,34 +142,25 @@ class SelfSNE(pl.LightningModule):
             prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
             rate = -self.prior.rate(z_y).mean()
             self.log(mode + "rate", rate.item(), prog_bar=True)
-            self.log(
-                mode + "prior_entropy",
-                self.prior.entropy().item(),
-                prog_bar=True,
-            )
-            self.log(
-                mode + "cluster_perplexity",
-                self.prior.mixture.entropy().exp().item(),
-                prog_bar=True,
-            )
-            if (
-                self.hparams.rate_start_step
-                <= self.current_epoch
-                < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
-            ):
-                rate_weight = self.hparams.rate_weight * (
-                    (self.current_epoch - self.hparams.rate_start_step + 1)
-                    / self.hparams.rate_warmup_steps
+            if hasattr(self.prior, "entropy"):
+                self.log(
+                    mode + "prior_entropy",
+                    self.prior.entropy().item(),
+                    prog_bar=True,
                 )
-            elif self.current_epoch > self.hparams.rate_start_step:
-                rate_weight = self.hparams.rate_weight
-            else:
-                rate_weight = 0
-            self.log(mode + "rate_weight", float(rate_weight), prog_bar=True)
+            if hasattr(self.prior, "mixture") and hasattr(
+                self.prior.mixture, "entropy"
+            ):
+                self.log(
+                    mode + "cluster_perplexity",
+                    self.prior.mixture.entropy().exp().item(),
+                    prog_bar=True,
+                )
+            self.log(mode + "rate_weight", float(self.rate_weight), prog_bar=True)
 
         loss = (
             (prior_log_prob if self.prior is not None else 0)
-            + ((rate * rate_weight) if self.prior is not None else 0)
+            + ((rate * self.rate_weight) if self.prior is not None else 0)
             + (
                 (similarity * self.hparams.similarity_weight)
                 if self.similarity_loss is not None
@@ -178,8 +173,26 @@ class SelfSNE(pl.LightningModule):
             )
             + (reconstruction if self.reconstruction_loss is not None else 0)
         )
+        self.log(mode + "loss", loss.item(), prog_bar=True)
 
         return loss
+
+    @property
+    def rate_weight(self):
+        if (
+            self.hparams.rate_start_step
+            <= self.current_epoch
+            < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
+        ):
+            rate_weight = self.hparams.rate_weight * (
+                (self.current_epoch - self.hparams.rate_start_step + 1)
+                / self.hparams.rate_warmup_steps
+            )
+        elif self.current_epoch > self.hparams.rate_start_step:
+            rate_weight = self.hparams.rate_weight
+        else:
+            rate_weight = 0
+        return rate_weight
 
     def training_step(self, batch, batch_idx):
         return self.loss(batch, batch_idx, mode="")
@@ -194,7 +207,7 @@ class SelfSNE(pl.LightningModule):
         prediction = {}
 
         prediction["embedding"] = self(batch)
-        if self.prior is not None:
+        if self.prior is not None and hasattr(self.prior, "assign_labels"):
             prediction["labels"] = self.prior.assign_labels(prediction["embedding"])
 
         return prediction
@@ -263,7 +276,6 @@ class SelfSNE(pl.LightningModule):
             lr_target_steps = self.hparams.lr_target_steps
             lr_cosine_steps = self.hparams.lr_cosine_steps
             lr_cosine_steps_per_cycle = self.hparams.lr_cosine_steps_per_cycle
-            lr_decay_rate = self.hparams.lr_decay_rate
 
             milestones = np.cumsum(
                 [
@@ -289,10 +301,9 @@ class SelfSNE(pl.LightningModule):
                     optimizer, T_max=lr_cosine_steps_per_cycle, eta_min=0
                 )
 
-            exp_decay = lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay_rate)
             scheduler = lr_scheduler.SequentialLR(
                 optimizer,
-                [linear_warmup, target_lr, cosine_annealing, exp_decay],
+                [linear_warmup, target_lr, cosine_annealing],
                 milestones,
             )
 

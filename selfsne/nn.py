@@ -414,7 +414,9 @@ def ResNet2d(
         ),
         nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
         init_selu(nn.Conv2d(hidden_channels, out_channels, 1)),
-        nn.AdaptiveAvgPool2d(1) if global_pooling else nn.Identity(),
+        nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten())
+        if global_pooling
+        else nn.Identity(),
     )
 
 

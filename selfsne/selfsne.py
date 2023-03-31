@@ -207,7 +207,9 @@ class SelfSNE(pl.LightningModule):
 
     @property
     def rate_weight(self):
-        if (
+        if self.hparams.rate_start_step + self.hparams.rate_warmup_steps == 0:
+            rate_weight = self.hparams.rate_weight
+        elif (
             self.hparams.rate_start_step
             <= self.current_epoch
             < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
@@ -216,7 +218,7 @@ class SelfSNE(pl.LightningModule):
                 (self.current_epoch - self.hparams.rate_start_step + 1)
                 / self.hparams.rate_warmup_steps
             )
-        elif self.current_epoch > self.hparams.rate_start_step:
+        elif self.current_epoch >= self.hparams.rate_start_step:
             rate_weight = self.hparams.rate_weight
         else:
             rate_weight = 0

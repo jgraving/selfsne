@@ -119,16 +119,16 @@ class Queue(nn.Module):
     @torch.no_grad()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Adds the given data to the queue buffer. If the buffer is full and `freeze_on_full` is True,
-        the buffer will not be updated.
+        Adds the given data to the queue during training. If the queue is full and `freeze_on_full` is True,
+        the queue will not be updated. During evaluation, the queue will not be updated.
 
         Args:
-            x (torch.Tensor): The data to add to the buffer.
+            x (torch.Tensor): The data to add to the queue.
 
         Returns:
-            torch.Tensor: The current state of the buffer.
+            torch.Tensor: The current state of the queue.
         """
-        if self.freeze:
+        if self.freeze or not self.training:
             return self.queue
         else:
             self.queue = torch.cat((x, self.queue))[: self.max_size]
@@ -138,10 +138,10 @@ class Queue(nn.Module):
     @torch.no_grad()
     def sample(self, n_samples: int) -> torch.Tensor:
         """
-        Samples `n_samples` data points randomly from the buffer.
+        Samples `n_samples` data points randomly from the queue.
 
         Args:
-            n_samples (int): The number of data points to sample from the buffer.
+            n_samples (int): The number of data points to sample from the queue.
 
         Returns:
             torch.Tensor: A tensor containing the sampled data points.
@@ -155,20 +155,20 @@ class Queue(nn.Module):
     @property
     def full(self) -> bool:
         """
-        Returns True if the buffer is full, otherwise False.
+        Returns True if the queue is full, otherwise False.
 
         Returns:
-            bool: True if the buffer is full, otherwise False.
+            bool: True if the queue is full, otherwise False.
         """
         return self.queue_size == self.max_size
 
     @property
     def freeze(self) -> bool:
         """
-        Returns True if the buffer is full and `freeze_on_full` is True, otherwise False.
+        Returns True if the queue is full and `freeze_on_full` is True, otherwise False.
 
         Returns:
-            bool: True if the buffer is full and `freeze_on_full` is True, otherwise False.
+            bool: True if the queue is full and `freeze_on_full` is True, otherwise False.
         """
         return self.full and self.freeze_on_full
 
@@ -237,25 +237,18 @@ class NearestNeighborSampler(nn.Module):
                     "`return_index` is True, but index was not passed with batch."
                 )
 
-        if self.training:
-            batch_size = data.shape[0]
-            if self.return_index:
-                index_queue = self.index_queue(index)
+        batch_size = data.shape[0]
+        if self.return_index:
+            index_queue = self.index_queue(index)
+        data_queue = self.data_queue(data)
+        sample_idx = knn_sampler(
+            data, data_queue, self.kernel, self.num_neighbors, self.max_similarity
+        )
 
-            data_queue = self.data_queue(data)
-            sample_idx = knn_sampler(
-                data, data_queue, self.kernel, self.num_neighbors, self.max_similarity
-            )
-
-            if self.return_index:
-                return index_queue[sample_idx]
-            else:
-                return data_queue[sample_idx]
-
-        elif self.return_index:
-            return index
+        if self.return_index:
+            return index_queue[sample_idx]
         else:
-            return x
+            return data_queue[sample_idx]
 
 
 def knn_sampler(

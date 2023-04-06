@@ -136,14 +136,15 @@ class MomentumBaseline(LogMovingAverage):
         )
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the momentum baseline for a given set of logits.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
         Returns:
             torch.Tensor: Momentum baseline for the given set of logits.
@@ -153,14 +154,15 @@ class MomentumBaseline(LogMovingAverage):
 
 class BatchBaseline(nn.Module):
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the batch baseline for a given set of logits.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
         Returns:
             torch.Tensor: Batch baseline for the given set of logits.
@@ -170,14 +172,15 @@ class BatchBaseline(nn.Module):
 
 class BatchConditionalBaseline(nn.Module):
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the batch conditional baseline for a given set of logits.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
         Returns:
             torch.Tensor: Batch conditional baseline for the given set of logits.
@@ -201,14 +204,15 @@ class LearnedBaseline(nn.Module):
             self.activation = activation
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the learned baseline for a given set of logits.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
         Returns:
             torch.Tensor: Learned baseline for the given set of logits.
@@ -228,14 +232,15 @@ class ConstantBaseline(nn.Module):
         self.register_buffer("baseline", torch.tensor(baseline))
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the constant baseline for a given set of logits.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Unused for this baseline. Defaults to None.
 
         Returns:
             torch.Tensor: Constant baseline for the given set of logits.
@@ -245,34 +250,50 @@ class ConstantBaseline(nn.Module):
 
 class LearnedConditionalBaseline(nn.Module):
     def __init__(
-        self, encoder: nn.Module, activation: Optional[nn.Module] = nn.LogSigmoid()
+        self,
+        encoder: nn.Module,
+        embedding_input: bool = False,
+        activation: Optional[nn.Module] = nn.LogSigmoid(),
     ):
         """
         Initializes a learned conditional baseline module.
 
         Args:
             encoder (nn.Module): Encoder module to encode the input tensor y.
+            embedding_input (bool, optional): Whether to pass embedded data z_y to the encoder instead of data y. Defaults to False.
             activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
         """
         super().__init__()
         self.encoder = encoder
+        self.embedding_input = embedding_input
         if activation is None:
             self.activation = nn.Identity()
         else:
             self.activation = activation
 
-    def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        y: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
         """
-        Calculates the learned conditional baseline for a given set of logits and conditional data y.
+        Calculates the learned conditional baseline for a given set of data y or embedded data z_y.
 
         Args:
-            logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data input to the encoder.
+            y (torch.Tensor, optional): Data input to the encoder. Ignored if embedding_input=True.
+            z_y (torch.Tensor, optional): Embedded data input to the encoder. Used if embedding_input=True.
 
         Returns:
-            torch.Tensor: Learned conditional baseline for the given set of logits and conditional data y.
+            torch.Tensor: Learned conditional baseline for the data y or z_y.
         """
-        return self.activation(self.encoder(y))
+        if self.embedding_input:
+            assert z_y is not None, "z_y must be provided when embedding_input=True"
+            encoded = self.encoder(z_y)
+        else:
+            assert y is not None, "y must be provided when embedding_input=False"
+            encoded = self.encoder(y)
+        return self.activation(encoded)
 
 
 class LogInterpolatedBaseline(nn.Module):
@@ -293,20 +314,26 @@ class LogInterpolatedBaseline(nn.Module):
         self.register_buffer("alpha_logit", torch.tensor(alpha).logit())
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Calculates the logarithmically interpolated baseline for a given set of logits and optional data y.
+        Calculates the logarithmically interpolated baseline.
 
         Args:
             logits (torch.Tensor): Logits tensor.
             y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
+            z_y (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
 
         Returns:
             torch.Tensor: Logarithmically interpolated baseline for the given set of logits and optional data y.
         """
         return log_interpolate(
-            self.baseline_a(logits, y), self.baseline_b(logits, y), self.alpha_logit
+            self.baseline_a(logits=logits, y=y, z_y=z_y),
+            self.baseline_b(logits=logits, y=y, z_y=z_y),
+            self.alpha_logit,
         )
 
 
@@ -328,20 +355,26 @@ class InterpolatedBaseline(nn.Module):
         self.alpha = alpha
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Calculates the interpolated baseline for a given set of logits and optional data y.
+        Calculates the interpolated baseline.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for conditional baselines. Used only for LearnedConditionalBaseline. Defaults to None.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
+            z_y (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
 
         Returns:
             torch.Tensor: Interpolated baseline for the given set of logits and optional data y.
         """
         return interpolate(
-            self.baseline_a(logits, y), self.baseline_b(logits, y), self.alpha
+            self.baseline_a(logits=logits, y=y, z_y=z_y),
+            self.baseline_b(logits=logits, y=y, z_y=z_y),
+            self.alpha,
         )
 
 
@@ -360,21 +393,25 @@ class AdditiveBaseline(nn.Module):
         self.log_scale = np.log(self.scale)
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Calculates the additive baseline for a given set of logits and optional data y.
+        Calculates the additive baseline.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for conditional baselines. Unused for this function. Defaults to None.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
+            z_y (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
 
         Returns:
             torch.Tensor: Additive baseline for the given set of logits and optional data y.
         """
         log_baseline = 0
         for baseline in self.baselines:
-            log_baseline = log_baseline + baseline(logits, y)
+            log_baseline = log_baseline + baseline(logits=logits, y=y, z_y=z_y)
         return log_baseline / self.scale
 
 
@@ -390,21 +427,27 @@ class LogAdditiveBaseline(AdditiveBaseline):
         super().__init__(baselines, mean)
 
     def forward(
-        self, logits: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        logits: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Calculates the logarithmic additive baseline for a given set of logits and optional data y.
 
         Args:
             logits (torch.Tensor): Logits tensor.
-            y (torch.Tensor, optional): Data for conditional baselines. Unused for this function. Defaults to None.
+            y (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
+            z_y (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
 
         Returns:
             torch.Tensor: Logarithmic additive baseline for the given set of logits and optional data y.
         """
         log_baseline = torch.zeros((1), device=logits.device)
         for baseline in self.baselines:
-            log_baseline = torch.logaddexp(log_baseline, baseline(logits, y))
+            log_baseline = torch.logaddexp(
+                log_baseline, baseline(logits=logits, y=y, z_y=z_y)
+            )
         return log_baseline - self.log_scale
 
 

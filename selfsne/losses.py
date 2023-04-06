@@ -188,7 +188,7 @@ class DensityRatioEstimator(nn.Module):
             self.kernel_scale = np.sqrt(embedding_features)
 
         logits = self.kernel(z_y, z_x, self.kernel_scale)
-        log_baseline = self.baseline(logits, y)
+        log_baseline = self.baseline(logits=logits, y=y, z_y=z_y)
         logits = logits - log_baseline
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)

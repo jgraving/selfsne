@@ -86,7 +86,7 @@ class DensityRatioEstimator(nn.Module):
             Must be a float, string (one of selfsne.baselines.BASELINES), or nn.Module such as from selfsne.baselines.
             Default is 0.
         num_negatives (Optional[int]): Number of negative samples to use. Default is None.
-        embedding_decay (float): Weight decay for the embeddings. Default is 1e-5.
+        embedding_decay (float): Weight decay for the embeddings. Default is 0.0.
 
     Returns:
         Tuple[torch.Tensor]: A tuple containing four tensors:
@@ -130,7 +130,7 @@ class DensityRatioEstimator(nn.Module):
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = 0,
         num_negatives: Optional[int] = None,
-        embedding_decay: float = 1e-5,
+        embedding_decay: float = 0,
     ) -> None:
 
         super().__init__()

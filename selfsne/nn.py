@@ -163,6 +163,46 @@ class StopGradient(nn.Module):
         return stop_gradient(x)
 
 
+class InputNorm1d(nn.BatchNorm1d):
+    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
+        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Use super's forward to update running statistics
+        super().forward(x)
+        # Use running statistics for normalization
+        x_norm = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
+        return x_norm
+
+
+class InputNorm2d(nn.BatchNorm2d):
+    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
+        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Use super's forward to update running statistics
+        super().forward(x)
+        # Use running statistics for normalization
+        x_norm = (x - self.running_mean.view(1, -1, 1, 1)) / torch.sqrt(
+            self.running_var.view(1, -1, 1, 1) + self.eps
+        )
+        return x_norm
+
+
+class InputNorm3d(nn.BatchNorm3d):
+    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
+        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Use super's forward to update running statistics
+        super().forward(x)
+        # Use running statistics for normalization
+        x_norm = (x - self.running_mean.view(1, -1, 1, 1, 1)) / torch.sqrt(
+            self.running_var.view(1, -1, 1, 1, 1) + self.eps
+        )
+        return x_norm
+
+
 class CausalConv1d(nn.Conv1d):
     def __init__(
         self,

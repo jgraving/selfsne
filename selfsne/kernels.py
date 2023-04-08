@@ -63,6 +63,56 @@ def pairwise_laplace(
     return torch.cdist(x1, x2, p=1).div(scale).neg()
 
 
+def studentt(
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    scale: Union[float, torch.Tensor] = 1.0,
+    df: Union[float, torch.Tensor] = 1.0,
+) -> torch.Tensor:
+    """
+    Computes the log Student's t kernel between two sets of points x1 and x2, with a given scale.
+
+    The log Student's t kernel is defined as:
+    log(K(x1, x2)) = - log(1 + ||x1 - x2||_2^2 / scale^2 * df) * (df + 1) / 2
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
+
+    """
+    return (x1 - x2).pow(2).sum(-1).div(df * scale ** 2).log1p().neg() * (df + 1) / 2
+
+
+def pairwise_studentt(
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    scale: Union[float, torch.Tensor] = 1.0,
+    df: Union[float, torch.Tensor] = 1.0,
+) -> torch.Tensor:
+    """
+    Computes the pairwise log Student's t kernel between two sets of points x1 and x2, with a given scale.
+
+    The pairwise log Student's t kernel is defined as:
+    log(K(x1_i, x2_j)) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2 * df) * (df + 1) / 2
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
+
+    """
+    return (
+        torch.cdist(x1, x2, p=2).div(scale).pow(2).div(df).log1p().neg() * (df + 1) / 2
+    )
+
+
 def cauchy(
     x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
@@ -550,7 +600,7 @@ def pairwise_bhattacharyya(
 ROWWISE_KERNELS = {
     "euclidean": normal,
     "normal": normal,
-    "student_t": cauchy,
+    "student_t": studentt,
     "cauchy": cauchy,
     "inverse": inverse,
     "laplace": laplace,
@@ -572,7 +622,7 @@ ROWWISE_KERNELS = {
 PAIRWISE_KERNELS = {
     "euclidean": pairwise_normal,
     "normal": pairwise_normal,
-    "student_t": pairwise_cauchy,
+    "student_t": pairwise_studentt,
     "cauchy": pairwise_cauchy,
     "inverse": pairwise_inverse,
     "laplace": pairwise_laplace,

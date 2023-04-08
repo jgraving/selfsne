@@ -80,6 +80,7 @@ class DensityRatioEstimator(nn.Module):
         kernel_scale (Union[float, str]): Positive scale value for calculating logits.
             For loc-scale family kernels sqrt(embedding_dims) is recommended,
             which is calculated automatically when kernel_scale = "auto". Default is 1.0.
+        temperature (float): The temperature for the logits. Larger values create more uniform embeddings. Default is 1.
         divergence (Union[str, callable]): Divergence function used for instance classification.
             Must be one of selfsne.divergences.DIVERGENCES or a callable that takes in two 2D tensors and returns a scalar.
         baseline (Union[str, float, callable]): The baseline for calculating the log density ratio.
@@ -127,6 +128,7 @@ class DensityRatioEstimator(nn.Module):
         self,
         kernel: Union[str, callable] = "cauchy",
         kernel_scale: Union[float, str] = 1.0,
+        temperature: float = 1,
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = 0,
         num_negatives: Optional[int] = None,
@@ -155,6 +157,7 @@ class DensityRatioEstimator(nn.Module):
 
         self.num_negatives = num_negatives
         self.embedding_decay = embedding_decay
+        self.inverse_temperature = 1 / temperature
 
     def forward(
         self, z_x: torch.Tensor, z_y: torch.Tensor, y: Optional[torch.Tensor] = None
@@ -187,7 +190,7 @@ class DensityRatioEstimator(nn.Module):
             embedding_features = z_x.shape[1]
             self.kernel_scale = np.sqrt(embedding_features)
 
-        logits = self.kernel(z_y, z_x, self.kernel_scale)
+        logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
         log_baseline = self.baseline(logits=logits, y=y, z_y=z_y)
         logits = logits - log_baseline
         pos_logits = diagonal(logits).unsqueeze(1)
@@ -201,31 +204,6 @@ class DensityRatioEstimator(nn.Module):
             log_baseline.mean(),
             attraction.mean() + repulsion.mean() + embedding_decay,
         )
-
-
-def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:
-    """
-    Randomly samples columns from the input tensor.
-
-    Args:
-        x (torch.Tensor): The input tensor to sample from.
-        num_samples (int): The number of columns to sample.
-
-    Returns:
-        torch.Tensor: A tensor of shape (x.shape[0], num_samples), where each row of the output
-            tensor is a random selection of columns from the corresponding row of the input tensor.
-
-    Example:
-        >>> x = torch.randn((4, 6))
-        >>> random_sample_columns(x, 3)
-        tensor([[ 0.6305,  0.1669, -1.2118],
-                [ 0.5246, -0.0237, -1.2891],
-                [-1.3693, -0.1853, -0.3473],
-                [ 0.6842,  1.5442,  0.5549]])
-    """
-    idx = torch.arange(x.shape[0], device=x.device).unsqueeze(1).repeat(1, num_samples)
-    jdx = torch.randint(0, x.shape[1], (x.shape[0], num_samples), device=x.device)
-    return x[idx, jdx]
 
 
 class RedundancyReduction(nn.Module):

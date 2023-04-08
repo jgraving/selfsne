@@ -149,7 +149,7 @@ class MomentumBaseline(LogMovingAverage):
         Returns:
             torch.Tensor: Momentum baseline for the given set of logits.
         """
-        return super().forward(off_diagonal(logits))
+        return super().forward(logits)
 
 
 class BatchBaseline(nn.Module):
@@ -167,7 +167,7 @@ class BatchBaseline(nn.Module):
         Returns:
             torch.Tensor: Batch baseline for the given set of logits.
         """
-        return logmeanexp(off_diagonal(logits))
+        return logmeanexp(logits)
 
 
 class BatchConditionalBaseline(nn.Module):
@@ -185,7 +185,7 @@ class BatchConditionalBaseline(nn.Module):
         Returns:
             torch.Tensor: Batch conditional baseline for the given set of logits.
         """
-        return logmeanexp(remove_diagonal(logits), dim=-1, keepdim=True)
+        return logmeanexp(logits, dim=-1, keepdim=True)
 
 
 class LearnedBaseline(nn.Module):

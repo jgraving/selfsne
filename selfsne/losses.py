@@ -74,7 +74,7 @@ class DensityRatioEstimator(nn.Module):
 
     Args:
         kernel (Union[str, callable]): Similarity kernel used for calculating logits.
-            Must be one of selfsne.kernels.KERNELS or a callable that takes in two 2D tensors and returns a 2D tensor.
+            Must be one of selfsne.kernels.KERNELS or a callable that takes in two 2D tensors and returns a pairwise 2D tensor.
             For example, "cauchy" can be used to produce t-SNE or UMAP embeddings, "normal" can be used to
             produce SNE embeddings, and "vonmises" can be used for (hyper)spherical embeddings.
         kernel_scale (Union[float, str]): Positive scale value for calculating logits.
@@ -88,6 +88,7 @@ class DensityRatioEstimator(nn.Module):
             Default is 0.
         num_negatives (Optional[int]): Number of negative samples to use. Default is None.
         embedding_decay (float): Weight decay for the embeddings. Default is 0.0.
+
 
     Returns:
         Tuple[torch.Tensor]: A tuple containing four tensors:
@@ -191,13 +192,14 @@ class DensityRatioEstimator(nn.Module):
             self.kernel_scale = np.sqrt(embedding_features)
 
         logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
-        log_baseline = self.baseline(logits=logits, y=y, z_y=z_y)
-        logits = logits - log_baseline
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-        attraction, repulsion = self.divergence(pos_logits, neg_logits)
+        log_baseline = self.baseline(logits=neg_logits, y=y, z_y=z_y)
+        attraction, repulsion = self.divergence(
+            pos_logits - log_baseline, neg_logits - log_baseline
+        )
         return (
             pos_logits.mean(),
             neg_logits.mean(),

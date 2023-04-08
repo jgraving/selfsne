@@ -13,30 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Perceiver adapted from https://github.com/lucidrains/perceiver-pytorch/blob/main/perceiver_pytorch/perceiver_io.py
-# Under the following License:
-# MIT License
-
-# Copyright (c) 2021 Phil Wang
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 import torch
 from torch import nn, einsum
 from torch.nn import init
@@ -73,6 +49,11 @@ class Residual(nn.Module):
         return x + self.module(x)
 
 
+class PadShift(nn.Module):
+    def forward(self, x):
+        return F.pad(x, pad=(1, 0))[..., :-1]
+
+
 class ParametricResidual(nn.Module):
     def __init__(self, in_features, out_features, module):
         super().__init__()
@@ -92,24 +73,6 @@ class Lambda(nn.Module):
         return self.func(x)
 
 
-class PosEmbedding(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim):
-        super().__init__()
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-
-    def forward(self, x):
-        idx = torch.arange(x.shape[1], device=x.device)
-        return x + self.embedding(idx)
-
-
-def TokenMask(p=0.5):
-    return nn.Sequential(
-        Rearrange("batch tokens features -> batch tokens features ()"),
-        nn.Dropout2d(p),
-        Rearrange("batch tokens features () ->  batch tokens features"),
-    )
-
-
 class PairSampler(nn.Module):
     def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
         super().__init__()
@@ -127,8 +90,8 @@ class BatchCenter(nn.Module):
         self.momentum = momentum
 
     def forward(self, x):
-        batch_mean = x.mean(dim=0, keepdim=True)
         if self.training:
+            batch_mean = x.mean(dim=0, keepdim=True)
             self.running_mean = torch.lerp(self.running_mean, batch_mean, self.momentum)
             return x - batch_mean
         else:
@@ -417,9 +380,19 @@ def ResNet2d(
     n_blocks=4,
     global_pooling=True,
     batch_norm=False,
+    input_stride=2,
+    input_kernel=7,
 ):
     return nn.Sequential(
-        init_selu(nn.Conv2d(in_channels, hidden_channels, 7, stride=2, padding=3)),
+        init_selu(
+            nn.Conv2d(
+                in_channels,
+                hidden_channels,
+                input_kernel,
+                stride=input_stride,
+                padding=input_kernel // 2,
+            )
+        ),
         nn.SELU(),
         nn.Sequential(
             *[
@@ -495,182 +468,86 @@ def MLP(
     )
 
 
-# helpers
+class SampleTokens(nn.Module):
+    def __init__(self, p=0.5):
+        super(SampleTokens, self).__init__()
+        self.p = p
 
+    def forward(self, tensor):
+        if self.training:
+            batch_size, tokens, features = tensor.size()
 
-def exists(val):
-    return val is not None
+            # Calculate the number of tokens to keep per batch
+            tokens_to_keep = int(tokens * self.p)
 
+            # Generate weights for each token
+            weights = torch.ones(batch_size, tokens, device=tensor.device)
 
-def default(val, d):
-    return val if exists(val) else d
-
-
-# helper classes
-
-
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn, context_dim=None):
-        super().__init__()
-        self.fn = fn
-        self.norm = nn.LayerNorm(dim)
-        self.norm_context = nn.LayerNorm(context_dim) if exists(context_dim) else None
-
-    def forward(self, x, **kwargs):
-        x = self.norm(x)
-
-        if exists(self.norm_context):
-            context = kwargs["context"]
-            normed_context = self.norm_context(context)
-            kwargs.update(context=normed_context)
-
-        return self.fn(x, **kwargs)
-
-
-class GEGLU(nn.Module):
-    def forward(self, x):
-        x, gates = x.chunk(2, dim=-1)
-        return x * F.gelu(gates)
-
-
-class FeedForward(nn.Module):
-    def __init__(self, dim, mult=4):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, dim * mult * 2), GEGLU(), nn.Linear(dim * mult, dim)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class Attention(nn.Module):
-    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64):
-        super().__init__()
-        inner_dim = dim_head * heads
-        context_dim = default(context_dim, query_dim)
-        self.scale = dim_head ** -0.5
-        self.heads = heads
-
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_kv = nn.Linear(context_dim, inner_dim * 2, bias=False)
-        self.to_out = nn.Linear(inner_dim, query_dim)
-
-    def forward(self, x, context=None, mask=None):
-        h = self.heads
-
-        q = self.to_q(x)
-        context = default(context, x)
-        k, v = self.to_kv(context).chunk(2, dim=-1)
-
-        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> (b h) n d", h=h), (q, k, v))
-
-        sim = einsum("b i d, b j d -> b i j", q, k) * self.scale
-
-        if exists(mask):
-            mask = rearrange(mask, "b ... -> b (...)")
-            max_neg_value = -torch.finfo(sim.dtype).max
-            mask = repeat(mask, "b j -> (b h) () j", h=h)
-            sim.masked_fill_(~mask, max_neg_value)
-
-        # attention, what we cannot get enough of
-        attn = sim.softmax(dim=-1)
-
-        out = einsum("b i j, b j d -> b i d", attn, v)
-        out = rearrange(out, "(b h) n d -> b n (h d)", h=h)
-        return self.to_out(out)
-
-
-class Perceiver(nn.Module):
-    def __init__(
-        self,
-        *,
-        depth,
-        dim,
-        queries_dim,
-        num_queries,
-        logits_dim=None,
-        num_latents=512,
-        latent_dim=512,
-        cross_heads=1,
-        latent_heads=8,
-        cross_dim_head=64,
-        latent_dim_head=64,
-        decoder_ff=False,
-    ):
-        super().__init__()
-        self.latents = nn.Parameter(torch.randn(num_latents, latent_dim))
-        self.queries = nn.Parameter(torch.randn(num_queries, queries_dim))
-
-        get_cross_attn = lambda: PreNorm(
-            latent_dim,
-            Attention(latent_dim, dim, heads=cross_heads, dim_head=cross_dim_head),
-            context_dim=dim,
-        )
-        get_cross_ff = lambda: PreNorm(latent_dim, FeedForward(latent_dim))
-
-        get_latent_attn = lambda: PreNorm(
-            latent_dim,
-            Attention(latent_dim, heads=latent_heads, dim_head=latent_dim_head),
-        )
-        get_latent_ff = lambda: PreNorm(latent_dim, FeedForward(latent_dim))
-
-        self.layers = nn.ModuleList([])
-
-        for i in range(depth):
-            self.layers.append(
-                nn.ModuleList(
-                    [
-                        get_cross_attn(),
-                        get_cross_ff(),
-                        get_latent_attn(),
-                        get_latent_ff(),
-                    ]
-                )
+            # Sample indices without replacement using torch.multinomial
+            sampled_indices = torch.multinomial(
+                weights, tokens_to_keep, replacement=False
             )
 
-        self.decoder_cross_attn = PreNorm(
-            queries_dim,
-            Attention(
-                queries_dim, latent_dim, heads=cross_heads, dim_head=cross_dim_head
+            # Use the sampled indices to select the remaining tokens for each item in the batch
+            output_tensor = torch.gather(
+                tensor, 1, sampled_indices.unsqueeze(-1).expand(-1, -1, features)
+            )
+
+            return output_tensor
+        else:
+            return tensor
+
+
+class PositionEmbedding(nn.Module):
+    def __init__(self, embedding_dim, num_positions):
+        super().__init__()
+        self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
+
+    def forward(self, x):
+        return x + self.embedding
+
+
+class PatchEmbedding(nn.Module):
+    def __init__(self, image_size, patch_size, embedding_dim):
+        super().__init__()
+        assert (
+            image_size % patch_size
+        ) == 0, "Image size must be divisible by patch size."
+        self.patch_size = patch_size
+        self.patch_embedding = nn.Conv2d(
+            3, embedding_dim, kernel_size=patch_size, stride=patch_size
+        )
+
+    def forward(self, x):
+        x = self.patch_embedding(x)
+        return rearrange(x, "b c h w -> b (h w) c")
+
+
+class TransformerEncoder(nn.Module):
+    def __init__(
+        self,
+        embedding_dim,
+        num_layers,
+        num_out,
+        num_heads=8,
+        dropout=0.0,
+        feedforward_multiplier=2,
+    ):
+        super().__init__()
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=embedding_dim,
+                nhead=num_heads,
+                dim_feedforward=embedding_dim * feedforward_multiplier,
+                dropout=dropout,
+                activation="gelu",
             ),
-            context_dim=latent_dim,
+            num_layers=num_layers,
         )
-        self.decoder_ff = (
-            PreNorm(queries_dim, FeedForward(queries_dim)) if decoder_ff else None
-        )
+        self.fc = nn.Linear(embedding_dim, num_out)
 
-        self.to_logits = (
-            nn.Linear(queries_dim, logits_dim) if exists(logits_dim) else nn.Identity()
-        )
-
-    def forward(self, data, mask=None):
-        b, *_, device = *data.shape, data.device
-
-        x = repeat(self.latents, "n d -> b n d", b=b)
-
-        # layers
-
-        for cross_attn, cross_ff, self_attn, self_ff in self.layers:
-            x = cross_attn(x, context=data, mask=mask) + x
-            x = cross_ff(x) + x
-            x = self_attn(x) + x
-            x = self_ff(x) + x
-
-        # make sure queries contains batch dimension
-
-        if self.queries.ndim == 2:
-            queries = repeat(self.queries, "n d -> b n d", b=b)
-
-        # cross attend from decoder queries to latents
-
-        latents = self.decoder_cross_attn(queries, context=x)
-
-        # optional decoder feedforward
-
-        if exists(self.decoder_ff):
-            latents = latents + self.decoder_ff(latents)
-
-        # final linear out
-
-        return self.to_logits(latents)
+    def forward(self, x):
+        x = self.transformer_encoder(x)
+        x = x.mean(dim=1)
+        x = self.fc(x)
+        return x

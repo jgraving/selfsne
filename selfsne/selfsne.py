@@ -31,27 +31,28 @@ def get_lr_scheduler(
     target_steps,
     cosine_steps,
 ):
-    milestones = np.cumsum(
-        [
-            warmup_steps,
-            target_steps,
-        ]
-    )
+    if warmup_steps + target_steps + cosine_steps == 0:
+        scheduler = lr_scheduler.ConstantLR(optimizer, factor=1.0)
+    else:
+        milestones = np.cumsum([warmup_steps, target_steps])
 
-    linear_warmup = (
-        lr_scheduler.LinearLR(optimizer, start_factor=1e-8, total_iters=warmup_steps)
-        if warmup_steps > 0
-        else lr_scheduler.ConstantLR(optimizer, factor=1.0)
-    )
-    target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
+        linear_warmup = (
+            lr_scheduler.LinearLR(
+                optimizer, start_factor=1e-8, total_iters=warmup_steps
+            )
+            if warmup_steps > 0
+            else lr_scheduler.ConstantLR(optimizer, factor=1.0)
+        )
+        target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
+        cosine_annealing = (
+            lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=0)
+            if cosine_steps > 0
+            else lr_scheduler.ConstantLR(optimizer, factor=1.0)
+        )
 
-    cosine_annealing = lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cosine_steps, eta_min=0
-    )
-
-    scheduler = lr_scheduler.SequentialLR(
-        optimizer, [linear_warmup, target_lr, cosine_annealing], milestones
-    )
+        scheduler = lr_scheduler.SequentialLR(
+            optimizer, [linear_warmup, target_lr, cosine_annealing], milestones
+        )
 
     return scheduler
 

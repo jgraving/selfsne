@@ -205,17 +205,13 @@ class LearnedBaseline(nn.Module):
 
     def forward(
         self,
-        logits: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the learned baseline for a given set of logits.
-
-        Args:
-            logits (torch.Tensor): Logits tensor.
+        Returns the learned baseline.
 
         Returns:
-            torch.Tensor: Learned baseline for the given set of logits.
+            torch.Tensor: Learned baseline.
         """
         return self.activation(self.log_baseline)
 

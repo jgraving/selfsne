@@ -14,16 +14,13 @@
 # limitations under the License.
 
 import torch
-from torch import nn, einsum
+from torch import nn
 from torch.nn import init
 import torch.nn.functional as F
+
 import numpy as np
 
-from math import pi, log
-from functools import wraps
-
-from einops import rearrange, repeat
-from einops.layers.torch import Rearrange
+from einops import rearrange
 
 from selfsne.utils import stop_gradient
 

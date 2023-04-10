@@ -501,7 +501,7 @@ class PositionEmbedding(nn.Module):
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
 
     def forward(self, x):
-        return x + self.embedding
+        return (x + self.embedding) / 2
 
 
 class PatchEmbedding(nn.Module):
@@ -511,13 +511,83 @@ class PatchEmbedding(nn.Module):
             image_size % patch_size
         ) == 0, "Image size must be divisible by patch size."
         self.patch_size = patch_size
-        self.patch_embedding = nn.Conv2d(
+        self.patch_embedding = init_selu(nn.Conv2d(
             3, embedding_dim, kernel_size=patch_size, stride=patch_size
-        )
+        ))
 
     def forward(self, x):
         x = self.patch_embedding(x)
         return rearrange(x, "b c h w -> b (h w) c")
+
+
+class MultiheadAttention(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        feature_dim,
+        num_heads,
+        qk_dim=None,
+        v_dim=None,
+        output_dim=None,
+        dropout=0.1,
+    ):
+        super(MultiheadAttention, self).__init__()
+        self.input_dim = input_dim
+        self.qk_dim = qk_dim if qk_dim is not None else feature_dim
+        self.head_qk = self.qk_dim
+        self.qk_dim *= num_heads
+        self.v_dim = v_dim if v_dim is not None else feature_dim
+        self.head_v = self.v_dim
+        self.v_dim *= num_heads
+        self.feature_dim = feature_dim
+        self.num_heads = num_heads
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.scale = self.head_qk ** -0.5
+
+        self.qk = init_selu(nn.Linear(input_dim, 2 * self.qk_dim))
+        self.v = init_selu(nn.Linear(input_dim, self.v_dim))
+        self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
+
+        self.dropout = nn.Dropout(p=dropout)
+        self.residual = (
+            nn.Identity()
+            if input_dim == self.output_dim
+            else init_selu(nn.Linear(input_dim, self.output_dim))
+        )
+
+    def forward(self, x):
+        batch_size, seq_len, input_dim = x.shape
+        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
+        qk = rearrange(
+            qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
+        )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
+        q, k = qk[..., 0], qk[..., 1]
+
+        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
+        v = rearrange(
+            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
+        )  # shape (batch_size, num_heads, seq_len, head_v)
+
+        # compute attention weights
+        # q shape: (batch_size, num_heads, seq_len_i, head_qk)
+        # k shape: (batch_size, num_heads, seq_len_j, head_qk)
+        # attn_weights shape: (batch_size, num_heads, seq_len_i, seq_len_j)
+        attn_weights = torch.einsum("b h i d, b h j d -> b h i j", q, k)
+
+        # scale attention weights
+        attn_weights *= self.scale
+
+        # apply softmax and dropout
+        attn_weights = attn_weights.softmax(-1)
+        attn_weights = self.dropout(attn_weights)
+
+        # compute output
+        # v shape: (batch_size, num_heads, seq_len_j, head_v)
+        # out shape: (batch_size, num_heads, seq_len_i, head_v)
+        out = torch.einsum("b h i j, b h j d -> b h i d", attn_weights, v)
+        out = rearrange(out, "b h s d -> b s (h d)")
+        out = self.out(out) + self.residual(x)
+        return out / 2
 
 
 class TransformerEncoder(nn.Module):

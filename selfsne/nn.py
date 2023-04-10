@@ -43,7 +43,7 @@ class Residual(nn.Module):
         self.module = module
 
     def forward(self, x):
-        return x + self.module(x)
+        return (x + self.module(x)) / 2
 
 
 class PadShift(nn.Module):
@@ -58,7 +58,7 @@ class ParametricResidual(nn.Module):
         self.module = module
 
     def forward(self, x):
-        return self.proj(x) + self.module(x)
+        return (self.proj(x) + self.module(x)) / 2
 
 
 class Lambda(nn.Module):

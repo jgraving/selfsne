@@ -203,6 +203,8 @@ class DensityRatioEstimator(nn.Module):
         return (
             pos_logits.mean(),
             neg_logits.mean(),
+            pos_logits.sigmoid().mean(),
+            neg_logits.sigmoid().mean(),
             log_baseline.mean(),
             attraction.mean() + repulsion.mean() + embedding_decay,
         )

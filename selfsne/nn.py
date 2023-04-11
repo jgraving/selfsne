@@ -520,6 +520,10 @@ class MultiheadAttention(nn.Module):
         v_dim=None,
         output_dim=None,
         dropout=0.1,
+        softmax=True,
+        activation=nn.Identity(),
+        scale_factor=0.5,
+        causal_mask=False,
     ):
         super(MultiheadAttention, self).__init__()
         self.input_dim = input_dim
@@ -532,28 +536,32 @@ class MultiheadAttention(nn.Module):
         self.feature_dim = feature_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -0.5
-
+        self.scale = self.head_qk ** -scale_factor
+        self.softmax = softmax
+        self.activation = activation
         self.qk = init_selu(nn.Linear(input_dim, 2 * self.qk_dim))
         self.v = init_selu(nn.Linear(input_dim, self.v_dim))
         self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
 
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = (
+            nn.Dropout(p=dropout) if dropout > 0 and softmax else nn.Identity()
+        )
         self.residual = (
             nn.Identity()
             if input_dim == self.output_dim
             else init_selu(nn.Linear(input_dim, self.output_dim))
         )
+        self.causal_mask = causal_mask
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape
-        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
+        qk = self.activation(self.qk(x))  # shape (batch_size, seq_len, 2*qk_dim)
         qk = rearrange(
             qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
         )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
         q, k = qk[..., 0], qk[..., 1]
 
-        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
+        v = self.activation(self.v(x))  # shape (batch_size, seq_len, v_dim)
         v = rearrange(
             v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
         )  # shape (batch_size, num_heads, seq_len, head_v)
@@ -564,18 +572,34 @@ class MultiheadAttention(nn.Module):
         # attn_weights shape: (batch_size, num_heads, seq_len_i, seq_len_j)
         attn_weights = torch.einsum("b h i d, b h j d -> b h i j", q, k)
 
+        # apply causal mask if specified
+        if self.causal_mask:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, device=attn_weights.device), diagonal=1
+            )
+            mask = mask.view(1, 1, seq_len, seq_len).repeat(
+                batch_size, self.num_heads, 1, 1
+            )
+            attn_weights = attn_weights.masked_fill(
+                mask == 0, torch.finfo(attn_weights.dtype).min
+            )  # float('-inf')
+
         # scale attention weights
         attn_weights *= self.scale
 
         # apply softmax and dropout
-        attn_weights = attn_weights.softmax(-1)
+        if self.softmax:
+            attn_weights = attn_weights.softmax(-1)
+            out_scale = 1
+        else:
+            out_scale = seq_len ** -1
         attn_weights = self.dropout(attn_weights)
 
         # compute output
         # v shape: (batch_size, num_heads, seq_len_j, head_v)
         # out shape: (batch_size, num_heads, seq_len_i, head_v)
         out = torch.einsum("b h i j, b h j d -> b h i d", attn_weights, v)
-        out = rearrange(out, "b h s d -> b s (h d)")
+        out = rearrange(out, "b h s d -> b s (h d)") * out_scale
         out = self.out(out) + self.residual(x)
         return out / 2
 
@@ -584,16 +608,16 @@ class TransformerEncoder(nn.Module):
     def __init__(
         self,
         embedding_dim,
-        num_layers,
         num_out,
-        num_heads=8,
-        dropout=0.0,
+        num_layers=12,
+        num_heads=12,
+        dropout=0.1,
         feedforward_multiplier=2,
     ):
         super().__init__()
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
-                d_model=embedding_dim,
+                d_model=embedding_dim * num_heads,
                 nhead=num_heads,
                 dim_feedforward=embedding_dim * feedforward_multiplier,
                 dropout=dropout,

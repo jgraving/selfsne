@@ -22,7 +22,7 @@ import numpy as np
 
 from einops import rearrange
 
-from selfsne.utils import stop_gradient
+from selfsne.utils import stop_gradient, random_sample_columns
 
 
 def lecun_normal_(x, mode="fan_in"):
@@ -477,18 +477,8 @@ class SampleTokens(nn.Module):
             # Calculate the number of tokens to keep per batch
             tokens_to_keep = int(tokens * self.p)
 
-            # Generate weights for each token
-            weights = torch.ones(batch_size, tokens, device=tensor.device)
-
-            # Sample indices without replacement using torch.multinomial
-            sampled_indices = torch.multinomial(
-                weights, tokens_to_keep, replacement=False
-            )
-
-            # Use the sampled indices to select the remaining tokens for each item in the batch
-            output_tensor = torch.gather(
-                tensor, 1, sampled_indices.unsqueeze(-1).expand(-1, -1, features)
-            )
+            # Use the random_sample_columns function to sample the remaining tokens for each item in the batch
+            output_tensor = random_sample_columns(tensor, tokens_to_keep)
 
             return output_tensor
         else:
@@ -511,9 +501,9 @@ class PatchEmbedding(nn.Module):
             image_size % patch_size
         ) == 0, "Image size must be divisible by patch size."
         self.patch_size = patch_size
-        self.patch_embedding = init_selu(nn.Conv2d(
-            3, embedding_dim, kernel_size=patch_size, stride=patch_size
-        ))
+        self.patch_embedding = init_selu(
+            nn.Conv2d(3, embedding_dim, kernel_size=patch_size, stride=patch_size)
+        )
 
     def forward(self, x):
         x = self.patch_embedding(x)

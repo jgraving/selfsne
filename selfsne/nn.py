@@ -24,6 +24,8 @@ from einops import rearrange
 
 from selfsne.utils import stop_gradient, random_sample_columns
 
+RSQRT2 = 2 ** -0.5
+
 
 def lecun_normal_(x, mode="fan_in"):
     return init.kaiming_normal_(x, mode=mode, nonlinearity="linear")
@@ -43,7 +45,7 @@ class Residual(nn.Module):
         self.module = module
 
     def forward(self, x):
-        return (x + self.module(x)) / 2
+        return (x + self.module(x)) * RSQRT2
 
 
 class PadShift(nn.Module):
@@ -58,7 +60,7 @@ class ParametricResidual(nn.Module):
         self.module = module
 
     def forward(self, x):
-        return (self.proj(x) + self.module(x)) / 2
+        return (self.proj(x) + self.module(x)) * RSQRT2
 
 
 class Lambda(nn.Module):
@@ -449,6 +451,7 @@ def MLP(
                             if batch_norm
                             else nn.Identity(),
                             init_selu(nn.Linear(hidden_features, hidden_features)),
+                            nn.SELU(),
                         )
                     )
                     for _ in range(n_layers)
@@ -491,18 +494,20 @@ class PositionEmbedding(nn.Module):
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
 
     def forward(self, x):
-        return (x + self.embedding) / 2
+        return (x + self.embedding) * RSQRT2
 
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, image_size, patch_size, embedding_dim):
+    def __init__(self, image_size, patch_size, embedding_dim, input_channels=3):
         super().__init__()
         assert (
             image_size % patch_size
         ) == 0, "Image size must be divisible by patch size."
         self.patch_size = patch_size
         self.patch_embedding = init_selu(
-            nn.Conv2d(3, embedding_dim, kernel_size=patch_size, stride=patch_size)
+            nn.Conv2d(
+                input_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
+            )
         )
 
     def forward(self, x):
@@ -510,11 +515,11 @@ class PatchEmbedding(nn.Module):
         return rearrange(x, "b c h w -> b (h w) c")
 
 
-class MultiheadAttention(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(
         self,
         input_dim,
-        feature_dim,
+        attention_dim,
         num_heads,
         qk_dim=None,
         v_dim=None,
@@ -525,15 +530,15 @@ class MultiheadAttention(nn.Module):
         scale_factor=0.5,
         causal_mask=False,
     ):
-        super(MultiheadAttention, self).__init__()
+        super(SelfAttention, self).__init__()
         self.input_dim = input_dim
-        self.qk_dim = qk_dim if qk_dim is not None else feature_dim
+        self.qk_dim = qk_dim if qk_dim is not None else attention_dim
         self.head_qk = self.qk_dim
         self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else feature_dim
+        self.v_dim = v_dim if v_dim is not None else attention_dim
         self.head_v = self.v_dim
         self.v_dim *= num_heads
-        self.feature_dim = feature_dim
+        self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
         self.scale = self.head_qk ** -scale_factor
@@ -566,42 +571,139 @@ class MultiheadAttention(nn.Module):
             v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
         )  # shape (batch_size, num_heads, seq_len, head_v)
 
-        # compute attention weights
+        # compute similarity
         # q shape: (batch_size, num_heads, seq_len_i, head_qk)
         # k shape: (batch_size, num_heads, seq_len_j, head_qk)
-        # attn_weights shape: (batch_size, num_heads, seq_len_i, seq_len_j)
-        attn_weights = torch.einsum("b h i d, b h j d -> b h i j", q, k)
+        # similarity shape: (batch_size, num_heads, seq_len_i, seq_len_j)
+        similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k)
 
         # apply causal mask if specified
         if self.causal_mask:
             mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=attn_weights.device), diagonal=1
+                torch.ones(seq_len, seq_len, device=similarity.device), diagonal=1
             )
             mask = mask.view(1, 1, seq_len, seq_len).repeat(
                 batch_size, self.num_heads, 1, 1
             )
-            attn_weights = attn_weights.masked_fill(
-                mask == 0, torch.finfo(attn_weights.dtype).min
+            similarity = similarity.masked_fill(
+                mask == 0, torch.finfo(similarity.dtype).min
             )  # float('-inf')
 
-        # scale attention weights
-        attn_weights *= self.scale
+        # scale dot product similarity
+        similarity *= self.scale
 
         # apply softmax and dropout
         if self.softmax:
-            attn_weights = attn_weights.softmax(-1)
+            similarity = similarity.softmax(-1)
             out_scale = 1
         else:
-            out_scale = seq_len ** -1
-        attn_weights = self.dropout(attn_weights)
+            out_scale = 1 / seq_len
+        similarity = self.dropout(similarity)
 
         # compute output
         # v shape: (batch_size, num_heads, seq_len_j, head_v)
         # out shape: (batch_size, num_heads, seq_len_i, head_v)
-        out = torch.einsum("b h i j, b h j d -> b h i d", attn_weights, v)
+        out = torch.einsum("b h i j, b h j d -> b h i d", similarity, v)
         out = rearrange(out, "b h s d -> b s (h d)") * out_scale
-        out = self.out(out) + self.residual(x)
-        return out / 2
+        return (self.out(out) + self.residual(x)) * RSQRT2
+
+
+class CrossAttention(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        latent_dim,
+        num_latent_tokens,
+        attention_dim,
+        num_heads,
+        qk_dim=None,
+        v_dim=None,
+        output_dim=None,
+        dropout=0.1,
+        softmax=True,
+        activation=nn.Identity(),
+        scale_factor=0.5,
+    ):
+        super(CrossAttention, self).__init__()
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.qk_dim = qk_dim if qk_dim is not None else attention_dim
+        self.head_qk = self.qk_dim
+        self.qk_dim *= num_heads
+        self.v_dim = v_dim if v_dim is not None else attention_dim
+        self.head_v = self.v_dim
+        self.v_dim *= num_heads
+        self.attention_dim = attention_dim
+        self.num_heads = num_heads
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.scale = self.head_qk ** -scale_factor
+        self.softmax = softmax
+        self.activation = activation
+        self.k = init_selu(nn.Linear(input_dim, self.qk_dim))
+        self.v = init_selu(nn.Linear(input_dim, self.v_dim))
+        self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
+
+        self.dropout = (
+            nn.Dropout(p=dropout) if dropout > 0 and softmax else nn.Identity()
+        )
+        self.residual = (
+            nn.Identity()
+            if self.latent_dim == self.output_dim
+            else init_selu(nn.Linear(self.latent_dim, self.output_dim))
+        )
+
+        self.latents = nn.Parameter(torch.randn((1, num_latent_tokens, latent_dim)))
+        self.q = init_selu(nn.Linear(latent_dim, self.qk_dim))
+
+    def forward(self, x):
+        batch_size, seq_len, input_dim = x.shape
+
+        q = self.activation(
+            self.q(self.latents)
+        )  # shape (1, num_latent_tokens, qk_dim)
+        q = rearrange(
+            q, "b l (h d) -> b h l d", h=self.num_heads, d=self.head_qk
+        )  # shape (1, num_heads, num_latent_tokens, head_qk)
+        q = q.repeat(
+            batch_size, 1, 1, 1
+        )  # shape (batch_size, num_heads, num_latent_tokens, head_qk)
+
+        k = self.activation(self.k(x))  # shape (batch_size, seq_len, qk_dim)
+        k = rearrange(
+            k, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_qk
+        )  # shape (batch_size, num_heads, seq_len, head_qk)
+
+        v = self.activation(self.v(x))  # shape (batch_size, seq_len, v_dim)
+        v = rearrange(
+            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
+        )  # shape (batch_size, num_heads, seq_len, head_v)
+
+        # compute dot product similarity
+        similarity = torch.einsum(
+            "b h i d, b h j d -> b h i j", q, k
+        )  # shape (batch_size, num_heads, num_latent_tokens, seq_len)
+
+        # scale dot product similarity
+        similarity *= self.scale
+
+        # apply softmax and dropout
+        if self.softmax:
+            similarity = similarity.softmax(-1)
+            out_scale = 1
+        else:
+            out_scale = 1 / seq_len
+        similarity = self.dropout(similarity)
+
+        # compute output
+        # v shape: (batch_size, num_heads, seq_len, head_v)
+        # out shape: (batch_size, num_heads, num_latent_tokens, head_v)
+        out = torch.einsum(
+            "b h i j, b h j d -> b h i d", similarity, v
+        )  # shape (batch_size, num_heads, num_latent_tokens, head_v)
+        out = (
+            rearrange(out, "b h l d -> b l (h d)") * out_scale
+        )  # shape (batch_size, num_latent_tokens, v_dim)
+        return (self.out(out) + self.residual(self.latents)) * RSQRT2
 
 
 class TransformerEncoder(nn.Module):

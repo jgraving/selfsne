@@ -72,16 +72,6 @@ class Lambda(nn.Module):
         return self.func(x)
 
 
-class PairSampler(nn.Module):
-    def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
-        super().__init__()
-        self.x_sampler = x_sampler
-        self.y_sampler = y_sampler
-
-    def forward(self, x):
-        return self.x_sampler(x), self.y_sampler(x)
-
-
 class BatchCenter(nn.Module):
     def __init__(self, num_features, momentum=0.9):
         super().__init__()
@@ -95,6 +85,25 @@ class BatchCenter(nn.Module):
             return x - batch_mean
         else:
             return x - self.running_mean
+
+
+class Bias(torch.nn.Module):
+    def __init__(self, num_features):
+        super(Bias, self).__init__()
+        self.bias = torch.nn.Parameter(torch.zeros(1, num_features))
+
+    def forward(self, x):
+        return x + self.bias
+
+
+class PairSampler(nn.Module):
+    def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
+        super().__init__()
+        self.x_sampler = x_sampler
+        self.y_sampler = y_sampler
+
+    def forward(self, x):
+        return self.x_sampler(x), self.y_sampler(x)
 
 
 class PairAugmenter(nn.Module):

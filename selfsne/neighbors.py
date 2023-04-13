@@ -233,20 +233,17 @@ class NearestNeighborSampler(nn.Module):
         else:
             data = batch
             if self.return_index:
-                warnings.warn(
+                raise ValueError(
                     "`return_index` is True, but index was not passed with batch."
                 )
 
-        batch_size = data.shape[0]
-        if self.return_index:
-            index_queue = self.index_queue(index)
         data_queue = self.data_queue(data)
         sample_idx = knn_sampler(
             data, data_queue, self.kernel, self.num_neighbors, self.max_similarity
         )
 
         if self.return_index:
-            return index_queue[sample_idx]
+            return self.index_queue(index)[sample_idx]
         else:
             return data_queue[sample_idx]
 
@@ -276,7 +273,6 @@ def knn_sampler(
     """
     batch_size = x1.shape[0]
     similarity = kernel(x1, x2)
-    batch_idx = torch.arange(batch_size, device=x1.device)
 
     similarity = torch.where(similarity == max_similarity, NEG_INF, similarity)
 
@@ -284,6 +280,7 @@ def knn_sampler(
     _, knn_index = torch.topk(similarity, num_neighbors, dim=-1)
 
     if num_neighbors > 1:
+        batch_idx = torch.arange(batch_size, device=knn_index.device)
         neighbor_idx = torch.randint(
             0, num_neighbors, (batch_size,), device=knn_index.device
         )
@@ -292,19 +289,3 @@ def knn_sampler(
         sample_idx = knn_index[:, 0]
 
     return sample_idx
-
-
-def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:
-    """
-    Randomly samples columns from the input tensor.
-
-    Args:
-        x (torch.Tensor): The input tensor to sample from.
-        num_samples (int): The number of columns to sample.
-
-    Returns:
-        torch.Tensor: A tensor containing the sampled columns.
-    """
-    idx = torch.arange(x.shape[0], device=x.device)
-    jdx = torch.randint(0, num_samples, (x.shape[0],), device=x.device)
-    return x[idx, jdx]

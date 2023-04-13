@@ -84,8 +84,8 @@ class SelfSNE(pl.LightningModule):
         dampening=0,
         nesterov=False,
         weight_decay=0.0,
-        projector_weight_decay=0.0,
-        decoder_weight_decay=0.0,
+        projector_weight_decay=None,
+        decoder_weight_decay=None,
         lr_scheduler=False,
         lr_warmup_steps=0,
         lr_target_steps=0,
@@ -116,6 +116,14 @@ class SelfSNE(pl.LightningModule):
                 "similarity_loss",
                 "redundancy_loss",
             ],
+        )
+        self.hparams.projector_weight_decay = (
+            projector_weight_decay
+            if projector_weight_decay is not None
+            else weight_decay
+        )
+        self.hparams.decoder_weight_decay = (
+            decoder_weight_decay if decoder_weight_decay is not None else weight_decay
         )
 
     def forward(self, batch):

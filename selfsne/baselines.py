@@ -18,6 +18,7 @@ from torch import nn
 
 import numpy as np
 
+from selfsne.nn import init_selu
 from selfsne.utils import (
     off_diagonal,
     remove_diagonal,
@@ -214,6 +215,37 @@ class LearnedBaseline(nn.Module):
             torch.Tensor: Learned baseline.
         """
         return self.activation(self.log_baseline)
+
+
+class LearnedLatentBaseline(nn.Module):
+    def __init__(
+        self, latent_dim: int = 64, activation: Optional[nn.Module] = nn.LogSigmoid()
+    ):
+        """
+        Initializes a learned latent baseline module.
+
+        Args:
+            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
+        """
+        super().__init__()
+        self.latent = nn.Parameter(torch.randn(1, latent_dim))
+        self.projection = init_selu(nn.Linear(latent_dim, 1))
+        if activation is None:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activation
+
+    def forward(
+        self,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Returns the learned baseline.
+
+        Returns:
+            torch.Tensor: Learned baseline.
+        """
+        return self.activation(self.projection(self.latent))
 
 
 class ConstantBaseline(nn.Module):
@@ -452,5 +484,6 @@ BASELINES = {
     "batch_conditional": BatchConditionalBaseline,
     "momentum": MomentumBaseline,
     "learn": LearnedBaseline,
+    "learn_latent": LearnedLatentBaseline,
     "constant": ConstantBaseline,
 }

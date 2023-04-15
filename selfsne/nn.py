@@ -466,13 +466,13 @@ def MLP(
         Residual(
             nn.Sequential(
                 *[
-                        nn.Sequential(
-                            nn.BatchNorm1d(hidden_features)
-                            if batch_norm
-                            else nn.Identity(),
-                            init_selu(nn.Linear(hidden_features, hidden_features)),
-                            nn.SELU(),
-                        )
+                    nn.Sequential(
+                        nn.BatchNorm1d(hidden_features)
+                        if batch_norm
+                        else nn.Identity(),
+                        init_selu(nn.Linear(hidden_features, hidden_features)),
+                        nn.SELU(),
+                    )
                     for _ in range(n_layers)
                 ]
             )
@@ -485,6 +485,36 @@ def MLP(
         if in_features == out_features
         else ParametricResidual(in_features, out_features, net)
     )
+
+
+class PositionEmbedding2d(nn.Module):
+    def __init__(self, embedding_dim, height, width):
+        super(PositionEmbedding2D, self).__init__()
+        self.embedding_dim = embedding_dim
+        self.height = height
+        self.width = width
+
+        # Initialize the height and width embeddings as learnable parameters
+        self.height_embedding = nn.Parameter(torch.randn(embedding_dim, height))
+        self.width_embedding = nn.Parameter(torch.randn(embedding_dim, width))
+
+    def forward(self, x):
+        # Create a tensor of shape (height, width, embedding_dim)
+        # with embeddings for each height and width
+        height_embed = self.height_embedding.view(1, self.embedding_dim, self.height, 1)
+        width_embed = self.width_embedding.view(1, self.embedding_dim, 1, self.width)
+        pos_embed = (height_embed + width_embed) * RSQRT2
+        # Add the position embedding 2D to the input tensor
+        return (x + pos_embed) * RSQRT2
+
+
+class PositionEmbedding(nn.Module):
+    def __init__(self, embedding_dim, num_positions):
+        super().__init__()
+        self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
+
+    def forward(self, x):
+        return (x + self.embedding) * RSQRT2
 
 
 class SampleTokens(nn.Module):
@@ -505,15 +535,6 @@ class SampleTokens(nn.Module):
             return output_tensor
         else:
             return tensor
-
-
-class PositionEmbedding(nn.Module):
-    def __init__(self, embedding_dim, num_positions):
-        super().__init__()
-        self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
-
-    def forward(self, x):
-        return (x + self.embedding) * RSQRT2
 
 
 class PatchEmbedding(nn.Module):

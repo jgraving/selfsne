@@ -98,8 +98,8 @@ def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:
         torch.Size([10, 5])
     """
     assert (
-        num_samples < x.shape[1]
-    ), "num_samples must be less than the number of columns"
+        num_samples <= x.shape[1]
+    ), "num_samples must be less than or equal to the number of columns"
     weights = torch.ones((x.shape[0], x.shape[1]), device=x.device)
     jdx = torch.multinomial(weights, num_samples, replacement=False)
     idx = torch.arange(x.shape[0], device=x.device).unsqueeze(1).expand(-1, num_samples)

@@ -405,24 +405,34 @@ def ResNet2d(
         nn.Sequential(
             *[
                 nn.Sequential(
+                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
+                    if batch_norm
+                    else nn.Identity(),
+                    init_selu(
+                        nn.Conv2d(
+                            hidden_channels * (2 ** block_idx),
+                            hidden_channels * (2 ** (block_idx + 1)),
+                            1,
+                        )
+                    ),
                     Residual(
                         nn.Sequential(
                             *[
-                                Residual(
-                                    nn.Sequential(
-                                        nn.BatchNorm2d(hidden_channels)
-                                        if batch_norm
-                                        else nn.Identity(),
-                                        init_selu(
-                                            nn.Conv2d(
-                                                hidden_channels,
-                                                hidden_channels,
-                                                kernel_size=3,
-                                                padding=1,
-                                            )
-                                        ),
-                                        nn.SELU(),
+                                nn.Sequential(
+                                    nn.BatchNorm2d(
+                                        hidden_channels * (2 ** (block_idx + 1))
                                     )
+                                    if batch_norm
+                                    else nn.Identity(),
+                                    init_selu(
+                                        nn.Conv2d(
+                                            hidden_channels * (2 ** (block_idx + 1)),
+                                            hidden_channels * (2 ** (block_idx + 1)),
+                                            kernel_size=3,
+                                            padding=1,
+                                        )
+                                    ),
+                                    nn.SELU(),
                                 )
                                 for _ in range(n_layers)
                             ]
@@ -430,11 +440,13 @@ def ResNet2d(
                     ),
                     nn.AvgPool2d(3, 2, 1),
                 )
-                for _ in range(n_blocks)
+                for block_idx in range(n_blocks)
             ]
         ),
-        nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
-        init_selu(nn.Conv2d(hidden_channels, out_channels, 1)),
+        nn.BatchNorm2d(hidden_channels * (2 ** n_blocks))
+        if batch_norm
+        else nn.Identity(),
+        init_selu(nn.Conv2d(hidden_channels * (2 ** n_blocks), out_channels, 1)),
         nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten())
         if global_pooling
         else nn.Identity(),
@@ -454,7 +466,6 @@ def MLP(
         Residual(
             nn.Sequential(
                 *[
-                    Residual(
                         nn.Sequential(
                             nn.BatchNorm1d(hidden_features)
                             if batch_norm
@@ -462,7 +473,6 @@ def MLP(
                             init_selu(nn.Linear(hidden_features, hidden_features)),
                             nn.SELU(),
                         )
-                    )
                     for _ in range(n_layers)
                 ]
             )

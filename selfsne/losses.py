@@ -161,7 +161,11 @@ class DensityRatioEstimator(nn.Module):
         self.inverse_temperature = 1 / temperature
 
     def forward(
-        self, z_x: torch.Tensor, z_y: torch.Tensor, y: Optional[torch.Tensor] = None
+        self,
+        z_x: torch.Tensor,
+        z_y: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        **kwargs
     ) -> Tuple[torch.Tensor]:
         """
         Computes similarity loss.

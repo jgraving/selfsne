@@ -602,10 +602,8 @@ class SelfAttention(nn.Module):
         v_dim=None,
         output_dim=None,
         dropout=0.1,
-        softmax=True,
-        activation=nn.Identity(),
-        scale_factor=0.5,
         causal_mask=False,
+        prenorm=True,
     ):
         super(SelfAttention, self).__init__()
         self.input_dim = input_dim
@@ -618,32 +616,37 @@ class SelfAttention(nn.Module):
         self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -scale_factor
-        self.softmax = softmax
-        self.activation = activation
+        self.scale = self.head_qk ** -0.5
         self.qk = init_selu(nn.Linear(input_dim, 2 * self.qk_dim))
-        self.v = init_selu(nn.Linear(input_dim, self.v_dim))
-        self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
-
-        self.dropout = (
-            nn.Dropout(p=dropout) if dropout > 0 and softmax else nn.Identity()
+        self.v = (
+            init_selu(nn.Linear(input_dim, self.v_dim))
+            if input_dim != self.v_dim
+            else nn.Identity()
         )
+        self.out = (
+            init_selu(nn.Linear(self.v_dim, self.output_dim))
+            if self.output_dim != self.v_dim
+            else nn.Identity()
+        )
+
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         self.residual = (
             nn.Identity()
             if input_dim == self.output_dim
             else init_selu(nn.Linear(input_dim, self.output_dim))
         )
         self.causal_mask = causal_mask
+        self.prenorm = nn.LayerNorm(self.output_dim) if prenorm else nn.Identity()
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape
-        qk = self.activation(self.qk(x))  # shape (batch_size, seq_len, 2*qk_dim)
+        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
         qk = rearrange(
             qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
         )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
         q, k = qk[..., 0], qk[..., 1]
 
-        v = self.activation(self.v(x))  # shape (batch_size, seq_len, v_dim)
+        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
         v = rearrange(
             v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
         )  # shape (batch_size, num_heads, seq_len, head_v)
@@ -670,19 +673,15 @@ class SelfAttention(nn.Module):
         similarity *= self.scale
 
         # apply softmax and dropout
-        if self.softmax:
-            similarity = similarity.softmax(-1)
-            out_scale = 1
-        else:
-            out_scale = 1 / seq_len
-        similarity = self.dropout(similarity)
+        attention = similarity.softmax(-1)
+        attention = self.dropout(attention)
 
         # compute output
         # v shape: (batch_size, num_heads, seq_len_j, head_v)
         # out shape: (batch_size, num_heads, seq_len_i, head_v)
-        out = torch.einsum("b h i j, b h j d -> b h i d", similarity, v)
-        out = rearrange(out, "b h s d -> b s (h d)") * out_scale
-        return (self.out(out) + self.residual(x)) * RSQRT2
+        out = torch.einsum("b h i j, b h j d -> b h i d", attention, v)
+        out = rearrange(out, "b h s d -> b s (h d)")
+        return (self.prenorm(self.out(out)) + self.residual(x)) * RSQRT2
 
 
 class CrossAttention(nn.Module):
@@ -697,9 +696,7 @@ class CrossAttention(nn.Module):
         v_dim=None,
         output_dim=None,
         dropout=0.1,
-        softmax=True,
-        activation=nn.Identity(),
-        scale_factor=0.5,
+        prenorm=True,
     ):
         super(CrossAttention, self).__init__()
         self.input_dim = input_dim
@@ -713,16 +710,12 @@ class CrossAttention(nn.Module):
         self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -scale_factor
-        self.softmax = softmax
-        self.activation = activation
+        self.scale = self.head_qk ** -0.5
         self.k = init_selu(nn.Linear(input_dim, self.qk_dim))
         self.v = init_selu(nn.Linear(input_dim, self.v_dim))
         self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
 
-        self.dropout = (
-            nn.Dropout(p=dropout) if dropout > 0 and softmax else nn.Identity()
-        )
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         self.residual = (
             nn.Identity()
             if self.latent_dim == self.output_dim
@@ -731,13 +724,12 @@ class CrossAttention(nn.Module):
 
         self.latents = nn.Parameter(torch.randn((1, num_latent_tokens, latent_dim)))
         self.q = init_selu(nn.Linear(latent_dim, self.qk_dim))
+        self.prenorm = nn.LayerNorm(self.output_dim) if prenorm else nn.Identity()
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape
 
-        q = self.activation(
-            self.q(self.latents)
-        )  # shape (1, num_latent_tokens, qk_dim)
+        q = self.q(self.latents)  # shape (1, num_latent_tokens, qk_dim)
         q = rearrange(
             q, "b l (h d) -> b h l d", h=self.num_heads, d=self.head_qk
         )  # shape (1, num_heads, num_latent_tokens, head_qk)
@@ -745,12 +737,12 @@ class CrossAttention(nn.Module):
             batch_size, 1, 1, 1
         )  # shape (batch_size, num_heads, num_latent_tokens, head_qk)
 
-        k = self.activation(self.k(x))  # shape (batch_size, seq_len, qk_dim)
+        k = self.k(x)  # shape (batch_size, seq_len, qk_dim)
         k = rearrange(
             k, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_qk
         )  # shape (batch_size, num_heads, seq_len, head_qk)
 
-        v = self.activation(self.v(x))  # shape (batch_size, seq_len, v_dim)
+        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
         v = rearrange(
             v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
         )  # shape (batch_size, num_heads, seq_len, head_v)
@@ -764,23 +756,19 @@ class CrossAttention(nn.Module):
         similarity *= self.scale
 
         # apply softmax and dropout
-        if self.softmax:
-            similarity = similarity.softmax(-1)
-            out_scale = 1
-        else:
-            out_scale = 1 / seq_len
-        similarity = self.dropout(similarity)
+        attention = similarity.softmax(-1)
+        attention = self.dropout(attention)
 
         # compute output
         # v shape: (batch_size, num_heads, seq_len, head_v)
         # out shape: (batch_size, num_heads, num_latent_tokens, head_v)
         out = torch.einsum(
-            "b h i j, b h j d -> b h i d", similarity, v
+            "b h i j, b h j d -> b h i d", attention, v
         )  # shape (batch_size, num_heads, num_latent_tokens, head_v)
-        out = (
-            rearrange(out, "b h l d -> b l (h d)") * out_scale
+        out = rearrange(
+            out, "b h l d -> b l (h d)"
         )  # shape (batch_size, num_latent_tokens, v_dim)
-        return (self.out(out) + self.residual(self.latents)) * RSQRT2
+        return (self.prenorm(self.out(out)) + self.residual(self.latents)) * RSQRT2
 
 
 class TransformerEncoder(nn.Module):

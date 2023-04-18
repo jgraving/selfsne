@@ -242,10 +242,10 @@ def logmeanexp(
     if dim is not None:
         if isinstance(dim, tuple):
             return x.logsumexp(dim=dim, keepdim=keepdim) - np.log(
-                np.sum([x.shape[dim] for dim in dim])
+                np.prod([x.shape[dim] for dim in dim])
             )
         else:
-            return x.logsumexp(dim=dim, keepdim=keepdim) - np.log(np.sum(x.shape[dim]))
+            return x.logsumexp(dim=dim, keepdim=keepdim) - np.log(x.shape[dim])
     else:
         return x.logsumexp(
             dim=tuple([dim for dim in range(x.dim())]), keepdim=keepdim

@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from einops import rearrange
+from einops import rearrange, reduce
 
 from selfsne.utils import stop_gradient, random_sample_columns
 
@@ -61,6 +61,45 @@ class ParametricResidual(nn.Module):
 
     def forward(self, x):
         return (self.proj(x) + self.module(x)) * RSQRT2
+
+
+class VarPool2d(nn.Module):
+    def __init__(self, kernel_size):
+        super().__init__()
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        self.kernel_size = kernel_size
+        self.scale = (self.kernel_size[0] * self.kernel_size[1]) ** -0.5
+
+    def forward(self, x):
+        y = rearrange(
+            x,
+            "b c (h kh) (w kw) -> b c h w kh kw",
+            kh=self.kernel_size[0],
+            kw=self.kernel_size[1],
+        )
+        return reduce(y, "b c h w kh kw -> b c h w", "sum") * self.scale
+
+
+class GlobalVarPool(nn.Module):
+    def __init__(self, dim, keepdim=False):
+        super().__init__()
+        self.dim = dim
+        self.keepdim = keepdim
+
+    def forward(self, x):
+        return x.sum(self.dim) * x.shape[self.dim] ** -0.5
+
+
+class GlobalVarPool1d(nn.Module):
+    def forward(self, x):
+        y = reduce(x, "b c l -> b c", "sum") * x.shape[-1] ** -0.5
+        return y
+
+
+class GlobalVarPool2d(nn.Module):
+    def forward(self, x):
+        return reduce(x, "b c h w -> b c", "sum") * (x.shape[-1] * x.shape[2]) ** -0.5
 
 
 class Lambda(nn.Module):
@@ -438,7 +477,7 @@ def ResNet2d(
                             ]
                         )
                     ),
-                    nn.AvgPool2d(3, 2, 1),
+                    VarPool2d(2),
                 )
                 for block_idx in range(n_blocks)
             ]
@@ -447,9 +486,7 @@ def ResNet2d(
         if batch_norm
         else nn.Identity(),
         init_selu(nn.Conv2d(hidden_channels * (2 ** n_blocks), out_channels, 1)),
-        nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten())
-        if global_pooling
-        else nn.Identity(),
+        GlobalVarPool2d() if global_pooling else nn.Identity(),
     )
 
 

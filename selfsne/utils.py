@@ -252,6 +252,29 @@ def logmeanexp(
         ) - np.log(x.numel())
 
 
+def radicant_mean(x, dim=None, keepdim=False):
+    """
+    Compute the radicant mean (sum(x) / sqrt(n)) along the specified dimensions.
+
+    Args:
+        x (torch.Tensor): The input tensor.
+        dim (int, tuple, or list, optional): The dimensions to reduce. If None (default), all dimensions will be reduced.
+        keepdim (bool, optional): Whether the output tensor has the reduced dimensions retained. Default is False.
+
+    Returns:
+        torch.Tensor: The radicant mean tensor.
+    """
+    if dim is not None:
+        if isinstance(dim, tuple):
+            return x.sum(dim, keepdim=keepdim) / np.sqrt(
+                np.prod([x.shape[dim] for dim in dim])
+            )
+        else:
+            return x.sum(dim=dim, keepdim=keepdim) / np.sqrt(x.shape[dim])
+    else:
+        return x.sum(keepdim=keepdim) / np.sqrt(x.numel())
+
+
 def off_diagonal(x: torch.Tensor) -> torch.Tensor:
     r"""
     Returns a flattened view of the off-diagonal elements of a square matrix.

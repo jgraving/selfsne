@@ -134,6 +134,7 @@ class DensityRatioEstimator(nn.Module):
         baseline: Union[str, float, callable] = 0,
         num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
+        symmetric_negatives: bool = False,
     ) -> None:
 
         super().__init__()
@@ -159,6 +160,7 @@ class DensityRatioEstimator(nn.Module):
         self.num_negatives = num_negatives
         self.embedding_decay = embedding_decay
         self.inverse_temperature = 1 / temperature
+        self.symmetric_negatives = symmetric_negatives
 
     def forward(
         self,
@@ -180,13 +182,17 @@ class DensityRatioEstimator(nn.Module):
                 Default: None.
 
         Returns:
-            Tuple[torch.Tensor]: A tuple containing four tensors:
+            Tuple[torch.Tensor]: A tuple containing six tensors:
                 [0] The mean of the positive logits, i.e., the diagonal entries of the
                     kernel matrix (shape: (1,))
                 [1] The mean of the negative logits, i.e., the off-diagonal entries of
                     the kernel matrix (shape: (1,))
-                [2] The mean of the log-baseline (shape: (1,))
-                [3] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
+                [2] The mean of the positive probs, i.e., the diagonal entries of the
+                    kernel matrix (shape: (1,))
+                [3] The mean of the negative probs, i.e., the off-diagonal entries of
+                    the kernel matrix (shape: (1,))
+                [4] The mean of the log-baseline (shape: (1,))
+                [5] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
         """
 
         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
@@ -198,6 +204,9 @@ class DensityRatioEstimator(nn.Module):
         logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits)
+        if self.symmetric_negatives:
+            logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
+            neg_logits = torch.cat([neg_logits, remove_diagonal(logits)], dim=-1)
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
         log_baseline = self.baseline(logits=neg_logits, y=y, z_y=z_y)

@@ -154,7 +154,7 @@ class SelfSNE(pl.LightningModule):
                 neg_prob,
                 log_baseline,
                 similarity,
-            ) = self.similarity_loss(z_x, z_y, y)
+            ) = self.similarity_loss(z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y)
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
             self.log(
                 mode + "pos_logits",

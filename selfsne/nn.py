@@ -48,11 +48,6 @@ class Residual(nn.Module):
         return (x + self.module(x)) * RSQRT2
 
 
-class PadShift(nn.Module):
-    def forward(self, x):
-        return F.pad(x, pad=(1, 0))[..., :-1]
-
-
 class ParametricResidual(nn.Module):
     def __init__(self, in_features, out_features, module):
         super().__init__()
@@ -211,6 +206,11 @@ class InputNorm3d(nn.BatchNorm3d):
             self.running_var.view(1, -1, 1, 1, 1) + self.eps
         )
         return x_norm
+
+
+class PadShift(nn.Module):
+    def forward(self, x):
+        return F.pad(x, pad=(1, 0))[..., :-1]
 
 
 class CausalConv1d(nn.Conv1d):
@@ -592,6 +592,26 @@ class PatchEmbedding(nn.Module):
         return rearrange(x, "b c h w -> b (h w) c")
 
 
+class PreNorm(nn.Module):
+    def __init__(self, in_features, module):
+        super().__init__()
+        self.norm = nn.LayerNorm(in_features)
+        self.module = module
+
+    def forward(self, x):
+        return (x + self.module(self.norm(x))) * RSQRT2
+
+
+class ResNorm(nn.Module):
+    def __init__(self, in_features, module):
+        super().__init__()
+        self.norm = nn.LayerNorm(in_features)
+        self.module = module
+
+    def forward(self, x):
+        return (x + self.norm(self.module(x))) * RSQRT2
+
+
 class SelfAttention(nn.Module):
     def __init__(
         self,
@@ -603,7 +623,6 @@ class SelfAttention(nn.Module):
         output_dim=None,
         dropout=0.1,
         causal_mask=False,
-        prenorm=True,
     ):
         super(SelfAttention, self).__init__()
         self.input_dim = input_dim
@@ -630,13 +649,7 @@ class SelfAttention(nn.Module):
         )
 
         self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
-        self.residual = (
-            nn.Identity()
-            if input_dim == self.output_dim
-            else init_selu(nn.Linear(input_dim, self.output_dim))
-        )
         self.causal_mask = causal_mask
-        self.prenorm = nn.LayerNorm(self.output_dim) if prenorm else nn.Identity()
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape
@@ -681,7 +694,7 @@ class SelfAttention(nn.Module):
         # out shape: (batch_size, num_heads, seq_len_i, head_v)
         out = torch.einsum("b h i j, b h j d -> b h i d", attention, v)
         out = rearrange(out, "b h s d -> b s (h d)")
-        return (self.prenorm(self.out(out)) + self.residual(x)) * RSQRT2
+        return self.out(out)
 
 
 class CrossAttention(nn.Module):
@@ -696,7 +709,6 @@ class CrossAttention(nn.Module):
         v_dim=None,
         output_dim=None,
         dropout=0.1,
-        prenorm=True,
     ):
         super(CrossAttention, self).__init__()
         self.input_dim = input_dim
@@ -724,7 +736,6 @@ class CrossAttention(nn.Module):
 
         self.latents = nn.Parameter(torch.randn((1, num_latent_tokens, latent_dim)))
         self.q = init_selu(nn.Linear(latent_dim, self.qk_dim))
-        self.prenorm = nn.LayerNorm(self.output_dim) if prenorm else nn.Identity()
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape
@@ -768,7 +779,7 @@ class CrossAttention(nn.Module):
         out = rearrange(
             out, "b h l d -> b l (h d)"
         )  # shape (batch_size, num_latent_tokens, v_dim)
-        return (self.prenorm(self.out(out)) + self.residual(self.latents)) * RSQRT2
+        return (self.out(out) + self.residual(self.latents)) * RSQRT2
 
 
 class TransformerEncoder(nn.Module):

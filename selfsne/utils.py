@@ -275,6 +275,19 @@ def radicant_mean(x, dim=None, keepdim=False):
         return x.sum(keepdim=keepdim) / np.sqrt(x.numel())
 
 
+def radicant_add(*tensors):
+    """
+    Compute the radicant sum (sum(tensors) / sqrt(n)).
+
+    Args:
+        *tensors (torch.Tensor): Any number of input tensors.
+
+    Returns:
+        torch.Tensor: The radicant sum tensor.
+    """
+    return sum(tensors) * len(tensors) ** -0.5
+
+
 def off_diagonal(x: torch.Tensor) -> torch.Tensor:
     r"""
     Returns a flattened view of the off-diagonal elements of a square matrix.

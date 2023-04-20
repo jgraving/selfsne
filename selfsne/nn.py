@@ -169,8 +169,8 @@ class StopGradient(nn.Module):
 
 
 class InputNorm1d(nn.BatchNorm1d):
-    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
-        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+    def __init__(self, num_features: int, eps: float = 1e-05, momentum=None) -> None:
+        super().__init__(num_features, eps=eps, momentum=momentum, affine=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Use super's forward to update running statistics
@@ -181,8 +181,8 @@ class InputNorm1d(nn.BatchNorm1d):
 
 
 class InputNorm2d(nn.BatchNorm2d):
-    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
-        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+    def __init__(self, num_features: int, eps: float = 1e-05, momentum=None) -> None:
+        super().__init__(num_features, eps=eps, momentum=momentum, affine=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Use super's forward to update running statistics
@@ -195,8 +195,8 @@ class InputNorm2d(nn.BatchNorm2d):
 
 
 class InputNorm3d(nn.BatchNorm3d):
-    def __init__(self, num_features: int, eps: float = 1e-05) -> None:
-        super().__init__(num_features, eps=eps, momentum=None, affine=False)
+    def __init__(self, num_features: int, eps: float = 1e-05, momentum=None) -> None:
+        super().__init__(num_features, eps=eps, momentum=momentum, affine=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Use super's forward to update running statistics

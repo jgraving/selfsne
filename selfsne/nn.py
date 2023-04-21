@@ -24,6 +24,9 @@ from einops import rearrange, reduce
 
 from selfsne.utils import stop_gradient, random_sample_columns
 
+import warnings
+
+
 RSQRT2 = 2 ** -0.5
 
 
@@ -555,23 +558,38 @@ class PositionEmbedding(nn.Module):
 
 
 class SampleTokens(nn.Module):
-    def __init__(self, p=0.5):
+    def __init__(self, p=None, num_tokens=None):
         super(SampleTokens, self).__init__()
         self.p = p
+        self.num_tokens = num_tokens
 
-    def forward(self, tensor):
+        if self.p is None and self.num_tokens is None:
+            warnings.warn(
+                "Neither 'p' nor 'num_tokens' were specified. The module will not perform any sampling on the input tensor."
+            )
+        elif self.p is not None and (self.p <= 0 or self.p > 1):
+            raise ValueError("The 'p' parameter must be between 0 and 1.")
+
+    def forward(self, x):
         if self.training:
-            batch_size, tokens, features = tensor.size()
+            batch_size, tokens, features = x.size()
 
-            # Calculate the number of tokens to keep per batch
-            tokens_to_keep = int(tokens * self.p)
+            if self.num_tokens is not None:
+                # Ensure that we don't sample more tokens than are available
+                tokens_to_keep = min(tokens, self.num_tokens)
+            elif self.p is not None:
+                # Calculate the number of tokens to keep per batch
+                tokens_to_keep = int(tokens * self.p)
+            else:
+                # If neither p nor num_tokens is specified, don't do anything
+                return x
 
             # Use the random_sample_columns function to sample the remaining tokens for each item in the batch
-            output_tensor = random_sample_columns(tensor, tokens_to_keep)
+            output_tensor = random_sample_columns(x, tokens_to_keep)
 
             return output_tensor
         else:
-            return tensor
+            return x
 
 
 class PatchEmbedding(nn.Module):

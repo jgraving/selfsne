@@ -21,6 +21,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from einops import rearrange, reduce
+from einops.layers.torch import Rearrange
 
 from selfsne.utils import stop_gradient, random_sample_columns
 
@@ -43,22 +44,17 @@ def init_selu(x):
 
 
 class Residual(nn.Module):
-    def __init__(self, module):
+    def __init__(self, module, residual=nn.Identity()):
         super().__init__()
         self.module = module
+        self.residual = residual
 
     def forward(self, x):
-        return (x + self.module(x)) * RSQRT2
+        return (self.residual(x) + self.module(x)) * RSQRT2
 
 
-class ParametricResidual(nn.Module):
-    def __init__(self, in_features, out_features, module):
-        super().__init__()
-        self.proj = init_selu(nn.Linear(in_features, out_features))
-        self.module = module
-
-    def forward(self, x):
-        return (self.proj(x) + self.module(x)) * RSQRT2
+def ParametricResidual(in_features, out_features, module):
+    return Residual(module, init_selu(nn.Linear(in_features, out_features)))
 
 
 class VarPool2d(nn.Module):
@@ -587,32 +583,18 @@ class SampleTokens(nn.Module):
             return x
 
 
-class PatchEmbedding(nn.Module):
-    def __init__(self, image_size, patch_size, embedding_dim, input_channels=3):
-        super().__init__()
-        assert (
-            image_size % patch_size
-        ) == 0, "Image size must be divisible by patch size."
-        self.patch_size = patch_size
-        self.patch_embedding = init_selu(
-            nn.Conv2d(
-                input_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
-            )
-        )
-
-    def forward(self, x):
-        x = self.patch_embedding(x)
-        return rearrange(x, "b c h w -> b (h w) c")
+def PatchEmbedding(image_size, patch_size, embedding_dim, input_channels=3):
+    assert (image_size % patch_size) == 0, "Image size must be divisible by patch size."
+    return nn.Sequential(
+        nn.Conv2d(
+            input_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
+        ),
+        Rearrange("b c h w -> b (h w) c"),
+    )
 
 
-class PreNorm(nn.Module):
-    def __init__(self, in_features, module):
-        super().__init__()
-        self.norm = nn.LayerNorm(in_features)
-        self.module = module
-
-    def forward(self, x):
-        return (x + self.module(self.norm(x))) * RSQRT2
+def PreNorm(in_features, module):
+    return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
 
 
 class SelfAttention(nn.Module):

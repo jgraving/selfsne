@@ -500,7 +500,7 @@ def MLP(
     n_layers=4,
     batch_norm=False,
 ):
-    net = nn.Sequential(
+    return nn.Sequential(
         init_selu(nn.Linear(in_features, hidden_features)),
         nn.SELU(),
         Residual(
@@ -519,11 +519,6 @@ def MLP(
         ),
         nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
         init_selu(nn.Linear(hidden_features, out_features)),
-    )
-    return (
-        Residual(net)
-        if in_features == out_features
-        else ParametricResidual(in_features, out_features, net)
     )
 
 

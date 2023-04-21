@@ -243,7 +243,7 @@ class SymmetricLoss(nn.Module):
     def forward(self, z_x, z_y, y, x, **kwargs):
         xy_loss = self.loss(z_x, z_y, y)
         yx_loss = self.loss(z_y, z_x, x)
-        return tuple([(xy + yx) / 2 for (h, z) in zip(xy_loss, yx_loss)])
+        return tuple([(xy + yx) / 2 for (xy, yx) in zip(xy_loss, yx_loss)])
 
 
 class SymmetricEncoderProjectorLoss(nn.Module):

@@ -84,8 +84,12 @@ class SelfSNE(pl.LightningModule):
         dampening=0,
         nesterov=False,
         weight_decay=0.0,
+        encoder_weight_decay=None,
         projector_weight_decay=None,
+        encoder_x_weight_decay=None,
+        projector_x_weight_decay=None,
         decoder_weight_decay=None,
+        prior_weight_decay=None,
         lr_scheduler=False,
         lr_warmup_steps=0,
         lr_target_steps=0,
@@ -117,13 +121,29 @@ class SelfSNE(pl.LightningModule):
                 "redundancy_loss",
             ],
         )
+        self.hparams.encoder_weight_decay = (
+            encoder_weight_decay if encoder_weight_decay is not None else weight_decay
+        )
         self.hparams.projector_weight_decay = (
             projector_weight_decay
             if projector_weight_decay is not None
             else weight_decay
         )
+        self.hparams.encoder_x_weight_decay = (
+            encoder_x_weight_decay
+            if encoder_x_weight_decay is not None
+            else weight_decay
+        )
+        self.hparams.projector_x_weight_decay = (
+            projector_x_weight_decay
+            if projector_x_weight_decay is not None
+            else weight_decay
+        )
         self.hparams.decoder_weight_decay = (
             decoder_weight_decay if decoder_weight_decay is not None else weight_decay
+        )
+        self.hparams.prior_weight_decay = (
+            prior_weight_decay if prior_weight_decay is not None else weight_decay
         )
 
     def forward(self, batch):
@@ -265,18 +285,26 @@ class SelfSNE(pl.LightningModule):
 
     def configure_optimizers(self):
         params_list = [
-            {"params": self.encoder.parameters()},
+            {
+                "params": self.encoder.parameters(),
+                "weight_decay": self.hparams.encoder_weight_decay,
+            },
             {
                 "params": self.projector.parameters(),
                 "weight_decay": self.hparams.projector_weight_decay,
             },
         ]
         if self.encoder_x is not None:
-            params_list.append({"params": self.encoder_x.parameters()})
+            params_list.append(
+                {
+                    "params": self.encoder_x.parameters(),
+                    "weight_decay": self.hparams.encoder_x_weight_decay,
+                },
+            )
             params_list.append(
                 {
                     "params": self.projector_x.parameters(),
-                    "weight_decay": self.hparams.projector_weight_decay,
+                    "weight_decay": self.hparams.projector_x_weight_decay,
                 }
             )
 
@@ -301,7 +329,7 @@ class SelfSNE(pl.LightningModule):
             params_list.append(
                 {
                     "params": self.prior.parameters(),
-                    "weight_decay": 0.0,
+                    "weight_decay": self.hparams.prior_weight_decay,
                     "lr": self.prior.hparams.lr,
                 }
             )

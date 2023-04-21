@@ -602,44 +602,40 @@ class PreNorm(nn.Module):
         return (x + self.module(self.norm(x))) * RSQRT2
 
 
-class ResNorm(nn.Module):
-    def __init__(self, in_features, module):
-        super().__init__()
-        self.norm = nn.LayerNorm(in_features)
-        self.module = module
-
-    def forward(self, x):
-        return (x + self.norm(self.module(x))) * RSQRT2
-
-
 class SelfAttention(nn.Module):
     def __init__(
         self,
         input_dim,
-        attention_dim,
         num_heads,
+        attention_dim=None,
         qk_dim=None,
         v_dim=None,
         output_dim=None,
-        dropout=0.1,
+        dropout=0.0,
         causal_mask=False,
     ):
         super(SelfAttention, self).__init__()
         self.input_dim = input_dim
-        self.qk_dim = qk_dim if qk_dim is not None else attention_dim
+        if attention_dim is None:
+            assert (
+                input_dim % num_heads == 0
+            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
+            self.attention_dim = input_dim // num_heads
+        else:
+            self.attention_dim = attention_dim
+        self.qk_dim = qk_dim if qk_dim is not None else self.attention_dim
         self.head_qk = self.qk_dim
         self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else attention_dim
+        self.v_dim = v_dim if v_dim is not None else self.attention_dim
         self.head_v = self.v_dim
         self.v_dim *= num_heads
-        self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
         self.scale = self.head_qk ** -0.5
-        self.qk = init_selu(nn.Linear(input_dim, 2 * self.qk_dim))
+        self.qk = init_selu(nn.Linear(self.input_dim, 2 * self.qk_dim))
         self.v = (
-            init_selu(nn.Linear(input_dim, self.v_dim))
-            if input_dim != self.v_dim
+            init_selu(nn.Linear(self.input_dim, self.v_dim))
+            if self.input_dim != self.v_dim
             else nn.Identity()
         )
         self.out = (
@@ -701,41 +697,61 @@ class CrossAttention(nn.Module):
     def __init__(
         self,
         input_dim,
-        latent_dim,
-        num_latent_tokens,
-        attention_dim,
         num_heads,
+        num_latent_tokens,
+        latent_dim=None,
+        attention_dim=None,
         qk_dim=None,
         v_dim=None,
         output_dim=None,
-        dropout=0.1,
+        dropout=0.0,
+        latent_prenorm=False,
     ):
         super(CrossAttention, self).__init__()
         self.input_dim = input_dim
-        self.latent_dim = latent_dim
-        self.qk_dim = qk_dim if qk_dim is not None else attention_dim
+        self.latent_dim = self.input_dim if latent_dim is None else latent_dim
+        if attention_dim is None:
+            assert (
+                input_dim % num_heads == 0
+            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
+            self.attention_dim = self.input_dim // num_heads
+        else:
+            self.attention_dim = attention_dim
+        self.qk_dim = self.attention_dim if qk_dim is None else qk_dim
         self.head_qk = self.qk_dim
         self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else attention_dim
+        self.v_dim = v_dim if v_dim is not None else self.attention_dim
         self.head_v = self.v_dim
         self.v_dim *= num_heads
-        self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.output_dim = output_dim if output_dim is not None else input_dim
         self.scale = self.head_qk ** -0.5
-        self.k = init_selu(nn.Linear(input_dim, self.qk_dim))
-        self.v = init_selu(nn.Linear(input_dim, self.v_dim))
-        self.out = init_selu(nn.Linear(self.v_dim, self.output_dim))
-
-        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
-        self.residual = (
-            nn.Identity()
-            if self.latent_dim == self.output_dim
-            else init_selu(nn.Linear(self.latent_dim, self.output_dim))
+        self.k = init_selu(nn.Linear(self.input_dim, self.qk_dim))
+        self.v = (
+            init_selu(nn.Linear(self.input_dim, self.v_dim))
+            if self.input_dim != self.v_dim
+            else nn.Identity()
+        )
+        self.out = (
+            init_selu(nn.Linear(self.v_dim, self.output_dim))
+            if self.output_dim != self.v_dim
+            else nn.Identity()
         )
 
-        self.latents = nn.Parameter(torch.randn((1, num_latent_tokens, latent_dim)))
-        self.q = init_selu(nn.Linear(latent_dim, self.qk_dim))
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
+        self.residual = nn.Sequential(
+            nn.Identity()
+            if self.latent_dim == self.output_dim
+            else init_selu(nn.Linear(self.latent_dim, self.output_dim)),
+        )
+
+        self.latents = nn.Parameter(
+            torch.randn((1, num_latent_tokens, self.latent_dim))
+        )
+        self.q = nn.Sequential(
+            nn.LayerNorm(self.latent_dim) if latent_prenorm else nn.Identity(),
+            init_selu(nn.Linear(self.latent_dim, self.qk_dim)),
+        )
 
     def forward(self, x):
         batch_size, seq_len, input_dim = x.shape

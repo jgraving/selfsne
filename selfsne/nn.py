@@ -57,22 +57,77 @@ def ParametricResidual(in_features, out_features, module):
     return Residual(module, init_selu(nn.Linear(in_features, out_features)))
 
 
-class VarPool2d(nn.Module):
-    def __init__(self, kernel_size):
-        super().__init__()
+class VarPool1d(nn.AvgPool1d):
+    def __init__(
+        self,
+        kernel_size,
+        stride=None,
+        padding=0,
+        ceil_mode=False,
+        count_include_pad=True,
+        divisor_override=None,
+    ):
+        super().__init__(
+            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+        )
+        self.scale = kernel_size ** -0.5
+
+    def forward(self, x):
+        y = super().forward(x) * self.kernel_size
+        return y * self.scale
+
+
+class VarPool2d(nn.AvgPool2d):
+    def __init__(
+        self,
+        kernel_size,
+        stride=None,
+        padding=0,
+        ceil_mode=False,
+        count_include_pad=True,
+        divisor_override=None,
+    ):
+        super().__init__(
+            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+        )
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
         self.kernel_size = kernel_size
         self.scale = (self.kernel_size[0] * self.kernel_size[1]) ** -0.5
 
     def forward(self, x):
-        y = rearrange(
-            x,
-            "b c (h kh) (w kw) -> b c h w kh kw",
-            kh=self.kernel_size[0],
-            kw=self.kernel_size[1],
+        y = super().forward(x) * self.kernel_size[0] * self.kernel_size[1]
+        return y * self.scale
+
+
+class VarPool3d(nn.AvgPool3d):
+    def __init__(
+        self,
+        kernel_size,
+        stride=None,
+        padding=0,
+        ceil_mode=False,
+        count_include_pad=True,
+        divisor_override=None,
+    ):
+        super().__init__(
+            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
         )
-        return reduce(y, "b c h w kh kw -> b c h w", "sum") * self.scale
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size, kernel_size)
+        self.kernel_size = kernel_size
+        self.scale = (
+            self.kernel_size[0] * self.kernel_size[1] * self.kernel_size[2]
+        ) ** -0.5
+
+    def forward(self, x):
+        y = (
+            super().forward(x)
+            * self.kernel_size[0]
+            * self.kernel_size[1]
+            * self.kernel_size[2]
+        )
+        return y * self.scale
 
 
 class GlobalVarPool(nn.Module):
@@ -93,7 +148,7 @@ class GlobalVarPool1d(nn.Module):
 
 class GlobalVarPool2d(nn.Module):
     def forward(self, x):
-        return reduce(x, "b c h w -> b c", "sum") * (x.shape[-1] * x.shape[2]) ** -0.5
+        return reduce(x, "b c h w -> b c", "sum") * (x.shape[-1] * x.shape[-2]) ** -0.5
 
 
 class Lambda(nn.Module):

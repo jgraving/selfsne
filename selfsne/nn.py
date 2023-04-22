@@ -23,7 +23,11 @@ import numpy as np
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
-from selfsne.utils import stop_gradient, random_sample_columns
+from selfsne.utils import (
+    stop_gradient,
+    random_sample_columns,
+    straight_through_estimator,
+)
 
 import warnings
 
@@ -640,6 +644,113 @@ def PatchEmbedding(image_size, patch_size, embedding_dim, input_channels=3):
 
 def PreNorm(in_features, module):
     return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
+
+
+def PostNorm(out_features, module):
+    return nn.Sequential(Residual(module), nn.LayerNorm(out_features))
+
+
+def ResNorm(out_features, module):
+    return Residual(nn.Sequential(module, nn.LayerNorm(out_features)))
+
+
+class VarSelfAttention(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        num_heads,
+        attention_dim=None,
+        qk_dim=None,
+        v_dim=None,
+        output_dim=None,
+        dropout=0.0,
+        causal_mask=False,
+    ):
+        super(VarSelfAttention, self).__init__()
+        self.input_dim = input_dim
+        if attention_dim is None:
+            assert (
+                input_dim % num_heads == 0
+            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
+            self.attention_dim = input_dim // num_heads
+        else:
+            self.attention_dim = attention_dim
+        self.qk_dim = qk_dim if qk_dim is not None else self.attention_dim
+        self.head_qk = self.qk_dim
+        self.qk_dim *= num_heads
+        self.v_dim = v_dim if v_dim is not None else self.attention_dim
+        self.head_v = self.v_dim
+        self.v_dim *= num_heads
+        self.num_heads = num_heads
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.scale = self.head_qk ** -0.5
+        self.qk = init_selu(nn.Linear(self.input_dim, 2 * self.qk_dim))
+        self.v = (
+            init_selu(nn.Linear(self.input_dim, self.v_dim))
+            if self.input_dim != self.v_dim
+            else nn.Identity()
+        )
+        self.out = (
+            init_selu(nn.Linear(self.v_dim, self.output_dim))
+            if self.output_dim != self.v_dim
+            else nn.Identity()
+        )
+
+        self.dropout = nn.AlphaDropout(p=dropout) if dropout > 0 else nn.Identity()
+        self.causal_mask = causal_mask
+
+    def forward(self, x):
+        batch_size, seq_len, input_dim = x.shape
+        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
+        qk = rearrange(
+            qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
+        )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
+        q, k = qk[..., 0], qk[..., 1]
+
+        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
+        v = rearrange(
+            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
+        )  # shape (batch_size, num_heads, seq_len, head_v)
+
+        # compute similarity
+        # q shape: (batch_size, num_heads, seq_len_i, head_qk)
+        # k shape: (batch_size, num_heads, seq_len_j, head_qk)
+        # similarity shape: (batch_size, num_heads, seq_len_i, seq_len_j)
+        similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k)
+
+        # scale dot product similarity
+        similarity *= self.scale
+
+        # apply activation and dropout
+        attention = F.selu(similarity - torch.mean(similarity, dim=-1, keepdim=True))
+        attention = self.dropout(attention)
+
+        # apply causal mask if specified
+        if self.causal_mask:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, device=attention.device), diagonal=1
+            )
+            mask = mask.view(1, 1, seq_len, seq_len).repeat(
+                batch_size, self.num_heads, 1, 1
+            )
+            gradient = attention.masked_fill(
+                mask == 0,
+                -1.6732632423543772848170429916717,  # set masked elements to selu lower bound for zero grad
+            )
+            estimator = attention * mask
+            attention = straight_through_estimator(
+                gradient, estimator
+            )  # use straight-through estimator to pass zeros in forward and backward
+
+        # compute output
+        # v shape: (batch_size, num_heads, seq_len_j, head_v)
+        # out shape: (batch_size, num_heads, seq_len_i, head_v)
+        out = (
+            torch.einsum("b h i j, b h j d -> b h i d", attention, v)
+            * (seq_len) ** -0.5
+        )
+        out = rearrange(out, "b h s d -> b s (h d)")
+        return self.out(out)
 
 
 class SelfAttention(nn.Module):

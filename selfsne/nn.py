@@ -332,21 +332,19 @@ def TCN(
                     Residual(
                         nn.Sequential(
                             *[
-                                Residual(
-                                    nn.Sequential(
-                                        nn.BatchNorm1d(hidden_channels)
-                                        if batch_norm
-                                        else nn.Identity(),
-                                        init_selu(
-                                            conv1d(
-                                                hidden_channels,
-                                                hidden_channels,
-                                                kernel_size=kernel_size,
-                                                dilation=dilation,
-                                            )
-                                        ),
-                                        nn.SELU(),
-                                    )
+                                nn.Sequential(
+                                    nn.BatchNorm1d(hidden_channels)
+                                    if batch_norm
+                                    else nn.Identity(),
+                                    init_selu(
+                                        conv1d(
+                                            hidden_channels,
+                                            hidden_channels,
+                                            kernel_size=kernel_size,
+                                            dilation=dilation,
+                                        )
+                                    ),
+                                    nn.SELU(),
                                 )
                                 for dilation in 2 ** np.arange(n_layers)
                             ]
@@ -383,25 +381,23 @@ def TCN2d(
                     Residual(
                         nn.Sequential(
                             *[
-                                Residual(
-                                    nn.Sequential(
-                                        nn.BatchNorm2d(hidden_channels)
-                                        if batch_norm
-                                        else nn.Identity(),
-                                        init_selu(
-                                            conv(
-                                                hidden_channels,
-                                                hidden_channels,
-                                                kernel_size=(1, kernel_size),
-                                                dilation=(1, dilation),
-                                                padding=(
-                                                    0,
-                                                    ((kernel_size - 1) * dilation // 2),
-                                                ),
-                                            )
-                                        ),
-                                        nn.SELU(),
-                                    )
+                                nn.Sequential(
+                                    nn.BatchNorm2d(hidden_channels)
+                                    if batch_norm
+                                    else nn.Identity(),
+                                    init_selu(
+                                        conv(
+                                            hidden_channels,
+                                            hidden_channels,
+                                            kernel_size=(1, kernel_size),
+                                            dilation=(1, dilation),
+                                            padding=(
+                                                0,
+                                                ((kernel_size - 1) * dilation // 2),
+                                            ),
+                                        )
+                                    ),
+                                    nn.SELU(),
                                 )
                                 for dilation in 2 ** np.arange(n_layers)
                             ]
@@ -439,26 +435,24 @@ def TCN3d(
                     Residual(
                         nn.Sequential(
                             *[
-                                Residual(
-                                    nn.Sequential(
-                                        nn.BatchNorm3d(hidden_channels)
-                                        if batch_norm
-                                        else nn.Identity(),
-                                        init_selu(
-                                            conv(
-                                                hidden_channels,
-                                                hidden_channels,
-                                                kernel_size=(1, 1, kernel_size),
-                                                dilation=(1, 1, dilation),
-                                                padding=(
-                                                    0,
-                                                    0,
-                                                    ((kernel_size - 1) * dilation // 2),
-                                                ),
-                                            )
-                                        ),
-                                        nn.SELU(),
-                                    )
+                                nn.Sequential(
+                                    nn.BatchNorm3d(hidden_channels)
+                                    if batch_norm
+                                    else nn.Identity(),
+                                    init_selu(
+                                        conv(
+                                            hidden_channels,
+                                            hidden_channels,
+                                            kernel_size=(1, 1, kernel_size),
+                                            dilation=(1, 1, dilation),
+                                            padding=(
+                                                0,
+                                                0,
+                                                ((kernel_size - 1) * dilation // 2),
+                                            ),
+                                        )
+                                    ),
+                                    nn.SELU(),
                                 )
                                 for dilation in 2 ** np.arange(n_layers)
                             ]
@@ -554,19 +548,15 @@ def MLP(
     return nn.Sequential(
         init_selu(nn.Linear(in_features, hidden_features)),
         nn.SELU(),
-        Residual(
-            nn.Sequential(
-                *[
-                    nn.Sequential(
-                        nn.BatchNorm1d(hidden_features)
-                        if batch_norm
-                        else nn.Identity(),
-                        init_selu(nn.Linear(hidden_features, hidden_features)),
-                        nn.SELU(),
-                    )
-                    for _ in range(n_layers)
-                ]
-            )
+        nn.Sequential(
+            *[
+                nn.Sequential(
+                    nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
+                    init_selu(nn.Linear(hidden_features, hidden_features)),
+                    nn.SELU(),
+                )
+                for _ in range(n_layers)
+            ]
         ),
         nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
         init_selu(nn.Linear(hidden_features, out_features)),

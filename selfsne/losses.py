@@ -47,6 +47,8 @@ from torch import nn
 from torch import diagonal
 import torch.nn.functional as F
 
+from torchmetrics.functional import accuracy, precision, recall
+
 from selfsne.kernels import PAIRWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
@@ -58,6 +60,37 @@ from selfsne.utils import (
 )
 
 from typing import Optional, Union, Tuple
+
+
+def classifier_metrics(pos_logits, neg_logits):
+    """
+    Calculates accuracy, recall, and precision given positive and negative logits.
+
+    Args:
+        pos_logits (torch.Tensor): A tensor of positive logits of shape (batch_size,).
+        neg_logits (torch.Tensor): A tensor of negative logits of shape (batch_size,).
+        threshold (float): A threshold to convert logits to binary predictions. Defaults to 0.5.
+
+    Returns:
+        accuracy (float): The accuracy score
+        recall (float): The recall score.
+        precision (float): The precision score.
+    """
+    # Combine positive and negative logits
+    logits = torch.cat((pos_logits, neg_logits), dim=0)
+
+    # Convert logits to probabilities using sigmoid function
+    preds = torch.sigmoid(logits)
+
+    # Create binary labels (1 for positive, 0 for negative)
+    target = torch.cat(
+        (
+            torch.ones_like(pos_logits, dtype=torch.long, device=preds.device),
+            torch.zeros_like(neg_logits, dtype=torch.long, device=preds.device),
+        ),
+        dim=0,
+    )
+    return accuracy(preds, target), recall(preds, target), precision(preds, target)
 
 
 class DensityRatioEstimator(nn.Module):
@@ -213,11 +246,18 @@ class DensityRatioEstimator(nn.Module):
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
+        with torch.no_grad():
+            accuracy, recall, precision = classifier_metrics(
+                pos_logits.flatten(), neg_logits.flatten()
+            )
         return (
             pos_logits.mean(),
             neg_logits.mean(),
             pos_logits.sigmoid().mean(),
             neg_logits.sigmoid().mean(),
+            accuracy,
+            recall,
+            precision,
             log_baseline.mean(),
             attraction.mean() + repulsion.mean() + embedding_decay,
         )

@@ -172,31 +172,21 @@ class SelfSNE(pl.LightningModule):
                 neg_logits,
                 pos_prob,
                 neg_prob,
+                accuracy,
+                recall,
+                precision,
                 log_baseline,
                 similarity,
             ) = self.similarity_loss(z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y)
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
-            self.log(
-                mode + "pos_logits",
-                pos_logits.item(),
-                prog_bar=True,
-            )
-            self.log(
-                mode + "neg_logits",
-                neg_logits.item(),
-                prog_bar=True,
-            )
-            self.log(
-                mode + "pos_prob",
-                pos_prob.item(),
-                prog_bar=True,
-            )
-            self.log(
-                mode + "neg_prob",
-                neg_prob.item(),
-                prog_bar=True,
-            )
+            self.log(mode + "pos_logits", pos_logits.item(), prog_bar=True)
+            self.log(mode + "neg_logits", neg_logits.item(), prog_bar=True)
             self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
+            self.log(mode + "pos_prob", pos_prob.item(), prog_bar=True)
+            self.log(mode + "neg_prob", neg_prob.item(), prog_bar=True)
+            self.log(mode + "accuracy", accuracy.item(), prog_bar=True)
+            self.log(mode + "recall", recall.item(), prog_bar=True)
+            self.log(mode + "precision", precision.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)
@@ -213,9 +203,7 @@ class SelfSNE(pl.LightningModule):
             self.log(mode + "rate", rate.item(), prog_bar=True)
             if hasattr(self.prior, "entropy"):
                 self.log(
-                    mode + "prior_entropy",
-                    self.prior.entropy().item(),
-                    prog_bar=True,
+                    mode + "prior_entropy", self.prior.entropy().item(), prog_bar=True
                 )
             if hasattr(self.prior, "mixture") and hasattr(
                 self.prior.mixture, "entropy"

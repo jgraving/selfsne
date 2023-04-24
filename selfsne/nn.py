@@ -569,7 +569,7 @@ def MLP(
 
 class PositionEmbedding2d(nn.Module):
     def __init__(self, embedding_dim, height, width):
-        super(PositionEmbedding2D, self).__init__()
+        super(PositionEmbedding2d, self).__init__()
         self.embedding_dim = embedding_dim
         self.height = height
         self.width = width

@@ -567,6 +567,54 @@ def MLP(
     )
 
 
+class MultiHeadEncoder(nn.Module):
+    def __init__(self, encoder, num_heads, hidden_dim, embedding_dim):
+        super().__init__()
+        self.encoder = encoder
+        self.projectors = nn.ModuleList(
+            [
+                MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
+                for _ in range(num_heads)
+            ]
+        )
+
+    def forward(self, x):
+        h = self.encoder(x)
+        z_out = []
+        for projector in self.projectors:
+            z = projector(h)
+            z_out.append(z)
+        return torch.cat(z_out, dim=-1)
+
+
+class MultiStageEncoder(nn.Module):
+    def __init__(self, encoder, num_stages, hidden_dim, embedding_dim):
+        super().__init__()
+        self.encoder = encoder
+        self.projector = MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
+        self.stages = nn.ModuleList(
+            [
+                MLP(hidden_dim, hidden_dim, hidden_dim, n_layers=1)
+                for _ in range(num_stages)
+            ]
+        )
+        self.projectors = nn.ModuleList(
+            [
+                MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
+                for _ in range(num_stages)
+            ]
+        )
+
+    def forward(self, x):
+        h = self.encoder(x)
+        z_out = []
+        for stage, projector in zip(self.stages, self.projectors):
+            h = stage(h)
+            z = projector(h)
+            z_out.append(z)
+        return torch.cat(z_out, dim=-1)
+
+
 class PositionEmbedding2d(nn.Module):
     def __init__(self, embedding_dim, height, width):
         super(PositionEmbedding2d, self).__init__()

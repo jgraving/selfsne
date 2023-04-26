@@ -31,7 +31,7 @@ MAINTAINER_EMAIL = "jgraving@gmail.com"
 URL = "https://github.com/jgraving/selfsne"
 LICENSE = "Apache 2.0"
 DOWNLOAD_URL = "https://github.com/jgraving/selfsne.git"
-VERSION = "0.0.1.dev"
+VERSION = "0.0.2.dev"
 
 
 if __name__ == "__main__":

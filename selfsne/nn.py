@@ -546,7 +546,7 @@ def MLP(
     in_features,
     out_features,
     hidden_features=256,
-    n_layers=4,
+    n_layers=1,
     batch_norm=False,
 ):
     return nn.Sequential(

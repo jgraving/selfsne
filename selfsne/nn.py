@@ -318,7 +318,7 @@ def TCN(
     out_channels,
     kernel_size=3,
     hidden_channels=64,
-    n_layers=4,
+    num_layers=4,
     n_blocks=4,
     causal=False,
     causal_shift=False,
@@ -350,7 +350,7 @@ def TCN(
                                     ),
                                     nn.SELU(),
                                 )
-                                for dilation in 2 ** np.arange(n_layers)
+                                for dilation in 2 ** np.arange(num_layers)
                             ]
                         )
                     )
@@ -368,7 +368,7 @@ def TCN2d(
     out_channels,
     kernel_size=3,
     hidden_channels=64,
-    n_layers=4,
+    num_layers=4,
     n_blocks=4,
     causal=False,
     causal_shift=False,
@@ -403,7 +403,7 @@ def TCN2d(
                                     ),
                                     nn.SELU(),
                                 )
-                                for dilation in 2 ** np.arange(n_layers)
+                                for dilation in 2 ** np.arange(num_layers)
                             ]
                         )
                     )
@@ -421,7 +421,7 @@ def TCN3d(
     out_channels,
     kernel_size=3,
     hidden_channels=64,
-    n_layers=4,
+    num_layers=4,
     n_blocks=4,
     causal=False,
     causal_shift=False,
@@ -458,7 +458,7 @@ def TCN3d(
                                     ),
                                     nn.SELU(),
                                 )
-                                for dilation in 2 ** np.arange(n_layers)
+                                for dilation in 2 ** np.arange(num_layers)
                             ]
                         )
                     )
@@ -475,7 +475,7 @@ def ResNet2d(
     in_channels,
     out_channels,
     hidden_channels=64,
-    n_layers=4,
+    num_layers=4,
     n_blocks=4,
     global_pooling=True,
     batch_norm=False,
@@ -525,7 +525,7 @@ def ResNet2d(
                                     ),
                                     nn.SELU(),
                                 )
-                                for _ in range(n_layers)
+                                for _ in range(num_layers)
                             ]
                         )
                     ),
@@ -546,7 +546,7 @@ def MLP(
     in_features,
     out_features,
     hidden_features=256,
-    n_layers=1,
+    num_layers=1,
     batch_norm=False,
 ):
     return nn.Sequential(
@@ -559,7 +559,7 @@ def MLP(
                     init_selu(nn.Linear(hidden_features, hidden_features)),
                     nn.SELU(),
                 )
-                for _ in range(n_layers)
+                for _ in range(num_layers)
             ]
         ),
         nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),

@@ -567,52 +567,121 @@ def MLP(
     )
 
 
-class MultiHeadEncoder(nn.Module):
-    def __init__(self, encoder, num_heads, hidden_dim, embedding_dim):
-        super().__init__()
-        self.encoder = encoder
-        self.projectors = nn.ModuleList(
-            [
-                MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
-                for _ in range(num_heads)
+def MultiheadMLP(
+    in_features,
+    out_features,
+    hidden_features=256,
+    num_layers=1,
+    batch_norm=False,
+    num_heads=1,
+):
+    return nn.Sequential(
+        MultiheadLinear(in_features, hidden_features, num_heads),
+        nn.SELU(),
+        nn.Sequential(
+            *[
+                nn.Sequential(
+                    nn.BatchNorm1d(hidden_features * num_heads)
+                    if batch_norm
+                    else nn.Identity(),
+                    MultiheadLinear(hidden_features, hidden_features, num_heads),
+                    nn.SELU(),
+                )
+                for _ in range(num_layers)
             ]
-        )
+        ),
+        nn.BatchNorm1d(hidden_features * num_heads) if batch_norm else nn.Identity(),
+        MultiheadLinear(hidden_features, out_features, num_heads),
+    )
+
+
+class MultiheadLinear(nn.Module):
+    def __init__(self, in_features, out_features, num_heads, bias=True):
+        super(MultiheadLinear, self).__init__()
+        self.num_heads = num_heads
+        self.in_features = in_features
+        self.out_features = out_features
+
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features, num_heads))
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(1, num_heads, out_features))
+        else:
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.normal_(self.weight, std=self.in_features ** -0.5)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
 
     def forward(self, x):
-        h = self.encoder(x)
-        z_out = []
-        for projector in self.projectors:
-            z = projector(h)
-            z_out.append(z)
-        return torch.cat(z_out, dim=-1)
+        if x.dim() == 2:  # Input is 2D batch x features
+            out = torch.einsum("bi,oih->bho", x, self.weight)
+        elif x.dim() == 3:  # Input is 3D batch x num_heads x features
+            if x.shape[1] != self.num_heads:
+                raise ValueError(
+                    f"Expected input shape[1] to be {self.num_heads} but got {x.shape[1]}"
+                )
+            out = torch.einsum("bhi,oih->bho", x, self.weight)
+
+        else:
+            raise ValueError(
+                "Input must be 2D batch x features or 3D batch x num_heads x features"
+            )
+
+        if self.bias is not None:
+            out += self.bias
+        return out
 
 
-class MultiStageEncoder(nn.Module):
-    def __init__(self, encoder, num_stages, hidden_dim, embedding_dim):
+def MultiheadEncoder(encoder, num_heads, hidden_dim, embedding_dim, num_layers=1):
+    return nn.Sequential(
+        encoder,
+        MultiheadMLP(
+            hidden_dim,
+            embedding_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            num_heads=num_heads,
+        ),
+    )
+
+
+class MultistageEncoder(nn.Module):
+    def __init__(
+        self,
+        encoder,
+        num_stages,
+        hidden_dim,
+        embedding_dim,
+        stage_hidden_layers=1,
+        projector_hidden_layers=1,
+    ):
         super().__init__()
         self.encoder = encoder
-        self.projector = MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
         self.stages = nn.ModuleList(
             [
-                MLP(hidden_dim, hidden_dim, hidden_dim, n_layers=1)
+                MLP(hidden_dim, hidden_dim, hidden_dim, num_layers=stage_hidden_layers)
                 for _ in range(num_stages)
             ]
         )
-        self.projectors = nn.ModuleList(
-            [
-                MLP(hidden_dim, embedding_dim, hidden_dim, n_layers=1)
-                for _ in range(num_stages)
-            ]
+        self.projector = MultiheadMLP(
+            hidden_dim,
+            embedding_dim,
+            hidden_dim,
+            num_layers=projector_hidden_layers,
+            num_heads=num_stages,
         )
 
     def forward(self, x):
         h = self.encoder(x)
-        z_out = []
-        for stage, projector in zip(self.stages, self.projectors):
+        stages = []
+        for stage in self.stages:
             h = stage(h)
-            z = projector(h)
-            z_out.append(z)
-        return torch.cat(z_out, dim=-1)
+            stages.append(h)
+        stages = torch.stack(stages, dim=1)
+        return self.projector(stages)
 
 
 class PositionEmbedding2d(nn.Module):

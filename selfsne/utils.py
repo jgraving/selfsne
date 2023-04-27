@@ -106,6 +106,25 @@ def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:
     return x[idx, jdx]
 
 
+def shuffle_rows(tensor: torch.Tensor) -> torch.Tensor:
+    r"""
+    Shuffles the rows of a 2D tensor randomly.
+
+    Args:
+        tensor (torch.Tensor): The input tensor of shape :math:`(N, D)`.
+
+    Returns:
+        A tensor of shape :math:`(N, D)` with the rows randomly shuffled.
+
+    Examples::
+        >>> x = torch.randn(10, 20)
+        >>> shuffled = shuffle_rows(x)
+        >>> shuffled.shape
+        torch.Size([10, 20])
+    """
+    return tensor[torch.randperm(tensor.shape[0])]
+
+
 def disable_grad(module: torch.nn.Module) -> None:
     r"""
     Disables gradient computation for all parameters of a given module.

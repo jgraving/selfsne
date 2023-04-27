@@ -202,7 +202,7 @@ class DensityRatioEstimator(nn.Module):
         z_x: torch.Tensor,
         z_y: torch.Tensor,
         y: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[torch.Tensor]:
         """
         Computes similarity loss.
@@ -265,7 +265,7 @@ class DensityRatioEstimator(nn.Module):
         )
 
 
-class MultiHeadDensityRatioEstimator(nn.Module):
+class MultiheadDensityRatioEstimator(nn.Module):
     def __init__(
         self,
         num_heads: int,
@@ -357,7 +357,7 @@ class MultiHeadDensityRatioEstimator(nn.Module):
         z_y: Tuple[torch.Tensor],
         y: Optional[torch.Tensor],
         idx: int,
-        **kwargs
+        **kwargs,
     ) -> Tuple[torch.Tensor]:
         if self.kernel_scales[idx] == "auto":
             embedding_features = z_x[idx].shape[1]
@@ -366,14 +366,14 @@ class MultiHeadDensityRatioEstimator(nn.Module):
             kernel_scale = self.kernel_scales[idx]
 
         logits = (
-            self.kernels[idx](z_y[idx], z_x[idx], kernel_scale)
+            self.kernels[idx](z_y[:, idx], z_x[:, idx], kernel_scale)
             * self.inverse_temperatures[idx]
         )
         local_pos_logits = diagonal(logits).unsqueeze(1)
         local_neg_logits = remove_diagonal(logits)
         if self.symmetric_negatives:
             logits = (
-                self.kernels[idx](z_y[idx], z_y[idx], kernel_scale)
+                self.kernels[idx](z_y[:, idx], z_y[:, idx], kernel_scale)
                 * self.inverse_temperatures[idx]
             )
             local_neg_logits = torch.cat(
@@ -384,7 +384,7 @@ class MultiHeadDensityRatioEstimator(nn.Module):
                 local_neg_logits, self.num_negatives
             )
         local_log_baseline = self.baselines[idx](
-            logits=local_neg_logits, y=y, z_y=z_y[idx]
+            logits=local_neg_logits, y=y, z_y=z_y[:, idx]
         )
         local_pos_logits = local_pos_logits - local_log_baseline
         local_neg_logits = local_neg_logits - local_log_baseline
@@ -395,12 +395,14 @@ class MultiHeadDensityRatioEstimator(nn.Module):
         z_x: torch.Tensor,
         z_y: torch.Tensor,
         y: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[torch.Tensor]:
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+        if z_x.dim() != 3 or z_y.dim() != 3:
+            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
 
-        z_x = torch.chunk(z_x, self.num_heads, dim=-1)
-        z_y = torch.chunk(z_y, self.num_heads, dim=-1)
+        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
         global_pos_logits = 0
         global_neg_logits = 0
@@ -445,7 +447,7 @@ class MultiHeadDensityRatioEstimator(nn.Module):
         )
 
 
-class ProductOfExpertsDensityRatioEstimator(MultiHeadDensityRatioEstimator):
+class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
     def __init__(
         self,
         num_heads: int,
@@ -481,12 +483,15 @@ class ProductOfExpertsDensityRatioEstimator(MultiHeadDensityRatioEstimator):
         z_x: torch.Tensor,
         z_y: torch.Tensor,
         y: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[torch.Tensor]:
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
-        z_x = torch.chunk(z_x, self.num_heads, dim=-1)
-        z_y = torch.chunk(z_y, self.num_heads, dim=-1)
+        if z_x.dim() != 3 or z_y.dim() != 3:
+            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
+
+        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
         global_pos_logits = 0
         global_neg_logits = 0
@@ -500,9 +505,9 @@ class ProductOfExpertsDensityRatioEstimator(MultiHeadDensityRatioEstimator):
             global_neg_logits = global_neg_logits + local_neg_logits
             global_log_baseline = global_log_baseline + local_log_baseline
 
-        global_pos_logits = global_pos_logits  # / self.num_heads
-        global_neg_logits = global_neg_logits  # / self.num_heads
-        global_log_baseline = global_log_baseline  # / self.num_heads
+        global_pos_logits = global_pos_logits / self.num_heads
+        global_neg_logits = global_neg_logits / self.num_heads
+        global_log_baseline = global_log_baseline / self.num_heads
         global_attraction, global_repulsion = self.divergence(
             global_pos_logits, global_neg_logits
         )
@@ -530,12 +535,14 @@ class MixtureOfExpertsDensityRatioEstimator(ProductOfExpertsDensityRatioEstimato
         z_x: torch.Tensor,
         z_y: torch.Tensor,
         y: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[torch.Tensor]:
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+        if z_x.dim() != 3 or z_y.dim() != 3:
+            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
 
-        z_x = torch.chunk(z_x, self.num_heads, dim=-1)
-        z_y = torch.chunk(z_y, self.num_heads, dim=-1)
+        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
         global_pos_logits = torch.zeros(1, device=z_x[0].device) - float("inf")
         global_neg_logits = torch.zeros(1, device=z_x[0].device) - float("inf")

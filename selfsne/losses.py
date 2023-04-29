@@ -48,7 +48,7 @@ from torch import diagonal
 from torch.nn import ModuleList
 import torch.nn.functional as F
 
-from torchmetrics.functional import accuracy, precision, recall
+from torchmetrics.functional.classification import binary_accuracy, binary_precision, binary_recall
 
 from selfsne.kernels import PAIRWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
@@ -81,18 +81,19 @@ def classifier_metrics(pos_logits, neg_logits):
     # Combine positive and negative logits
     logits = torch.cat((pos_logits, neg_logits), dim=0)
 
-    # Convert logits to probabilities using sigmoid function
-    preds = torch.sigmoid(logits)
-
     # Create binary labels (1 for positive, 0 for negative)
     target = torch.cat(
         (
-            torch.ones_like(pos_logits, dtype=torch.long, device=preds.device),
-            torch.zeros_like(neg_logits, dtype=torch.long, device=preds.device),
+            torch.ones_like(pos_logits, dtype=torch.long, device=logits.device),
+            torch.zeros_like(neg_logits, dtype=torch.long, device=logits.device),
         ),
         dim=0,
     )
-    return accuracy(preds, target), recall(preds, target), precision(preds, target)
+    return (
+        binary_accuracy(logits, target),
+        binary_recall(logits, target),
+        binary_precision(logits, target),
+    )
 
 
 class DensityRatioEstimator(nn.Module):

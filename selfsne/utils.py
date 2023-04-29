@@ -192,21 +192,26 @@ def straight_through_estimator(
     gradient: torch.Tensor, estimator: torch.Tensor
 ) -> torch.Tensor:
     r"""
-    Computes a straight-through estimator for a non-differentiable function.
+    The straight-through estimator method replaces the backward pass of an estimator tensor with the backward pass of the provided gradient tensor.
 
     Args:
-        gradient (torch.Tensor): The gradient tensor used for the straight-through estimator. Should have the same shape as `estimator`.
-        estimator (torch.Tensor): The output tensor of a non-differentiable function.
+        gradient (torch.Tensor): The gradient tensor to be used for the backward pass. Should be broadcastable with `estimator`.
+        estimator (torch.Tensor): The output tensor of the forward pass.
 
     Returns:
-        A tensor with the same shape as `estimator`, where the values are the estimator for the non-differentiable function.
+        A tensor with the same shape as `estimator`, where the values are the result of the forward pass, and the backward pass is replaced with the provided gradient tensor.
+
+    Equation:
+        STE(estimator, gradient) = stop_gradient(estimator - gradient) + gradient
 
     Examples::
         >>> x = torch.tensor([1., 2., 3.], requires_grad=True)
-        >>> y = torch.round(x)
-        >>> gradient = torch.tensor([0.5, 0.5, 0.5])
-        >>> straight_through_estimator(gradient, y)
-        tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+        >>> y = x * 2
+        >>> gradient = torch.tensor([1., 1., 1.])
+        >>> y_ste = straight_through_estimator(gradient, y)
+        >>> y_ste.backward(torch.ones_like(y_ste))
+        >>> x.grad
+        tensor([1., 1., 1.])
     """
     return stop_gradient(estimator - gradient) + gradient
 
@@ -235,6 +240,47 @@ def log_interpolate(
     log_alpha = F.logsigmoid(alpha_logit)
     log1m_alpha = F.logsigmoid(alpha_logit) - alpha_logit
     return torch.logaddexp(log_a + log_alpha, log_b + log1m_alpha)
+
+
+def log_lerp(
+    start: torch.Tensor,
+    end: torch.Tensor,
+    alpha: torch.Tensor = None,
+    log_alpha: torch.Tensor = None,
+    alpha_logit: torch.Tensor = None,
+) -> torch.Tensor:
+    r"""
+    Log-linearly interpolates between two tensors with log-transformed values.
+
+    Args:
+        start (torch.Tensor): The starting tensor with log-transformed values.
+        end (torch.Tensor): The ending tensor with log-transformed values.
+        alpha (torch.Tensor, optional): The interpolation factor alpha, defined in the range (0, 1). Default is None.
+        log_alpha (torch.Tensor, optional): The log of the interpolation factor alpha. Default is None.
+        alpha_logit (torch.Tensor, optional): The logit of the interpolation factor alpha, defined in the range (-inf, inf). Default is None.
+
+    Returns:
+        A tensor with the same shape as `start` and `end`, where each element is a log-linear interpolation of the corresponding elements in `start` and `end`.
+
+    Examples::
+        >>> start = torch.tensor([1., 2., 3.])
+        >>> end = torch.tensor([4., 5., 6.])
+        >>> alpha_logit = torch.tensor([0.])
+        >>> lerp(start, end, alpha_logit=alpha_logit)
+        tensor([1.3863, 2.3863, 3.3863])
+    """
+    if alpha_logit is not None:
+        log_alpha = F.logsigmoid(alpha_logit)
+        log1m_alpha = F.logsigmoid(-alpha_logit)
+    elif alpha is not None:
+        log_alpha = torch.log(alpha)
+        log1m_alpha = torch.log(1 - alpha)
+    elif log_alpha is not None:
+        log1m_alpha = torch.log(1 - torch.exp(log_alpha))
+    else:
+        raise ValueError("Either alpha, log_alpha, or alpha_logit must be provided.")
+
+    return torch.logaddexp(start + log1m_alpha, end + log_alpha)
 
 
 def logmeanexp(

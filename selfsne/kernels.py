@@ -416,7 +416,7 @@ def joint_product(
         x1 = x1.log_softmax(-1)
         x2 = x2.log_softmax(-1)
 
-    return (x1 + x2).logsumexp(-1).div_(scale)
+    return (x1 + x2).logsumexp(-1).div(scale)
 
 
 def pairwise_joint_product(

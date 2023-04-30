@@ -48,7 +48,11 @@ from torch import diagonal
 from torch.nn import ModuleList
 import torch.nn.functional as F
 
-from torchmetrics.functional.classification import binary_accuracy, binary_precision, binary_recall
+from torchmetrics.functional.classification import (
+    binary_accuracy,
+    binary_precision,
+    binary_recall,
+)
 
 from selfsne.kernels import PAIRWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
@@ -271,10 +275,10 @@ class MultiheadDensityRatioEstimator(nn.Module):
         self,
         num_heads: int,
         kernels: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
-        kernel_scales: Union[float, str, List[Union[float, str]]] = 1.0,
-        temperatures: Union[float, List[float]] = 1,
-        divergences: Union[str, Callable, List[Union[str, Callable]]] = "kld",
-        baselines: Union[
+        kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
+        temperature: Union[float, List[float]] = 1,
+        divergence: Union[str, Callable, List[Union[str, Callable]]] = "kld",
+        baseline: Union[
             str, float, Callable, List[Union[str, float, Callable]]
         ] = "batch",
         num_negatives: Optional[int] = None,
@@ -284,68 +288,64 @@ class MultiheadDensityRatioEstimator(nn.Module):
 
         super().__init__()
 
-        if isinstance(kernels, list):
+        if isinstance(kernel, list):
             assert (
-                len(kernels) == num_heads
+                len(kernel) == num_heads
             ), "Length of kernels list should match num_heads"
-            self.kernels = [
-                PAIRWISE_KERNELS[k] if isinstance(k, str) else k for k in kernels
+            self.kernel = [
+                PAIRWISE_KERNELS[k] if isinstance(k, str) else k for k in kernel
             ]
         else:
-            kernels = PAIRWISE_KERNELS[kernels] if isinstance(kernels, str) else kernels
-            self.kernels = [kernels] * num_heads
+            kernel = PAIRWISE_KERNELS[kernel] if isinstance(kernel, str) else kernel
+            self.kernel = [kernel] * num_heads
 
-        if isinstance(kernel_scales, list):
+        if isinstance(kernel_scale, list):
             assert (
-                len(kernel_scales) == num_heads
-            ), "Length of kernel_scales list should match num_heads"
-            self.kernel_scales = kernel_scales
+                len(kernel_scale) == num_heads
+            ), "Length of kernel_scale list should match num_heads"
+            self.kernel_scale = kernel_scale
         else:
-            self.kernel_scales = [kernel_scales] * num_heads
+            self.kernel_scale = [kernel_scale] * num_heads
 
-        if isinstance(temperatures, list):
+        if isinstance(temperature, list):
             assert (
-                len(temperatures) == num_heads
-            ), "Length of temperatures list should match num_heads"
-            self.inverse_temperatures = [1 / t for t in temperatures]
+                len(temperature) == num_heads
+            ), "Length of temperature list should match num_heads"
+            self.inverse_temperature = [1 / t for t in temperature]
         else:
-            self.inverse_temperatures = [1 / temperatures] * num_heads
+            self.inverse_temperature = [1 / temperature] * num_heads
 
-        if isinstance(divergences, list):
+        if isinstance(divergence, list):
             assert (
-                len(divergences) == num_heads
-            ), "Length of divergences list should match num_heads"
-            self.divergences = [
-                DIVERGENCES[d] if isinstance(d, str) else d for d in divergences
+                len(divergence) == num_heads
+            ), "Length of divergence list should match num_heads"
+            self.divergence = [
+                DIVERGENCES[d] if isinstance(d, str) else d for d in divergence
             ]
         else:
             divergence = (
-                DIVERGENCES[divergences]
-                if isinstance(divergences, str)
-                else divergences
+                DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
             )
-            self.divergences = [divergence] * num_heads
+            self.divergence = [divergence] * num_heads
 
-        if isinstance(baselines, list):
+        if isinstance(baseline, list):
             assert (
-                len(baselines) == num_heads
-            ), "Length of baselines list should match num_heads"
-            self.baselines = ModuleList()
-            for b in baselines:
+                len(baseline) == num_heads
+            ), "Length of baseline list should match num_heads"
+            self.baseline = ModuleList()
+            for b in baseline:
                 if isinstance(b, str):
-                    self.baselines.append(BASELINES[b]())
+                    self.baseline.append(BASELINES[b]())
                 elif isinstance(b, (int, float)):
-                    self.baselines.append(BASELINES["constant"](b))
+                    self.baseline.append(BASELINES["constant"](b))
                 else:
-                    self.baselines.append(b)
+                    self.baseline.append(b)
         else:
-            if isinstance(baselines, str):
-                baseline = BASELINES[baselines]()
-            elif isinstance(baselines, (int, float)):
-                baseline = BASELINES["constant"](baselines)
-            else:
-                baseline = baselines
-            self.baselines = ModuleList([deepcopy(baseline) for _ in range(num_heads)])
+            if isinstance(baseline, str):
+                baseline = BASELINES[baseline]()
+            elif isinstance(baseline, (int, float)):
+                baseline = BASELINES["constant"](baseline)
+            self.baseline = ModuleList([deepcopy(baseline) for _ in range(num_heads)])
 
         self.num_negatives = num_negatives
         self.embedding_decay = embedding_decay
@@ -360,22 +360,22 @@ class MultiheadDensityRatioEstimator(nn.Module):
         idx: int,
         **kwargs,
     ) -> Tuple[torch.Tensor]:
-        if self.kernel_scales[idx] == "auto":
+        if self.kernel_scale[idx] == "auto":
             embedding_features = z_x[idx].shape[1]
             kernel_scale = np.sqrt(embedding_features)
         else:
-            kernel_scale = self.kernel_scales[idx]
+            kernel_scale = self.kernel_scale[idx]
 
         logits = (
-            self.kernels[idx](z_y[:, idx], z_x[:, idx], kernel_scale)
-            * self.inverse_temperatures[idx]
+            self.kernel[idx](z_y[:, idx], z_x[:, idx], kernel_scale)
+            * self.inverse_temperature[idx]
         )
         local_pos_logits = diagonal(logits).unsqueeze(1)
         local_neg_logits = remove_diagonal(logits)
         if self.symmetric_negatives:
             logits = (
-                self.kernels[idx](z_y[:, idx], z_y[:, idx], kernel_scale)
-                * self.inverse_temperatures[idx]
+                self.kernel[idx](z_y[:, idx], z_y[:, idx], kernel_scale)
+                * self.inverse_temperature[idx]
             )
             local_neg_logits = torch.cat(
                 [local_neg_logits, remove_diagonal(logits)], dim=-1
@@ -384,7 +384,7 @@ class MultiheadDensityRatioEstimator(nn.Module):
             local_neg_logits = random_sample_columns(
                 local_neg_logits, self.num_negatives
             )
-        local_log_baseline = self.baselines[idx](
+        local_log_baseline = self.baseline[idx](
             logits=local_neg_logits, y=y, z_y=z_y[:, idx]
         )
         local_pos_logits = local_pos_logits - local_log_baseline
@@ -415,7 +415,7 @@ class MultiheadDensityRatioEstimator(nn.Module):
             local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
                 z_x=z_x, z_y=z_y, y=y, idx=idx
             )
-            local_attraction, local_repulsion = self.divergences[idx](
+            local_attraction, local_repulsion = self.divergence[idx](
                 local_pos_logits, local_neg_logits
             )
 
@@ -452,11 +452,11 @@ class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
     def __init__(
         self,
         num_heads: int,
-        kernels: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
-        kernel_scales: Union[float, str, List[Union[float, str]]] = 1.0,
-        temperatures: Union[float, List[float]] = 1,
+        kernel: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
+        kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
+        temperature: Union[float, List[float]] = 1,
         divergence: Union[str, Callable] = "kld",
-        baselines: Union[
+        baseline: Union[
             str, float, Callable, List[Union[str, float, Callable]]
         ] = "batch",
         num_negatives: Optional[int] = None,
@@ -466,10 +466,10 @@ class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
 
         super().__init__(
             num_heads=num_heads,
-            kernels=kernels,
-            kernel_scales=kernel_scales,
-            temperatures=temperatures,
-            baselines=baselines,
+            kernel=kernel,
+            kernel_scale=kernel_scale,
+            temperature=temperature,
+            baseline=baseline,
             num_negatives=num_negatives,
             embedding_decay=embedding_decay,
             symmetric_negatives=symmetric_negatives,

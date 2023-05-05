@@ -30,98 +30,29 @@ from selfsne.utils import (
 from typing import Optional, List, Union
 
 
-class LogMovingAverage(nn.Module):
+class LogMeanExp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, log_moving_average, momentum_logit):
+        log_batch_average = logmeanexp(input)
+        updated_log_moving_average = stop_gradient(
+            log_interpolate(log_moving_average, log_batch_average, momentum_logit)
+        )
+        log_moving_average.data = updated_log_moving_average
+        ctx.save_for_backward(input, updated_log_moving_average)
+        return updated_log_moving_average
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, log_moving_average = ctx.saved_tensors
+        log_n = np.log(input.numel())
+        grad_output = grad_output * input.exp() / log_moving_average.add(log_n).exp()
+        return grad_output, None, None
+
+
+class MomentumBaseline(nn.Module):
     def __init__(
         self,
         momentum: float = 0.9,
-        gradient: bool = True,
-        ema_forward: bool = True,
-        ema_backward: bool = True,
-    ) -> None:
-        """
-        LogMovingAverage module that calculates the running log-mean-exp of input tensor.
-
-        Args:
-            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
-            gradient (bool, optional): Whether to enable gradient calculation. Defaults to True.
-            ema_forward (bool, optional): Whether to use exponential moving average during forward pass. Defaults to True.
-            ema_backward (bool, optional): Whether to use exponential moving average during backward pass. Defaults to True.
-        """
-        super().__init__()
-        self.register_buffer("log_moving_average", torch.zeros(1))
-        self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
-
-        class LogMeanExp(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, input):
-                """
-                Computes the log-mean-exp of the input tensor.
-
-                Args:
-                    input (torch.Tensor): Input tensor.
-
-                Returns:
-                    torch.Tensor: Log-mean-exp of the input tensor.
-                """
-                log_batch_average = logmeanexp(input)
-                ctx.save_for_backward(input, log_batch_average)
-                self.log_moving_average.data = stop_gradient(
-                    log_interpolate(
-                        self.log_moving_average, log_batch_average, self.momentum_logit
-                    )
-                )
-                return self.log_moving_average if ema_forward else log_batch_average
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                """
-                Computes the gradients of the log-mean-exp with respect to the input tensor.
-
-                Args:
-                    ctx: Saved tensors from forward pass.
-                    grad_output (torch.Tensor): Gradient tensor.
-
-                Returns:
-                    torch.Tensor: Gradient of the log-mean-exp with respect to the input tensor.
-                """
-                if gradient:
-                    input, log_batch_average = ctx.saved_tensors
-                    log_n = np.log(input.numel())
-                    log_average = (
-                        self.log_moving_average if ema_backward else log_batch_average
-                    )
-                    grad_output = (
-                        grad_output * input.exp() / log_average.add(log_n).exp()
-                    )
-                    return grad_output
-                else:
-                    return None
-
-        self.logmeanexp = LogMeanExp.apply
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the log-mean-exp of the input tensor.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Log-mean-exp of the input tensor.
-        """
-        if self.training:
-            return self.logmeanexp(x)
-        else:
-            return self.log_moving_average
-
-
-class MomentumBaseline(LogMovingAverage):
-    def __init__(
-        self,
-        momentum: float = 0.9,
-        gradient: bool = True,
-        ema_forward: bool = True,
-        ema_backward: bool = True,
     ) -> None:
         """
         Calculates the momentum baseline for a given set of logits.
@@ -129,18 +60,11 @@ class MomentumBaseline(LogMovingAverage):
         Args:
             momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
         """
-        super().__init__(
-            momentum=momentum,
-            gradient=True,
-            ema_forward=True,
-            ema_backward=True,
-        )
+        super().__init__()
+        self.register_buffer("log_moving_average", torch.zeros(1))
+        self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
 
-    def forward(
-        self,
-        logits: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the momentum baseline for a given set of logits.
 
@@ -150,7 +74,14 @@ class MomentumBaseline(LogMovingAverage):
         Returns:
             torch.Tensor: Momentum baseline for the given set of logits.
         """
-        return super().forward(logits)
+        if self.training:
+            return LogMeanExp.apply(
+                logits,
+                self.log_moving_average,
+                self.momentum_logit,
+            )
+        else:
+            return self.log_moving_average
 
 
 class BatchBaseline(nn.Module):

@@ -175,8 +175,8 @@ def inverse(
         torch.Tensor: The row-wise inverse kernel matrix, of shape (batch_size,).
 
     """
-    eps = 1e-5
-    return -(x1 - x2).pow(2).sum(-1).div(scale ** 2).add(eps).log()
+    eps = torch.finfo(x1.dtype).eps
+    return -(x1 - x2).pow(2).sum(-1).div(scale ** 2).clamp(min=eps).log()
 
 
 def pairwise_inverse(
@@ -199,8 +199,8 @@ def pairwise_inverse(
         torch.Tensor: The pairwise inverse kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    eps = 1e-5
-    return torch.cdist(x1, x2, p=2).div(scale).pow(2).add(eps).log().neg()
+    eps = torch.finfo(x1.dtype).eps
+    return torch.cdist(x1, x2, p=2).div(scale).pow(2).clamp(min=eps).log().neg()
 
 
 def normal(
@@ -291,7 +291,6 @@ def von_mises(
     x1: torch.Tensor,
     x2: torch.Tensor,
     scale: Union[float, torch.Tensor] = 1.0,
-    eps: float = 1e-8,
 ) -> torch.Tensor:
     """
     Computes the log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
@@ -310,6 +309,7 @@ def von_mises(
         torch.Tensor: The row-wise von Mises-Fisher kernel matrix, of shape (batch_size,).
 
     """
+    eps = torch.finfo(x1.dtype).eps
     x1_norm = x1.norm(dim=-1)
     x2_norm = x2.norm(dim=-1)
     return inner_product(x1, x2, scale) / (x1_norm * x2_norm).clamp(min=eps)
@@ -319,7 +319,6 @@ def pairwise_von_mises(
     x1: torch.Tensor,
     x2: torch.Tensor,
     scale: Union[float, torch.Tensor] = 1.0,
-    eps: float = 1e-8,
 ) -> torch.Tensor:
     """
     Computes the pairwise log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
@@ -338,6 +337,7 @@ def pairwise_von_mises(
         torch.Tensor: The pairwise von Mises-Fisher kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
+    eps = torch.finfo(x1.dtype).eps
     x1_norm = x1.norm(dim=-1, keepdim=True)
     x2_norm = x2.norm(dim=-1, keepdim=True)
     return pairwise_inner_product(x1_norm, x2_norm, scale) / (
@@ -428,7 +428,6 @@ def pairwise_joint_product(
     """
     Computes the pairwise log joint product kernel between two sets of points x1 and x2, with a given scale.
 
-
     The log joint product kernel is defined as:
     log(K(x1_i, x2_j)) = log(Σ (softmax(x1_i) * softmax(x2_j))) / scale
 
@@ -441,18 +440,14 @@ def pairwise_joint_product(
         torch.Tensor: The pairwise joint product kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
+    eps = torch.finfo(x1.dtype).eps
+
     if apply_softmax:
         x1 = x1.log_softmax(-1)
         x2 = x2.log_softmax(-1)
 
-    x1_max = x1.max(-1, keepdim=True)[0]
-    x2_max = x2.max(-1, keepdim=True)[0]
-
-    x1_stable = x1 - x1_max
-    x2_stable = x2 - x2_max
-
-    pairwise = torch.matmul(x1_stable.exp(), x2_stable.exp().T)
-    log_pairwise = pairwise.log() + x1_max + x2_max.T
+    pairwise = torch.matmul(x1.exp(), x2.exp().T)
+    log_pairwise = pairwise.clamp(min=eps).log()
 
     return log_pairwise / scale
 

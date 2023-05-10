@@ -28,6 +28,12 @@ def density_ratio(pos_logits, neg_logits):
     return attraction, repulsion
 
 
+def wasserstein(pos_logits, neg_logits):
+    attraction = -pos_logits.mean()
+    repulsion = neg_logits.mean()
+    return attraction, repulsion
+
+
 def binary_cross_entropy(pos_logits, neg_logits):
     attraction = -F.logsigmoid(pos_logits).mean()
     repulsion = -F.logsigmoid(-neg_logits).mean()
@@ -111,6 +117,7 @@ def softened_reverse_kullback_leibler_divergence(pos_logits, neg_logits):
 
 DIVERGENCES = {
     "dr": density_ratio,
+    "wasserstein": wasserstein,
     "binary": binary_cross_entropy,
     "bce": binary_cross_entropy,
     "jsd": jensen_shannon_divergence,

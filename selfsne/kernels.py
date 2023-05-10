@@ -492,6 +492,58 @@ def pairwise_cross_entropy(
     return (x1.softmax(-1) @ x2.log_softmax(-1).T) / scale
 
 
+def symmetric_cross_entropy(
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+) -> torch.Tensor:
+    """
+    Computes the symmetric cross entropy between two sets of points x1 and x2.
+
+    The symmetric cross entropy is defined as the average of two cross entropies:
+    H_sym(x1, x2) = (H(x1, x2) + H(x2, x1)) / 2
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The symmetric cross entropy vector, of shape (batch_size,).
+    """
+    log_softmax_x1 = F.log_softmax(x1, dim=-1)
+    softmax_x2 = F.softmax(x2, dim=-1)
+    ce1 = (softmax_x2 * log_softmax_x1).sum(-1) / scale
+    log_softmax_x2 = F.log_softmax(x2, dim=-1)
+    softmax_x1 = F.softmax(x1, dim=-1)
+    ce2 = (softmax_x1 * log_softmax_x2).sum(-1) / scale
+    return (ce1 + ce2) / 2
+
+
+def pairwise_symmetric_cross_entropy(
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+) -> torch.Tensor:
+    """
+    Computes the symmetric pairwise cross entropy between two sets of points x1 and x2.
+
+    The symmetric pairwise cross entropy is defined as the average of two pairwise cross entropies:
+    H_sym(x1, x2) = (H(x1, x2) + H(x2, x1)) / 2
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The symmetric pairwise cross entropy matrix, of shape (batch_size_1, batch_size_2).
+    """
+    log_softmax_x1 = F.log_softmax(x1, dim=-1)
+    softmax_x2 = F.softmax(x2, dim=-1)
+    ce1 = softmax_x2 @ log_softmax_x1.T / scale
+    log_softmax_x2 = F.log_softmax(x2, dim=-1)
+    softmax_x1 = F.softmax(x1, dim=-1)
+    ce2 = softmax_x1 @ log_softmax_x2.T / scale
+    return (ce1 + ce2) / 2
+
+
 def kl_divergence(
     x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
@@ -658,6 +710,7 @@ ROWWISE_KERNELS = {
     "kl_div": kl_divergence,
     "bhattacharyya": bhattacharyya,
     "hellinger": hellinger,
+    "symmetric_cross_entropy": symmetric_cross_entropy,
 }
 
 PAIRWISE_KERNELS = {
@@ -680,4 +733,5 @@ PAIRWISE_KERNELS = {
     "kl_div": pairwise_kl_divergence,
     "bhattacharyya": pairwise_bhattacharyya,
     "hellinger": pairwise_hellinger,
+    "symmetric_cross_entropy": pairwise_symmetric_cross_entropy,
 }

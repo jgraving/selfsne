@@ -28,7 +28,7 @@ def laplace(
     Computes the log Laplace kernel between two sets of points x1 and x2, with a given scale.
 
     The log Laplace kernel is defined as:
-    log(K(x1, x2)) = - ||x1 - x2||_1 / scale
+    K(x1, x2) = - ||x1 - x2||_1 / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -49,7 +49,7 @@ def pairwise_laplace(
     Computes the pairwise log Laplace kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Laplace kernel is defined as:
-    log(K(x1_i, x2_j)) = - ||x1_i - x2_j||_1 / scale
+    K(x1_i, x2_j) = - ||x1_i - x2_j||_1 / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -73,7 +73,7 @@ def studentt(
     Computes the log Student's t kernel between two sets of points x1 and x2, with a given scale.
 
     The log Student's t kernel is defined as:
-    log(K(x1, x2)) = - log(1 + ||x1 - x2||_2^2 / scale^2 * df) * (df + 1) / 2
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / scale^2 * df) * (df + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -97,7 +97,7 @@ def pairwise_studentt(
     Computes the pairwise log Student's t kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Student's t kernel is defined as:
-    log(K(x1_i, x2_j)) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2 * df) * (df + 1) / 2
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2 * df) * (df + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -120,7 +120,7 @@ def cauchy(
     Computes the log Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The log Cauchy kernel is defined as:
-    log(K(x1, x2)) = - log(1 + ||x1 - x2||_2^2 / scale^2)
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / scale^2)
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -141,7 +141,7 @@ def pairwise_cauchy(
     Computes the pairwise log Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Cauchy kernel is defined as:
-    log(K(x1_i, x2_j)) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2)
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2)
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -162,7 +162,7 @@ def inverse(
     Computes the log inverse kernel between two sets of points x1 and x2, with a given scale.
 
     The log inverse kernel is defined as:
-    log(K(x1, x2)) = -log(eps + ||x1 - x2||_2^2 / scale^2)
+    K(x1, x2) = -log(eps + ||x1 - x2||_2^2 / scale^2)
 
     where eps is a small constant to avoid taking the logarithm of zero.
 
@@ -186,7 +186,7 @@ def pairwise_inverse(
     Computes the pairwise log inverse kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log inverse kernel is defined as:
-    log(K(x1_i, x2_j)) = -log(eps + ||x1_i - x2_j||_2^2 / scale^2)
+    K(x1_i, x2_j) = -log(eps + ||x1_i - x2_j||_2^2 / scale^2)
 
     where eps is a small constant to avoid taking the logarithm of zero.
 
@@ -210,7 +210,7 @@ def normal(
     Computes the log normal kernel between two sets of points x1 and x2, with a given scale.
 
     The log normal kernel is defined as:
-    log(K(x1, x2)) = -1/2 * ||x1 - x2||_2^2 / scale^2
+    K(x1, x2) = -1/2 * ||x1 - x2||_2^2 / scale^2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -231,7 +231,7 @@ def pairwise_normal(
     Computes the pairwise log normal kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log normal kernel is defined as:
-    log(K(x1_i, x2_j)) = -1/2 * ||x1_i - x2_j||_2^2 / scale^2
+    K(x1_i, x2_j) = -1/2 * ||x1_i - x2_j||_2^2 / scale^2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -252,7 +252,7 @@ def inner_product(
     Computes the inner product kernel between two sets of points x1 and x2, with a given scale.
 
     The log inner product kernel is defined as:
-    log(K(x1, x2)) = 1/scale * x1.T @ x2
+    K(x1, x2) = 1/scale * x1.T @ x2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -273,7 +273,7 @@ def pairwise_inner_product(
     Computes the pairwise inner product kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log inner product kernel is defined as:
-    log(K(x1_i, x2_j)) = 1/scale * x1_i.T @ x2_j
+    K(x1_i, x2_j) = 1/scale * x1_i.T @ x2_j
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -296,7 +296,7 @@ def von_mises(
     Computes the log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
 
     The log von Mises-Fisher kernel is defined as:
-    log(K(x1, x2)) = 1/scale * x1_norm.T @ x2_norm
+    K(x1, x2) = 1/scale * x1_norm.T @ x2_norm
 
     where x1_norm = x1 / ||x1||_2 and x2_norm = x2 / ||x2||_2 are the normalized versions of x1 and x2.
 
@@ -324,7 +324,7 @@ def pairwise_von_mises(
     Computes the pairwise log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log von Mises-Fisher kernel is defined as:
-    log(K(x1_i, x2_j)) = 1/scale * x1_i_norm.T @ x2_j_norm
+    K(x1_i, x2_j) = 1/scale * x1_i_norm.T @ x2_j_norm
 
     where x1_i_norm = x1_i / ||x1_i||_2 and x2_j_norm = x2_j / ||x2_j||_2 are the normalized versions of x1_i and x2_j.
 
@@ -352,7 +352,7 @@ def wrapped_cauchy(
     Computes the log wrapped Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The log wrapped Cauchy kernel is defined as:
-    log(K(x1, x2)) = log(cosh(scale) - log(K_vmf(x1, x2, 1)))
+    K(x1, x2) = log(cosh(scale) - log(K_vmf(x1, x2, 1)))
 
     where K_vmf(x1, x2, 1) is the von Mises-Fisher kernel between x1 and x2.
 
@@ -375,7 +375,7 @@ def pairwise_wrapped_cauchy(
     Computes the pairwise log wrapped Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log wrapped Cauchy kernel is defined as:
-    log(K(x1_i, x2_j)) = log(cosh(scale) - log(K_vmf(x1_i, x2_j, 1)))
+    K(x1_i, x2_j) = log(cosh(scale) - log(K_vmf(x1_i, x2_j, 1)))
 
     where K_vmf(x1_i, x2_j, 1) is the von Mises-Fisher kernel between x1_i and x2_j.
 
@@ -401,7 +401,7 @@ def joint_product(
     Computes the log joint product kernel between two sets of points x1 and x2, with a given scale.
 
     The log joint product kernel is defined as:
-    log(K(x1, x2)) = log(Σ (softmax(x1) * softmax(x2))) / scale
+    K(x1, x2) = log(Σ (softmax(x1) * softmax(x2))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -429,7 +429,7 @@ def pairwise_joint_product(
     Computes the pairwise log joint product kernel between two sets of points x1 and x2, with a given scale.
 
     The log joint product kernel is defined as:
-    log(K(x1_i, x2_j)) = log(Σ (softmax(x1_i) * softmax(x2_j))) / scale
+    K(x1_i, x2_j) = log(Σ (softmax(x1_i) * softmax(x2_j))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -547,7 +547,7 @@ def bhattacharyya(
     Computes the Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
 
     The Bhattacharyya kernel is defined as:
-    log(K(x1, x2)) = log(Σ (sqrt(softmax(x1)) * sqrt(softmax(x2))) / scale
+    K(x1, x2) = log(Σ (sqrt(softmax(x1)) * sqrt(softmax(x2))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -573,7 +573,7 @@ def pairwise_bhattacharyya(
     Computes the pairwise Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
 
     The Bhattacharyya kernel is defined as:
-    log(K(x1_i, x2_j)) = log(Σ (sqrt(softmax(x1_i)) * sqrt(softmax(x2_j))) / scale
+    K(x1_i, x2_j) = log(Σ (sqrt(softmax(x1_i)) * sqrt(softmax(x2_j))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).

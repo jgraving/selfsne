@@ -592,6 +592,52 @@ def pairwise_bhattacharyya(
     )
 
 
+def hellinger(
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+) -> torch.Tensor:
+    """
+    Computes the squared Hellinger kernel between two sets of points x1 and x2, with a given scale.
+
+    The Hellinger kernel is defined as:
+    K(x1, x2) = 1/ 2 * Σ (sqrt(softmax(x1)) - sqrt(softmax(x2)))^2 / scale
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The row-wise Hellinger kernel matrix, of shape (batch_size,).
+
+    """
+    return normal(
+        x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
+    ).mul(0.5)
+
+
+def pairwise_hellinger(
+    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+) -> torch.Tensor:
+    """
+    Computes the pairwise squared Hellinger kernel between two sets of points x1 and x2, with a given scale.
+
+    The Hellinger kernel is defined as:
+    K(x1_i, x2_j) = 1/2 * Σ (sqrt(softmax(x1_i)) - sqrt(softmax(x2_j))^2 / scale^2
+
+    Args:
+        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
+        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
+        scale (Union[float, torch.Tensor]): The scaling parameter.
+
+    Returns:
+        torch.Tensor: The pairwise Hellinger kernel matrix, of shape (batch_size_1, batch_size_2).
+
+    """
+    return pairwise_normal(
+        x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
+    ).mul(0.5)
+
+
 ROWWISE_KERNELS = {
     "euclidean": normal,
     "normal": normal,
@@ -611,7 +657,7 @@ ROWWISE_KERNELS = {
     "kld": kl_divergence,
     "kl_div": kl_divergence,
     "bhattacharyya": bhattacharyya,
-    "hellinger": bhattacharyya,
+    "hellinger": hellinger,
 }
 
 PAIRWISE_KERNELS = {
@@ -633,5 +679,5 @@ PAIRWISE_KERNELS = {
     "kld": pairwise_kl_divergence,
     "kl_div": pairwise_kl_divergence,
     "bhattacharyya": pairwise_bhattacharyya,
-    "hellinger": pairwise_bhattacharyya,
+    "hellinger": pairwise_hellinger,
 }

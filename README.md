@@ -12,7 +12,7 @@ Self-SNE is a probabilistic family of self-supervised deep learning models for c
 
 References
 ------------
-If you use Self-SNE for your research please cite [ 1 of our preprint](https://doi.org/10.1101/2020.07.17.207993) (an updated version is forthcoming):
+If you use Self-SNE for your research please cite [version 1 of our preprint](https://doi.org/10.1101/2020.07.17.207993) (an updated version is forthcoming):
 
     @article{graving2020vae,
     	title={VAE-SNE: a deep generative model for simultaneous dimensionality reduction and clustering},
@@ -24,6 +24,6 @@ If you use Self-SNE for your research please cite [ 1 of our preprint](https://d
 
 
 
-Licenseversion
+License
 ------------
 Released under a Apache 2.0 License. See [LICENSE](https://github.com/jgraving/cne/blob/main/LICENSE) for details.

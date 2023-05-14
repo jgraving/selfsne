@@ -714,9 +714,9 @@ class PositionEmbedding(nn.Module):
         return (x + self.embedding) * RSQRT2
 
 
-class SampleTokens(nn.Module):
+class TokenSampler(nn.Module):
     def __init__(self, p=None, num_tokens=None):
-        super(SampleTokens, self).__init__()
+        super(TokenSampler, self).__init__()
         self.p = p
         self.num_tokens = num_tokens
 
@@ -749,11 +749,182 @@ class SampleTokens(nn.Module):
             return x
 
 
-def PatchEmbedding(image_size, patch_size, embedding_dim, input_channels=3):
+class PairedTokenSampler(nn.Module):
+    def __init__(self, p=0.5, p_a=None, p_b=None):
+        super(PairedTokenSampler, self).__init__()
+
+        if p_a is None:
+            p_a = p
+
+        if p_b is None:
+            p_b = 1 - p_a
+
+        self.p_a = p_a
+        self.p_b = p_b
+
+        if p_a is not None and (p_a <= 0 or p_a > 1):
+            raise ValueError("The 'p_a' parameter must be between 0 and 1.")
+        if p_b is not None and (p_b <= 0 or p_b > 1):
+            raise ValueError("The 'p_b' parameter must be between 0 and 1.")
+        if p_a + p_b > 1:
+            warnings.warn(
+                "The sum of p_a and p_b is greater than 1, which may result in overlapping tokens."
+            )
+
+    def _calculate_samples(self, num_tokens):
+        sample_a_tokens = int(num_tokens * self.p_a)
+        sample_b_tokens = int(num_tokens * self.p_b)
+        return sample_a_tokens, sample_b_tokens
+
+    def forward(self, x):
+        batch_size, num_tokens, num_features = x.shape
+
+        # Calculate the number of tokens for each sample
+        sample_a_tokens, sample_b_tokens = self._calculate_samples(num_tokens)
+
+        # Generate random numbers for each token in the batch, ensuring they are on the same device
+        rand_values = torch.randn_like(x[:, :, 0])
+
+        # Use topk to get the indices of the highest k random values, where k is the number of tokens for each sample
+        _, top_indices = torch.topk(rand_values, k=sample_a_tokens, dim=1)
+        _, bottom_indices = torch.topk(
+            rand_values, k=sample_b_tokens, dim=1, largest=False
+        )
+
+        # Use gather to sample the tokens into 'a' and 'b' using the indices
+        a = x.gather(1, top_indices.unsqueeze(-1).expand(-1, -1, num_features))
+        b = x.gather(1, bottom_indices.unsqueeze(-1).expand(-1, -1, num_features))
+
+        return a, b
+
+
+class PairedImagePatchSampler(nn.Module):
+    def __init__(self, patch_size, p=0.5, p_a=None, p_b=None):
+        super(PairedImagePatchSampler, self).__init__()
+        self.patch_size = patch_size
+        self.token_sampler = PairedTokenSampler(p=p, p_a=p_a, p_b=p_b)
+
+    def forward(self, x):
+        batch_size, channels, height, width = x.shape
+        patch_size = self.patch_size
+
+        # Ensure height and width are divisible by patch_size
+        assert (
+            height % patch_size == 0 and width % patch_size == 0
+        ), "Height and width must be divisible by patch_size."
+
+        # Rearrange the input image into patches
+        patches = rearrange(
+            x, "b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_size, p2=patch_size
+        )
+
+        # Sample the patches using PairedTokenSampler
+        sampled_patches_a, sampled_patches_b = self.token_sampler(patches)
+
+        # Rearrange the sampled patches back into images
+        a = rearrange(
+            sampled_patches_a,
+            "b (s) (p1 p2 c) -> b c (s p1) (p2)",
+            p1=patch_size,
+            p2=patch_size,
+        )
+        b = rearrange(
+            sampled_patches_b,
+            "b (s) (p1 p2 c) -> b c (s p1) (p2)",
+            p1=patch_size,
+            p2=patch_size,
+        )
+
+        return a, b
+
+
+class PairedSequencePatchSampler(nn.Module):
+    def __init__(self, patch_size, p=0.5, p_a=None, p_b=None):
+        super(PairedSequencePatchSampler, self).__init__()
+        self.patch_size = patch_size
+        self.token_sampler = PairedTokenSampler(p=p, p_a=p_a, p_b=p_b)
+
+    def forward(self, x):
+        batch_size, channels, seq_length = x.shape
+        patch_size = self.patch_size
+
+        # Ensure seq_length is divisible by patch_size
+        assert (
+            seq_length % patch_size == 0
+        ), "Seq_length must be divisible by patch_size."
+
+        # Rearrange the input sequence into patches
+        patches = rearrange(x, "b c (s p) -> b (s) (p c)", p=patch_size)
+
+        # Sample the patches using PairedTokenSampler
+        sampled_patches_a, sampled_patches_b = self.token_sampler(patches)
+
+        # Rearrange the sampled patches back into sequences
+        a = rearrange(sampled_patches_a, "b (s) (p c) -> b c (s p)", p=patch_size)
+        b = rearrange(sampled_patches_b, "b (s) (p c) -> b c (s p)", p=patch_size)
+
+        return a, b
+
+
+class PairedCausalSequencePatchSampler(nn.Module):
+    def __init__(self, patch_size, p=None, split_index=None):
+        super(PairedCausalSequencePatchSampler, self).__init__()
+        self.patch_size = patch_size
+        self.p = p
+        self.split_index = split_index
+
+    def forward(self, x):
+        batch_size, channels, seq_length = x.shape
+        patch_size = self.patch_size
+
+        # Ensure seq_length is divisible by patch_size
+        assert (
+            seq_length % patch_size == 0
+        ), "Seq_length must be divisible by patch_size."
+
+        # Rearrange the input sequence into patches
+        patches = rearrange(x, "b c (s p) -> b (s) (p c)", p=patch_size)
+
+        # Determine the split index
+        if self.split_index is None and self.p is None:
+            split_index = patches.size(1) - 1
+        elif self.split_index is not None:
+            split_index = min(patches.size(1) - 1, self.split_index)
+        else:
+            split_index = int(patches.size(1) * self.p)
+
+        # Split the patches into a and b
+        a = patches[:, :split_index, :]
+        b = patches[:, split_index:, :]
+
+        # Rearrange a and b back into sequences
+        a = rearrange(a, "b (s) (p c) -> b c (s p)", p=patch_size)
+        b = rearrange(b, "b (s) (p c) -> b c (s p)", p=patch_size)
+
+        return a, b
+
+
+def PatchEmbedding1d(seq_length, patch_size, embedding_dim, in_channels):
+    assert (
+        seq_length % patch_size
+    ) == 0, "Sequence length must be divisible by patch size."
+    return nn.Sequential(
+        init_selu(
+            nn.Conv1d(
+                in_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
+            )
+        ),
+        Rearrange("b c s -> b s c"),
+    )
+
+
+def PatchEmbedding2d(image_size, patch_size, embedding_dim, in_channels=3):
     assert (image_size % patch_size) == 0, "Image size must be divisible by patch size."
     return nn.Sequential(
-        nn.Conv2d(
-            input_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
+        init_selu(
+            nn.Conv2d(
+                in_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
+            )
         ),
         Rearrange("b c h w -> b (h w) c"),
     )

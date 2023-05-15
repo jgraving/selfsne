@@ -17,8 +17,10 @@
 # https://matplotlib.org/stable/gallery/mplot3d/lorenz_attractor.html
 
 import numpy as np
+import torch
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
+
 import h5py
 from sklearn.datasets import fetch_openml
 
@@ -53,6 +55,137 @@ class PairedDataset(Dataset):
         dataset_a_idx = self.dataset_a_indices[idx]
         dataset_b_idx = self.dataset_b_indices[idx]
         return self.dataset_a[dataset_a_idx], self.dataset_b[dataset_b_idx]
+
+
+def correlated_gaussian_sampler(
+    n_samples, mutual_information, dim=20, seed=None, device=None
+):
+    def mi_to_rho(dim, mi):
+        return torch.sqrt(1 - torch.exp(-2.0 / dim * mi))
+
+    correlation = mi_to_rho(dim, mutual_information)
+
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    z = torch.randn(n_samples, 2 * dim, device=device)
+    x, eps = torch.split(z, dim, dim=1)
+    y = correlation * x + torch.sqrt(1.0 - correlation ** 2) * eps
+
+    samples = torch.cat((x, y), dim=1)
+    return samples
+
+
+class CorrelatedGaussianDataLoader(DataLoader):
+    def __init__(
+        self,
+        n_samples,
+        mutual_information,
+        dim=20,
+        seed=None,
+        batch_size=1024,
+        device=None,
+        **kwargs
+    ):
+        self.n_samples = n_samples
+        self.mutual_information = mutual_information
+        self.dim = dim
+        self.seed = seed
+        self.batch_size = batch_size
+        self.device = device
+        self.dataset = self.generate_samples()
+        super().__init__(self.dataset, batch_size=batch_size, **kwargs)
+
+    def generate_samples(self):
+        samples = correlated_gaussian_sampler(
+            self.n_samples, self.mutual_information, self.dim, self.seed, self.device
+        )
+        return samples
+
+    def __len__(self):
+        return len(self.dataset) // self.batch_size
+
+    def __iter__(self):
+        for idx in range(len(self)):
+            batch = self.dataset[idx * self.batch_size : (idx + 1) * self.batch_size]
+            yield batch
+        # regenerate the samples after each epoch
+        self.dataset = self.generate_samples()
+
+
+class TensorDataLoader(DataLoader):
+    def __init__(
+        self,
+        dataset,
+        batch_size=1024,
+        shuffle=True,
+        drop_last=False,
+        device=None,
+        **kwargs
+    ):
+        super().__init__(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+            **kwargs
+        )
+        self.tensor_dataset = torch.tensor(dataset)
+        if device is not None:
+            self.tensor_dataset = self.tensor_dataset.to(device)
+        self.shuffle = shuffle
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.tensor_dataset) // self.batch_size
+        else:
+            return int(
+                torch.ceil(torch.tensor(len(self.tensor_dataset) / self.batch_size))
+            )
+
+    def __iter__(self):
+        if self.shuffle:
+            indices = torch.randperm(
+                len(self.tensor_dataset), device=self.tensor_dataset.device
+            )
+        else:
+            indices = torch.arange(
+                len(self.tensor_dataset), device=self.tensor_dataset.device
+            )
+        for idx in range(len(self)):
+            batch_indices = indices[idx * self.batch_size : (idx + 1) * self.batch_size]
+            batch = self.tensor_dataset[batch_indices]
+            yield batch.float()
+
+
+class NumpyDataLoader(DataLoader):
+    def __init__(
+        self, dataset, batch_size=1024, shuffle=True, drop_last=False, **kwargs
+    ):
+        super().__init__(
+            dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
+        )
+        self.numpy_dataset = dataset
+        # self.batch_size = batch_size
+        self.shuffle = shuffle
+        # self.drop_last = drop_last
+        self.indices = np.arange(len(dataset))
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.numpy_dataset) // self.batch_size
+        else:
+            return int(np.ceil(len(self.numpy_dataset) / self.batch_size))
+
+    def __iter__(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+        for idx in range(len(self)):
+            batch_indices = self.indices[
+                idx * self.batch_size : (idx + 1) * self.batch_size
+            ]
+            batch = torch.from_numpy(self.numpy_dataset[batch_indices]).float()
+            yield batch
 
 
 class MNIST(Dataset):

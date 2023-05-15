@@ -150,7 +150,7 @@ class LearnedBaseline(nn.Module):
 
 class LearnedLatentBaseline(nn.Module):
     def __init__(
-        self, latent_dim: int = 64, activation: Optional[nn.Module] = nn.LogSigmoid()
+        self, latent_dim: int = 256, activation: Optional[nn.Module] = nn.LogSigmoid()
     ):
         """
         Initializes a learned latent baseline module.

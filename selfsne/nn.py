@@ -701,8 +701,10 @@ class PositionEmbedding2d(nn.Module):
         height_embed = self.height_embedding.view(1, self.embedding_dim, self.height, 1)
         width_embed = self.width_embedding.view(1, self.embedding_dim, 1, self.width)
         pos_embed = (height_embed + width_embed) * RSQRT2
+        # Repeat the pos_embed for the entire batch
+        pos_embed = pos_embed.repeat(x.shape[0], 1, 1, 1)
         # Add the position embedding 2D to the input tensor
-        return (x + pos_embed) * RSQRT2
+        return torch.cat([x, pos_embed], dim=1)
 
 
 class PositionEmbedding(nn.Module):

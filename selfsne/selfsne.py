@@ -23,15 +23,37 @@ import pytorch_lightning as pl
 
 import numpy as np
 
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+
 from selfsne.utils import stop_gradient
 
 
 def get_lr_scheduler(
-    optimizer,
-    warmup_steps,
-    target_steps,
-    cosine_steps,
-):
+    optimizer: optim.Optimizer,
+    warmup_steps: int,
+    target_steps: int,
+    cosine_steps: int,
+) -> lr_scheduler.LRScheduler:
+    """
+    Returns a learning rate scheduler based on input steps and optimizer.
+
+    Args:
+        optimizer (torch.optim.Optimizer): Optimizer for which the scheduler is to be created.
+        warmup_steps (int): Number of warmup steps.
+        target_steps (int): Number of target steps.
+        cosine_steps (int): Number of cosine annealing steps.
+
+    Returns:
+        torch.optim.lr_scheduler.LRScheduler: The learning rate scheduler.
+
+    Example:
+        >>> optimizer = torch.optim.SGD([torch.randn(1, requires_grad=True)], lr=1.0)
+        >>> warmup_steps = 1000
+        >>> target_steps = 5000
+        >>> cosine_steps = 5000
+        >>> scheduler = get_lr_scheduler(optimizer, warmup_steps, target_steps, cosine_steps)
+    """
     if warmup_steps + target_steps + cosine_steps == 0:
         scheduler = lr_scheduler.ConstantLR(optimizer, factor=1.0)
     else:
@@ -56,6 +78,57 @@ def get_lr_scheduler(
         )
 
     return scheduler
+
+
+def visualize_lr_schedule(
+    warmup_steps: int, target_steps: int, cosine_steps: int, lr: float = 1.0
+) -> Figure:
+    """
+    Visualizes learning rate schedule and returns a matplotlib figure.
+
+    Args:
+        warmup_steps (int): Number of warmup steps in the learning rate scheduler.
+        target_steps (int): Number of target steps in the learning rate scheduler.
+        cosine_steps (int): Number of cosine steps in the learning rate scheduler.
+        lr (float, optional): Initial learning rate for the SGD optimizer. Defaults to 1.0.
+
+    Returns:
+        matplotlib.figure.Figure: The figure object of the plotted learning rate schedule.
+
+    Example:
+        >>> warmup_steps = 1000
+        >>> target_steps = 5000
+        >>> cosine_steps = 5000
+        >>> fig = visualize_lr_schedule(warmup_steps, target_steps, cosine_steps, lr=1.0)
+        >>> plt.show()
+    """
+    # Initialize parameters
+    params = [torch.randn(1, requires_grad=True)]
+
+    # Set up SGD optimizer with specified learning rate
+    optimizer = optim.SGD(params, lr=lr)
+
+    # Get learning rate scheduler
+    scheduler = get_lr_scheduler(optimizer, warmup_steps, target_steps, cosine_steps)
+
+    # Calculate total steps
+    total_steps = warmup_steps + target_steps + cosine_steps
+
+    # Track learning rate values
+    lr_values = []
+    for step in range(total_steps):
+        lr = optimizer.param_groups[0]["lr"]
+        lr_values.append(lr)
+        scheduler.step()
+
+    # Create the plot
+    fig, ax = plt.subplots()
+    ax.plot(range(total_steps), lr_values)
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Learning Rate")
+    ax.set_title("Learning Rate Schedule")
+
+    return fig
 
 
 class SelfSNE(pl.LightningModule):
@@ -150,9 +223,10 @@ class SelfSNE(pl.LightningModule):
         return self.projector(self.encoder(batch))
 
     def loss(self, batch, batch_idx, mode=""):
-
         if self.pair_sampler is not None:
             x, y = self.pair_sampler(batch)
+        elif isinstance(batch, (list, tuple)) and len(batch) == 2:
+            x, y = batch
         else:
             x = batch
             y = batch

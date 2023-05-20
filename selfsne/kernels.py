@@ -690,6 +690,38 @@ def pairwise_hellinger(
     ).mul(0.5)
 
 
+def pairwise_kernel(func):
+    """
+    Decorator that converts a rowwise kernel function into a pairwise kernel function by unsqueezing x1.
+
+    Args:
+        func (Callable): The rowwise kernel function.
+
+    Returns:
+        Callable: The pairwise kernel function.
+
+    """
+
+    def decorator(
+        x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
+    ) -> torch.Tensor:
+        """
+        Computes the pairwise kernel by unsqueezing x1 and calling the rowwise kernel function.
+
+        Args:
+            x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
+            x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
+            scale (Union[float, torch.Tensor]): The scaling parameter.
+
+        Returns:
+            torch.Tensor: The pairwise kernel matrix, of shape (batch_size_1, batch_size_2).
+
+        """
+        return func(x1.unsqueeze(1), x2, scale)
+
+    return decorator
+
+
 ROWWISE_KERNELS = {
     "euclidean": normal,
     "normal": normal,
@@ -735,3 +767,8 @@ PAIRWISE_KERNELS = {
     "hellinger": pairwise_hellinger,
     "symmetric_cross_entropy": pairwise_symmetric_cross_entropy,
 }
+
+# Define and add the "precise" versions of the pairwise kernels using the decorator
+for kernel_name, kernel_func in ROWWISE_KERNELS.items():
+    precise_kernel_name = f"precise_{kernel_name}"
+    PAIRWISE_KERNELS[precise_kernel_name] = pairwise_kernel(kernel_func)

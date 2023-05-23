@@ -242,7 +242,7 @@ def pairwise_normal(
         torch.Tensor: The pairwise normal kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2).div(scale).pow(2).neg()
+    return torch.cdist(x1, x2).div(scale).pow(2).div(2).neg()
 
 
 def inner_product(
@@ -651,7 +651,7 @@ def hellinger(
     Computes the squared Hellinger kernel between two sets of points x1 and x2, with a given scale.
 
     The Hellinger kernel is defined as:
-    K(x1, x2) = 1/ 2 * Σ (sqrt(softmax(x1)) - sqrt(softmax(x2)))^2 / scale
+    K(x1, x2) = 1/2 * Σ (sqrt(softmax(x1)) - sqrt(softmax(x2)))^2 / scale^2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -664,7 +664,7 @@ def hellinger(
     """
     return normal(
         x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
-    ).mul(0.5)
+    )
 
 
 def pairwise_hellinger(
@@ -687,7 +687,7 @@ def pairwise_hellinger(
     """
     return pairwise_normal(
         x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
-    ).mul(0.5)
+    )
 
 
 def pairwise_kernel(func):

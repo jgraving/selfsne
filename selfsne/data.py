@@ -243,11 +243,26 @@ class Lorenz(Dataset):
         self.data = np.stack((xs, ys, zs))
         self.window_size = window_size
 
+        # Attractors
+        attractor_1 = np.array([np.sqrt(b * (r - 1)), np.sqrt(b * (r - 1)), r - 1])
+        attractor_2 = np.array([-np.sqrt(b * (r - 1)), -np.sqrt(b * (r - 1)), r - 1])
+
+        self.targets = np.zeros(num_steps + 1)
+
+        for i, point in enumerate(self.data.T):
+            dist_1 = np.linalg.norm(point - attractor_1)
+            dist_2 = np.linalg.norm(point - attractor_2)
+
+            if dist_1 < dist_2:
+                self.targets[i] = 0  # closer to attractor 1
+            else:
+                self.targets[i] = 1  # closer to attractor 2
+
     def __len__(self):
         return self.data.shape[-1] - self.window_size
 
     def __getitem__(self, idx):
-        return self.data[:, idx : idx + self.window_size]
+        return self.data[:, idx : idx + self.window_size].astype(np.float32)
 
 
 class LorenzRandomProjection(Lorenz):

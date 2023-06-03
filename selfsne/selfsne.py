@@ -167,6 +167,7 @@ class SelfSNE(pl.LightningModule):
         lr_warmup_steps=0,
         lr_target_steps=0,
         lr_cosine_steps=0,
+        concat_chunk_encode=True,
     ):
         self.kwargs = locals()
         super().__init__()
@@ -237,8 +238,14 @@ class SelfSNE(pl.LightningModule):
             h_y = self.encoder(y)
             z_y = self.projector(h_y)
         else:
-            h_x, h_y = torch.chunk(self.encoder(torch.cat([x, y])), 2)
-            z_x, z_y = torch.chunk(self.projector(torch.cat([h_x, h_y])), 2)
+            if self.hparams.concat_chunk_encode:
+                h_x, h_y = torch.chunk(self.encoder(torch.cat([x, y])), 2)
+                z_x, z_y = torch.chunk(self.projector(torch.cat([h_x, h_y])), 2)
+            else:
+                h_x = self.encoder(x)
+                h_y = self.encoder(y)
+                z_x = self.projector(h_x)
+                z_y = self.projector(h_y)
 
         if self.similarity_loss is not None:
             (

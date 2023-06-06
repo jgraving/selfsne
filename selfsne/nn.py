@@ -713,7 +713,7 @@ class PositionEmbedding(nn.Module):
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
 
     def forward(self, x):
-        return (x + self.embedding) * RSQRT2
+        return (x + self.embedding[:x.shape[1]]) * RSQRT2
 
 
 class TokenSampler(nn.Module):

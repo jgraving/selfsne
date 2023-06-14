@@ -231,10 +231,19 @@ class InputNorm1d(nn.BatchNorm1d):
         super().__init__(num_features, eps=eps, momentum=momentum, affine=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # The batch normalization forward pass will be done differently based on the input dimension
         # Use super's forward to update running statistics
         super().forward(x)
-        # Use running statistics for normalization
-        x_norm = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
+        if x.dim() == 2:
+            x_norm = (x - self.running_mean) / torch.sqrt(self.running_var + self.eps)
+        elif x.dim() == 3:
+            # Reshape running mean and var to 3D
+            running_mean = self.running_mean.view(1, -1, 1)
+            running_var = self.running_var.view(1, -1, 1)
+            # Use running statistics for normalization
+            x_norm = (x - running_mean) / torch.sqrt(running_var + self.eps)
+        else:
+            raise ValueError(f"Unexpected input dimension {x.dim()}, expected 2 or 3.")
         return x_norm
 
 
@@ -713,7 +722,7 @@ class PositionEmbedding(nn.Module):
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
 
     def forward(self, x):
-        return (x + self.embedding[:x.shape[1]]) * RSQRT2
+        return (x + self.embedding[: x.shape[1]]) * RSQRT2
 
 
 class TokenSampler(nn.Module):

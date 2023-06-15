@@ -120,47 +120,19 @@ class BatchConditionalBaseline(nn.Module):
         return logmeanexp(logits, dim=-1, keepdim=True)
 
 
-class LearnedBaseline(nn.Module):
-    def __init__(self, activation: Optional[nn.Module] = nn.LogSigmoid()):
-        """
-        Initializes a learned baseline module.
-
-        Args:
-            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
-        """
-        super().__init__()
-        self.log_baseline = nn.Parameter(torch.zeros(1))
-        if activation is None:
-            self.activation = nn.Identity()
-        else:
-            self.activation = activation
-
-    def forward(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
-        """
-        Returns the learned baseline.
-
-        Returns:
-            torch.Tensor: Learned baseline.
-        """
-        return self.activation(self.log_baseline)
-
-
-class LearnedLatentBaseline(nn.Module):
+class ParametricBaseline(nn.Module):
     def __init__(
-        self, latent_dim: int = 256, activation: Optional[nn.Module] = nn.LogSigmoid()
+        self, param_dim: int = 256, activation: Optional[nn.Module] = nn.LogSigmoid()
     ):
         """
-        Initializes a learned latent baseline module.
+        Initializes a parametric baseline module.
 
         Args:
             activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
         """
         super().__init__()
-        self.latent = nn.Parameter(torch.randn(1, latent_dim))
-        self.projection = init_selu(nn.Linear(latent_dim, 1))
+        self.param = nn.Parameter(torch.randn(1, param_dim))
+        self.projection = init_selu(nn.Linear(param_dim, 1))
         if activation is None:
             self.activation = nn.Identity()
         else:
@@ -171,12 +143,12 @@ class LearnedLatentBaseline(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Returns the learned baseline.
+        Returns the parametric baseline.
 
         Returns:
-            torch.Tensor: Learned baseline.
+            torch.Tensor: Parametric baseline.
         """
-        return self.activation(self.projection(self.latent))
+        return self.activation(self.projection(self.param))
 
 
 class ConstantBaseline(nn.Module):
@@ -207,19 +179,19 @@ class ConstantBaseline(nn.Module):
         return self.baseline
 
 
-class LearnedConditionalBaseline(nn.Module):
+class ConditionalBaseline(nn.Module):
     def __init__(
         self,
         encoder: nn.Module,
-        embedding_input: bool = False,
+        embedding_input: bool = True,
         activation: Optional[nn.Module] = nn.LogSigmoid(),
     ):
         """
-        Initializes a learned conditional baseline module.
+        Initializes a parametric conditional baseline module.
 
         Args:
             encoder (nn.Module): Encoder module to encode the input tensor y.
-            embedding_input (bool, optional): Whether to pass embedded data z_y to the encoder instead of data y. Defaults to False.
+            embedding_input (bool, optional): Whether to pass embedded data z_y to the encoder instead of data y. Defaults to True.
             activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
         """
         super().__init__()
@@ -237,14 +209,14 @@ class LearnedConditionalBaseline(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the learned conditional baseline for a given set of data y or embedded data z_y.
+        Calculates the parametric conditional baseline for a given set of data y or embedded data z_y.
 
         Args:
             y (torch.Tensor, optional): Data input to the encoder. Ignored if embedding_input=True.
             z_y (torch.Tensor, optional): Embedded data input to the encoder. Used if embedding_input=True.
 
         Returns:
-            torch.Tensor: Learned conditional baseline for the data y or z_y.
+            torch.Tensor: Parametric conditional baseline for the data y or z_y.
         """
         if self.embedding_input:
             assert z_y is not None, "z_y must be provided when embedding_input=True"
@@ -414,7 +386,6 @@ BASELINES = {
     "batch": BatchBaseline,
     "batch_conditional": BatchConditionalBaseline,
     "momentum": MomentumBaseline,
-    "learn": LearnedBaseline,
-    "learn_latent": LearnedLatentBaseline,
+    "parametric": ParametricBaseline,
     "constant": ConstantBaseline,
 }

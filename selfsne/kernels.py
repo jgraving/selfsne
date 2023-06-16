@@ -574,7 +574,7 @@ def pairwise_kl_divergence(
     Computes the pairwise Kullback-Leibler divergence between two sets of points x1 and x2.
 
     The pairwise Kullback-Leibler divergence is defined as:
-    KL(x1_i || x2_j) = Σ(softmax(x1_i) * (log_softmax(x1_i) - log_softmax(x2_j))) / scale
+    KL(x1_i || x2_j) = -Σ(softmax(x1_i) * (log_softmax(x1_i) - log_softmax(x2_j))) / scale
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -587,9 +587,9 @@ def pairwise_kl_divergence(
     log_p1 = x1.log_softmax(-1)
     log_p2 = x2.log_softmax(-1)
     p1 = log_p1.exp()
-    entropy = (p1 @ log_p1.T).neg()
+    neg_entropy = (p1 * log_p1).sum(1).unsqueeze(1)
     neg_cross_entropy = p1 @ log_p2.T
-    return (entropy + neg_cross_entropy) / scale
+    return (neg_cross_entropy - neg_entropy) / scale
 
 
 def bhattacharyya(

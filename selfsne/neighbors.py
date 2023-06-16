@@ -24,7 +24,7 @@ from torch.utils.data import Dataset
 from selfsne.kernels import PAIRWISE_KERNELS
 import numpy as np
 
-from typing import Tuple, List, Any, Union
+from typing import Tuple, List, Any, Union, Callable
 
 NEG_INF = float("-inf")
 
@@ -180,7 +180,7 @@ class NearestNeighborSampler(nn.Module):
     Args:
         num_features (int): The number of features in each data point.
         queue_size (int): The maximum size of the queue for the data points (default: 2 ** 15).
-        kernel (str): The name of the kernel to use for calculating the similarity (default: "euclidean").
+        kernel (Union[str, Callable]): The name of the kernel to use for calculating the similarity or a custom kernel function (default: "euclidean").
         num_neighbors (int): The number of nearest neighbors to sample from. Equivalent to perplexity from t-SNE (default: 1).
         freeze_queue_on_full (bool): Whether to stop updating the queue once it is full (default: False).
         return_index (bool): Whether to return the indices of the nearest neighbors instead of the data (default: False).
@@ -192,7 +192,7 @@ class NearestNeighborSampler(nn.Module):
         self,
         num_features: int,
         queue_size: int = 2 ** 15,
-        kernel: str = "euclidean",
+        kernel: Union[str, Callable] = "euclidean",
         num_neighbors: int = 1,
         freeze_queue_on_full: bool = False,
         return_index: bool = False,
@@ -200,7 +200,12 @@ class NearestNeighborSampler(nn.Module):
     ):
         super().__init__()
         self.data_queue = Queue(num_features, queue_size, freeze_queue_on_full)
-        self.kernel = PAIRWISE_KERNELS[kernel]
+        if isinstance(kernel, str):
+            self.kernel = PAIRWISE_KERNELS[kernel]
+        elif callable(kernel):
+            self.kernel = kernel
+        else:
+            raise ValueError("Invalid kernel type. Expected str or callable.")
         self.num_neighbors = num_neighbors
         self.return_index = return_index
         if self.return_index:

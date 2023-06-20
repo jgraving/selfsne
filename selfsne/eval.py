@@ -120,8 +120,10 @@ def knn_classification(
 
 
 def linear_reconstruction(
-    dataset,
-    embedding,
+    train_dataset,
+    train_embedding,
+    test_dataset,
+    test_embedding,
     loss,
     error,
     model=None,
@@ -135,20 +137,36 @@ def linear_reconstruction(
     patience=1,
 ):
     if model is None:
-        model = init_selu(nn.Linear(embedding.shape[1], dataset.shape[1]))
+        model = init_selu(nn.Linear(train_embedding.shape[1], train_dataset.shape[1]))
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    normalized_embedding = StandardScaler().fit_transform(embedding)
-    paired_dataset = PairedDataset(dataset, normalized_embedding, shuffle=shuffle)
+    scaler = StandardScaler().fit(train_embedding)
+    normalized_train_embedding = scaler.transform(train_embedding)
+    paired_train_dataset = PairedDataset(
+        train_dataset, normalized_train_embedding, shuffle=shuffle
+    )
+
+    normalized_test_embedding = scaler.transform(test_embedding)
+    paired_test_dataset = PairedDataset(
+        test_dataset, normalized_test_embedding, shuffle=shuffle
+    )
+
     train_dataloader = DataLoader(
-        paired_dataset,
+        paired_train_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=True,
         drop_last=True,
     )
-    eval_dataloader = DataLoader(
-        paired_dataset,
+    eval_train_dataloader = DataLoader(
+        paired_train_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    eval_test_dataloader = DataLoader(
+        paired_test_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=False,
@@ -156,7 +174,7 @@ def linear_reconstruction(
     )
 
     r2_score = R2Score(error)
-    r2_score.fit(dataset)
+    r2_score.fit(train_dataset)
 
     mean_loss_values = []
     if verbose:
@@ -213,23 +231,35 @@ def linear_reconstruction(
 
     metric_values = []
     model.eval()
-    if verbose:
-        prog_bar = tqdm(total=len(eval_dataloader), desc="Eval")
+
+    # Evaluation on train data
     y_true = []
     y_pred = []
-    for data, embedding_batch in eval_dataloader:
+    for data, embedding_batch in eval_train_dataloader:
         data = data.float()
         embedding_batch = embedding_batch.float()
         y_pred.append(link(best_model(embedding_batch)).detach().numpy())
         y_true.append(data.numpy())
-        if verbose:
-            prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), np.concatenate(y_true)).item()
+    train_r2_score = r2_score(np.concatenate(y_pred), np.concatenate(y_true)).item()
+
+    # Evaluation on test data
+    y_true = []
+    y_pred = []
+    for data, embedding_batch in eval_test_dataloader:
+        data = data.float()
+        embedding_batch = embedding_batch.float()
+        y_pred.append(link(best_model(embedding_batch)).detach().numpy())
+        y_true.append(data.numpy())
+    test_r2_score = r2_score(np.concatenate(y_pred), np.concatenate(y_true)).item()
+
+    return train_r2_score, test_r2_score
 
 
 def linear_classification(
-    labels,
-    embedding,
+    train_labels,
+    train_embedding,
+    test_labels,
+    test_embedding,
     epochs=100,
     batch_size=1024,
     verbose=True,
@@ -239,23 +269,39 @@ def linear_classification(
     patience=1,
 ):
     # Get number of classes
-    num_classes = np.unique(labels).shape[0]
+    num_classes = np.unique(train_labels).shape[0]
 
     loss = nn.CrossEntropyLoss()
-    model = init_selu(nn.Linear(embedding.shape[1], num_classes))
+    model = init_selu(nn.Linear(train_embedding.shape[1], num_classes))
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    normalized_embedding = StandardScaler().fit_transform(embedding)
-    paired_dataset = PairedDataset(labels, normalized_embedding, shuffle=shuffle)
+    scaler = StandardScaler().fit(train_embedding)
+    normalized_train_embedding = scaler.transform(train_embedding)
+    paired_train_dataset = PairedDataset(
+        train_labels, normalized_train_embedding, shuffle=shuffle
+    )
+
+    normalized_test_embedding = scaler.transform(test_embedding)
+    paired_test_dataset = PairedDataset(
+        test_labels, normalized_test_embedding, shuffle=shuffle
+    )
+
     train_dataloader = DataLoader(
-        paired_dataset,
+        paired_train_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=True,
         drop_last=True,
     )
-    eval_dataloader = DataLoader(
-        paired_dataset,
+    eval_train_dataloader = DataLoader(
+        paired_train_dataset,
+        batch_size=batch_size,
+        num_workers=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    eval_test_dataloader = DataLoader(
+        paired_test_dataset,
         batch_size=batch_size,
         num_workers=1,
         shuffle=False,
@@ -317,27 +363,48 @@ def linear_classification(
 
     if verbose:
         epoch_prog_bar.close()
-
     model.eval()
-    if verbose:
-        prog_bar = tqdm(total=len(eval_dataloader), desc="Eval")
 
+    # Evaluation on train data
     y_true = []
     y_pred = []
-    for label_batch, embedding_batch in eval_dataloader:
+    for label_batch, embedding_batch in eval_train_dataloader:
         label_batch = label_batch.long()
         embedding_batch = embedding_batch.float()
         output = best_model(embedding_batch)
         _, predicted = torch.max(output, 1)
         y_true.extend(label_batch.tolist())
         y_pred.extend(predicted.tolist())
-        if verbose:
-            prog_bar.update(1)
-    f1 = f1_score(y_true, y_pred, average="weighted")
-    acc = balanced_accuracy_score(y_true, y_pred, adjusted=True)
-    precision = precision_score(y_true, y_pred, average="weighted")
-    recall = recall_score(y_true, y_pred, average="weighted")
-    return acc, f1, precision, recall
+    f1_train = f1_score(y_true, y_pred, average="weighted")
+    acc_train = balanced_accuracy_score(y_true, y_pred, adjusted=True)
+    precision_train = precision_score(y_true, y_pred, average="weighted")
+    recall_train = recall_score(y_true, y_pred, average="weighted")
+
+    # Evaluation on test data
+    y_true = []
+    y_pred = []
+    for label_batch, embedding_batch in eval_test_dataloader:
+        label_batch = label_batch.long()
+        embedding_batch = embedding_batch.float()
+        output = best_model(embedding_batch)
+        _, predicted = torch.max(output, 1)
+        y_true.extend(label_batch.tolist())
+        y_pred.extend(predicted.tolist())
+    f1_test = f1_score(y_true, y_pred, average="weighted")
+    acc_test = balanced_accuracy_score(y_true, y_pred, adjusted=True)
+    precision_test = precision_score(y_true, y_pred, average="weighted")
+    recall_test = recall_score(y_true, y_pred, average="weighted")
+
+    return (
+        acc_train,
+        f1_train,
+        precision_train,
+        recall_train,
+        acc_test,
+        f1_test,
+        precision_test,
+        recall_test,
+    )
 
 
 def pdist_no_diag(data):

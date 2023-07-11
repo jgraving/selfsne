@@ -470,6 +470,19 @@ def config_to_filename(config: Dict) -> str:
     return "|".join(items)
 
 
+def sort_by_variance(embedding):
+    # Calculate variance along each dimension
+    variances = np.var(embedding, axis=0)
+
+    # Get the indices that would sort the variance array in descending order
+    indices = np.argsort(variances)[::-1]
+
+    # Sort the embedding according to the indices
+    sorted_embedding = embedding[:, indices]
+
+    return sorted_embedding
+
+
 class Trainer(pl.Trainer):
     def predict(
         self,

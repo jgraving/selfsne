@@ -55,68 +55,133 @@ class R2Score(nn.Module):
 
 
 def knn_reconstruction(
-    dataset,
-    embedding,
+    train_dataset,
+    train_embedding,
+    test_dataset,
+    test_embedding,
     error,
     k=1,
     batch_size=1000,
     verbose=True,
-    shuffle=False,
 ):
-    paired_dataset = PairedDataset(dataset, embedding, shuffle=shuffle)
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size)
+
     embedding_tree = NearestNeighbors(n_jobs=-1)
-    embedding_tree.fit(embedding)
+    embedding_tree.fit(train_embedding)
     r2_score = R2Score(error)
-    r2_score.fit(dataset)
+    r2_score.fit(train_dataset)
     if verbose:
-        prog_bar = tqdm(total=len(dataloader))
-    y_pred = []
-    for data, embedding_batch in dataloader:
-        data = data.numpy()
-        embedding_batch = embedding_batch.numpy()
-        knn_indices = embedding_tree.kneighbors(
-            embedding_batch, n_neighbors=k + 1, return_distance=False
+        train_prog_bar = tqdm(total=len(train_dataloader), desc="Train")
+        test_prog_bar = tqdm(total=len(test_dataloader), desc="Test")
+
+    train_pred, test_pred = [], []
+
+    # for train data
+    for i, train_data in enumerate(train_dataloader):
+        train_data = train_data.numpy()
+        train_embedding_batch = train_embedding[i * batch_size : (i + 1) * batch_size]
+        train_knn_indices = embedding_tree.kneighbors(
+            train_embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
-        knn_data = dataset[knn_indices]
-        knn = np.mean(knn_data, axis=1)
-        y_pred.append(knn)
+        train_knn_data = train_dataset[train_knn_indices]
+        train_knn = np.mean(train_knn_data, axis=1)
+        train_pred.append(train_knn)
         if verbose:
-            prog_bar.update(1)
-    return r2_score(np.concatenate(y_pred), dataset).item()
+            train_prog_bar.update(1)
+
+    # for test data
+    for i, test_data in enumerate(test_dataloader):
+        test_data = test_data.numpy()
+        test_embedding_batch = test_embedding[i * batch_size : (i + 1) * batch_size]
+        test_knn_indices = embedding_tree.kneighbors(
+            test_embedding_batch, n_neighbors=k + 1, return_distance=False
+        )[:, 1:]
+        test_knn_data = train_dataset[
+            test_knn_indices
+        ]  # using the train_dataset to retrieve the neighbors
+        test_knn = np.mean(test_knn_data, axis=1)
+        test_pred.append(test_knn)
+        if verbose:
+            test_prog_bar.update(1)
+
+    train_score = r2_score(np.concatenate(train_pred), train_dataset).item()
+    test_score = r2_score(np.concatenate(test_pred), test_dataset).item()
+
+    return train_score, test_score
 
 
 def knn_classification(
-    labels,
-    embedding,
+    train_labels,
+    train_embedding,
+    test_labels,
+    test_embedding,
     k=1,
     batch_size=1000,
     verbose=True,
     shuffle=False,
 ):
-    paired_dataset = PairedDataset(labels, embedding, shuffle=shuffle)
-    dataloader = DataLoader(paired_dataset, batch_size=batch_size)
+    train_dataloader = DataLoader(train_labels, batch_size=batch_size)
+    test_dataloader = DataLoader(test_labels, batch_size=batch_size)
     embedding_tree = NearestNeighbors(n_jobs=-1)
-    embedding_tree.fit(embedding)
+    embedding_tree.fit(train_embedding)
     if verbose:
-        prog_bar = tqdm(total=len(dataloader))
-    y_pred = []
-    for labels_batch, embedding_batch in dataloader:
+        train_prog_bar = tqdm(total=len(train_dataloader), desc="Train")
+        test_prog_bar = tqdm(total=len(test_dataloader), desc="Test")
+
+    train_pred, test_pred = [], []
+    # for train data
+    for labels_batch, embedding_batch in train_dataloader:
         labels_batch = labels_batch.numpy()
         embedding_batch = embedding_batch.numpy()
         knn_indices = embedding_tree.kneighbors(
             embedding_batch, n_neighbors=k + 1, return_distance=False
         )[:, 1:]
-        knn_labels = labels[knn_indices]
-        y_pred.append(mode(knn_labels, axis=1)[0])
+        knn_labels = train_labels[knn_indices]
+        train_pred.append(mode(knn_labels, axis=1)[0])
         if verbose:
-            prog_bar.update(1)
-    y_pred = np.concatenate(y_pred)
-    f1 = f1_score(labels, y_pred, average="weighted")
-    acc = balanced_accuracy_score(labels, y_pred, adjusted=True)
-    precision = precision_score(labels, y_pred, average="weighted")
-    recall = recall_score(labels, y_pred, average="weighted")
-    return acc, f1, precision, recall
+            train_prog_bar.update(1)
+
+    # for test data
+    for labels_batch, embedding_batch in test_dataloader:
+        labels_batch = labels_batch.numpy()
+        embedding_batch = embedding_batch.numpy()
+        knn_indices = embedding_tree.kneighbors(
+            embedding_batch, n_neighbors=k + 1, return_distance=False
+        )
+        knn_labels = train_labels[knn_indices]
+        test_pred.append(mode(knn_labels, axis=1)[0])
+        if verbose:
+            test_prog_bar.update(1)
+
+    train_acc = balanced_accuracy_score(
+        train_labels, np.concatenate(train_pred), adjusted=True
+    )
+    train_f1 = f1_score(train_labels, np.concatenate(train_pred), average="weighted")
+    train_precision = precision_score(
+        train_labels, np.concatenate(train_pred), average="weighted"
+    )
+    train_recall = recall_score(
+        train_labels, np.concatenate(train_pred), average="weighted"
+    )
+
+    test_acc = balanced_accuracy_score(
+        test_labels, np.concatenate(test_pred), adjusted=True
+    )
+    test_f1 = f1_score(test_labels, np.concatenate(test_pred), average="weighted")
+    test_precision = precision_score(
+        test_labels, np.concatenate(test_pred), average="weighted"
+    )
+    test_recall = recall_score(
+        test_labels, np.concatenate(test_pred), average="weighted"
+    )
+
+    return (train_acc, train_f1, train_precision, train_recall), (
+        test_acc,
+        test_f1,
+        test_precision,
+        test_recall,
+    )
 
 
 def linear_reconstruction(
@@ -275,13 +340,12 @@ def linear_classification(
     model = init_selu(nn.Linear(train_embedding.shape[1], num_classes))
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    scaler = StandardScaler().fit(train_embedding)
-    normalized_train_embedding = scaler.transform(train_embedding)
+    normalized_train_embedding = StandardScaler().fit_transform(train_embedding)
     paired_train_dataset = PairedDataset(
         train_labels, normalized_train_embedding, shuffle=shuffle
     )
 
-    normalized_test_embedding = scaler.transform(test_embedding)
+    normalized_test_embedding = StandardScaler().fit_transform(test_embedding)
     paired_test_dataset = PairedDataset(
         test_labels, normalized_test_embedding, shuffle=shuffle
     )

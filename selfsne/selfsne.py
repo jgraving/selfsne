@@ -251,6 +251,9 @@ class SelfSNE(pl.LightningModule):
             (
                 pos_logits,
                 neg_logits,
+                kld,
+                rkld,
+                jsd,
                 pos_prob,
                 neg_prob,
                 accuracy,
@@ -262,6 +265,9 @@ class SelfSNE(pl.LightningModule):
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
             self.log(mode + "pos_logits", pos_logits.item(), prog_bar=True)
             self.log(mode + "neg_logits", neg_logits.item(), prog_bar=True)
+            self.log(mode + "kld", kld.item(), prog_bar=True)
+            self.log(mode + "rkld", rkld.item(), prog_bar=True)
+            self.log(mode + "jsd", jsd.item(), prog_bar=True)
             self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
             self.log(mode + "pos_prob", pos_prob.item(), prog_bar=True)
             self.log(mode + "neg_prob", neg_prob.item(), prog_bar=True)

@@ -253,6 +253,9 @@ class DensityRatioEstimator(nn.Module):
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
+        kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
+        rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](pos_logits, neg_logits)
+        jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
         with torch.no_grad():
             accuracy, recall, precision = classifier_metrics(
                 pos_logits.flatten(), neg_logits.flatten()
@@ -260,6 +263,9 @@ class DensityRatioEstimator(nn.Module):
         return (
             pos_logits.mean(),
             neg_logits.mean(),
+            kld_attraction + kld_repulsion,
+            rkld_attraction + rkld_repulsion,
+            jsd_attraction + jsd_repulsion,
             pos_logits.sigmoid().mean(),
             neg_logits.sigmoid().mean(),
             accuracy,

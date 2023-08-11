@@ -29,6 +29,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     precision_score,
     recall_score,
+    r2_score,
 )
 from sklearn.preprocessing import StandardScaler
 from tqdm.autonotebook import tqdm
@@ -148,7 +149,7 @@ def knn_classification(
         embedding_batch = embedding_batch.numpy()
         knn_indices = embedding_tree.kneighbors(
             embedding_batch, n_neighbors=k + 1, return_distance=False
-        )
+        )[:, 1:]
         knn_labels = train_labels[knn_indices]
         test_pred.append(mode(knn_labels, axis=1)[0])
         if verbose:

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy as np
+from scipy.special import logit, expit
 
 import torch
 import torch.nn as nn
@@ -47,6 +48,67 @@ def jensen_shannon_divergence(pos_logits, neg_logits):
     return attraction, repulsion
 
 
+class BaseNCE(nn.Module):
+    def __init__(self, alpha=0.5, k=None, log_k=None):
+        super(BaseNCE, self).__init__()
+
+        assert (k is None) or (log_k is None), "Cannot define both k and log_k"
+
+        if log_k is not None:
+            self.log_k = log_k
+            self.k = np.exp(self.log_k)
+            self.alpha_logit = self.log_k
+            self.alpha = expit(self.log_k)
+        elif k is not None:
+            self.k = k
+            self.log_k = np.log(self.k)
+            self.alpha_logit = self.log_k
+            self.alpha = expit(self.log_k)
+        else:
+            self.alpha = alpha
+            self.alpha_logit = logit(alpha)
+            self.log_k = self.alpha_logit
+            self.k = np.exp(self.log_k)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(alpha={self.alpha:.1e}, k={self.k:.1e}, log_k={self.log_k:.1e})"
+
+    def forward(self):
+        raise NotImplementedError
+
+
+class ForwardNCE(BaseNCE):
+    def forward(self, pos_logits, neg_logits):
+        attraction = -F.logsigmoid(pos_logits - self.log_k).mean()
+        repulsion = -self.k * F.logsigmoid(-neg_logits + self.log_k).mean()
+        return attraction, repulsion
+
+
+class ReverseNCE(BaseNCE):
+    def forward(self, pos_logits, neg_logits):
+        attraction = -self.k * F.logsigmoid(pos_logits + self.log_k).mean()
+        repulsion = -F.logsigmoid(-neg_logits - self.log_k).mean()
+        return attraction, repulsion
+
+
+class AlphaNCE(BaseNCE):
+    def __init__(self, alpha=0.5, k=None, log_k=None):
+        super(AlphaNCE, self).__init__(alpha=alpha, k=k, log_k=log_k)
+        if self.alpha == 0:
+            self.divergence = kullback_leibler_divergence
+        elif self.alpha == 1:
+            self.divergence = reverse_kullback_leibler_divergence
+        elif self.alpha == 0.5:
+            self.divergence = binary_cross_entropy
+        elif self.alpha < 0.5:
+            self.divergence = ForwardNCE(alpha=1 - self.alpha)
+        elif self.alpha > 0.5:
+            self.divergence = ReverseNCE(alpha=self.alpha)
+
+    def forward(self, pos_logits, neg_logits):
+        return self.divergence(pos_logits, neg_logits)
+
+
 def kullback_leibler_divergence(pos_logits, neg_logits):
     attraction = -pos_logits.mean()
     repulsion = logmeanexp(neg_logits).expm1()
@@ -73,6 +135,9 @@ class InterpolateDivergences(nn.Module):
             torch.lerp(attraction_a, attraction_b, self.alpha),
             torch.lerp(repulsion_a, repulsion_b, self.alpha),
         )
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(alpha={self.alpha:.3f})"
 
 
 jeffreys_divergence = InterpolateDivergences(

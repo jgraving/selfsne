@@ -100,14 +100,14 @@ def classifier_metrics(pos_logits, neg_logits):
     )
 
 
-class DensityRatioEstimator(nn.Module):
+class LikelihoodRatioEstimator(nn.Module):
     """
-    A generalized multi-sample contrastive loss based on
-    Noise Contrastive Estimation (NCE) that preserves local embedding
+    A generalized contrastive loss for unnormalized likelihood ratio estimation based on
+    Noise Contrastive Estimation (NCE). For representation learning the loss preserves embedding
     structure by maximizing similarity for positive pairs and minimizing similarity
     for negative (noise) pairs.
 
-    A user-selected similarity kernel is used to calculate the log density ratio ("logits")
+    A user-selected similarity kernel is used to calculate the log likelihood ratio ("logits")
     for each pair, which are then optimized by a user-selected divergence function to
     maximize logits for positive pairs (attraction) and minimize logits for negative pairs
     (repulsion).
@@ -276,126 +276,54 @@ class DensityRatioEstimator(nn.Module):
         )
 
 
-class MultiheadDensityRatioEstimator(nn.Module):
+DensityRatioEstimator = LikelihoodRatioEstimator
+
+
+class TRELLIS(nn.Module):
     def __init__(
         self,
-        num_heads: int,
-        kernels: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
-        kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
-        temperature: Union[float, List[float]] = 1,
-        divergence: Union[str, Callable, List[Union[str, Callable]]] = "kld",
-        baseline: Union[
-            str, float, Callable, List[Union[str, float, Callable]]
-        ] = "batch",
+        num_waymarks: int = 1,
+        kernel: Union[str, callable] = "cauchy",
+        kernel_scale: Union[float, str] = 1.0,
+        temperature: float = 1,
+        divergence: Union[str, callable] = "kld",
+        baseline: Union[str, float, callable] = "batch",
         num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
         symmetric_negatives: bool = False,
     ) -> None:
 
         super().__init__()
-
-        if isinstance(kernel, list):
-            assert (
-                len(kernel) == num_heads
-            ), "Length of kernels list should match num_heads"
-            self.kernel = [
-                PAIRWISE_KERNELS[k] if isinstance(k, str) else k for k in kernel
-            ]
+        self.num_waymarks = num_waymarks
+        self.num_estimators = num_waymarks + 1
+        if isinstance(kernel, str):
+            self.kernel = PAIRWISE_KERNELS[kernel]
         else:
-            kernel = PAIRWISE_KERNELS[kernel] if isinstance(kernel, str) else kernel
-            self.kernel = [kernel] * num_heads
+            self.kernel = kernel
 
-        if isinstance(kernel_scale, list):
-            assert (
-                len(kernel_scale) == num_heads
-            ), "Length of kernel_scale list should match num_heads"
-            self.kernel_scale = kernel_scale
+        self.kernel_scale = kernel_scale
+
+        if isinstance(divergence, str):
+            self.divergence = DIVERGENCES[divergence]
         else:
-            self.kernel_scale = [kernel_scale] * num_heads
+            self.divergence = divergence
 
-        if isinstance(temperature, list):
-            assert (
-                len(temperature) == num_heads
-            ), "Length of temperature list should match num_heads"
-            self.inverse_temperature = [1 / t for t in temperature]
-        else:
-            self.inverse_temperature = [1 / temperature] * num_heads
+        if isinstance(baseline, str):
+            baseline = BASELINES[baseline]()
+        elif isinstance(baseline, (int, float)):
+            baseline = BASELINES["constant"](baseline)
 
-        if isinstance(divergence, list):
-            assert (
-                len(divergence) == num_heads
-            ), "Length of divergence list should match num_heads"
-            self.divergence = [
-                DIVERGENCES[d] if isinstance(d, str) else d for d in divergence
-            ]
-        else:
-            divergence = (
-                DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
-            )
-            self.divergence = [divergence] * num_heads
-
-        if isinstance(baseline, list):
-            assert (
-                len(baseline) == num_heads
-            ), "Length of baseline list should match num_heads"
-            self.baseline = ModuleList()
-            for b in baseline:
-                if isinstance(b, str):
-                    self.baseline.append(BASELINES[b]())
-                elif isinstance(b, (int, float)):
-                    self.baseline.append(BASELINES["constant"](b))
-                else:
-                    self.baseline.append(b)
-        else:
-            if isinstance(baseline, str):
-                baseline = BASELINES[baseline]()
-            elif isinstance(baseline, (int, float)):
-                baseline = BASELINES["constant"](baseline)
-            self.baseline = ModuleList([deepcopy(baseline) for _ in range(num_heads)])
-
+        self.baselines = ModuleList(
+            [deepcopy(baseline) for _ in range(self.num_estimators)]
+        )
         self.num_negatives = num_negatives
-        self.embedding_decay = embedding_decay
         self.symmetric_negatives = symmetric_negatives
-        self.num_heads = num_heads
-
-    def local_forward(
-        self,
-        z_x: Tuple[torch.Tensor],
-        z_y: Tuple[torch.Tensor],
-        y: Optional[torch.Tensor],
-        idx: int,
-        **kwargs,
-    ) -> Tuple[torch.Tensor]:
-        if self.kernel_scale[idx] == "auto":
-            embedding_features = z_x[idx].shape[1]
-            kernel_scale = np.sqrt(embedding_features)
-        else:
-            kernel_scale = self.kernel_scale[idx]
-
-        logits = (
-            self.kernel[idx](z_y[:, idx], z_x[:, idx], kernel_scale)
-            * self.inverse_temperature[idx]
-        )
-        local_pos_logits = diagonal(logits).unsqueeze(1)
-        local_neg_logits = remove_diagonal(logits)
-        if self.symmetric_negatives:
-            logits = (
-                self.kernel[idx](z_y[:, idx], z_y[:, idx], kernel_scale)
-                * self.inverse_temperature[idx]
+        self.embedding_decay = embedding_decay
+        self.inverse_temperature = 1 / temperature
+        if self.num_estimators > 1:
+            self.register_buffer(
+                "alphas", torch.linspace(0, 1, self.num_waymarks + 2)[1:-1]
             )
-            local_neg_logits = torch.cat(
-                [local_neg_logits, remove_diagonal(logits)], dim=-1
-            )
-        if self.num_negatives:
-            local_neg_logits = random_sample_columns(
-                local_neg_logits, self.num_negatives
-            )
-        local_log_baseline = self.baseline[idx](
-            logits=local_neg_logits, y=y, z_y=z_y[:, idx]
-        )
-        local_pos_logits = local_pos_logits - local_log_baseline
-        local_neg_logits = local_neg_logits - local_log_baseline
-        return local_pos_logits, local_neg_logits, local_log_baseline
 
     def forward(
         self,
@@ -404,124 +332,75 @@ class MultiheadDensityRatioEstimator(nn.Module):
         y: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor]:
-        if z_x.dim() != 3 or z_y.dim() != 3:
-            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
-        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
-            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
-
         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+
+        if self.kernel_scale == "auto":
+            embedding_features = z_x.shape[1]
+            self.kernel_scale = np.sqrt(embedding_features)
+
+        logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
+        pos_logits = diagonal(logits).unsqueeze(1)
+        neg_logits = remove_diagonal(logits)
+        if self.symmetric_negatives:
+            logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
+            neg_logits = torch.cat([neg_logits, remove_diagonal(logits)], dim=-1)
+        if self.num_negatives:
+            neg_logits = random_sample_columns(neg_logits, self.num_negatives)
+        if self.num_estimators > 1:
+            waymark_logits = log_lerp(
+                pos_logits, neg_logits, self.alphas.view(-1, 1, 1)
+            )
+            waymark_logits = torch.cat(
+                [
+                    pos_logits.expand_as(waymark_logits[0, None]),
+                    waymark_logits,
+                    neg_logits.expand_as(waymark_logits[0, None]),
+                ],
+                dim=0,
+            )
+            log_baselines = [
+                self.baselines[idx](
+                    logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
+                )
+                for idx in range(self.num_estimators)
+            ]
+        else:
+            waymark_logits = torch.stack(
+                [
+                    pos_logits.expand_as(neg_logits),
+                    neg_logits,
+                ],
+                dim=0,
+            )
+            log_baselines = [
+                self.baselines[idx](
+                    logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
+                )
+                for idx in range(self.num_estimators)
+            ]
 
         global_pos_logits = 0
         global_neg_logits = 0
-        global_log_baseline = 0
         global_attraction = 0
         global_repulsion = 0
-
-        for idx in range(self.num_heads):
-            local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
-                z_x=z_x, z_y=z_y, y=y, idx=idx
-            )
-            local_attraction, local_repulsion = self.divergence[idx](
-                local_pos_logits, local_neg_logits
-            )
-
-            global_pos_logits = global_pos_logits + local_pos_logits
-            global_neg_logits = global_neg_logits + local_neg_logits
-            global_log_baseline = global_log_baseline + local_log_baseline
-            global_attraction = global_attraction + local_attraction
-            global_repulsion = global_repulsion + local_repulsion
-
-        global_pos_logits = global_pos_logits / self.num_heads
-        global_neg_logits = global_neg_logits / self.num_heads
-        global_log_baseline = global_log_baseline / self.num_heads
-        global_attraction = global_attraction / self.num_heads
-        global_repulsion = global_repulsion / self.num_heads
-
-        with torch.no_grad():
-            accuracy, recall, precision = classifier_metrics(
-                global_pos_logits.flatten(), global_neg_logits.flatten()
-            )
-        return (
-            global_pos_logits.mean(),
-            global_neg_logits.mean(),
-            global_pos_logits.sigmoid().mean(),
-            global_neg_logits.sigmoid().mean(),
-            accuracy,
-            recall,
-            precision,
-            global_log_baseline.mean(),
-            global_attraction.mean() + global_repulsion.mean() + embedding_decay,
-        )
-
-
-class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
-    def __init__(
-        self,
-        num_heads: int,
-        kernel: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
-        kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
-        temperature: Union[float, List[float]] = 1,
-        divergence: Union[str, Callable] = "kld",
-        baseline: Union[
-            str, float, Callable, List[Union[str, float, Callable]]
-        ] = "batch",
-        num_negatives: Optional[int] = None,
-        embedding_decay: float = 0,
-        symmetric_negatives: bool = False,
-    ) -> None:
-
-        super().__init__(
-            num_heads=num_heads,
-            kernel=kernel,
-            kernel_scale=kernel_scale,
-            temperature=temperature,
-            baseline=baseline,
-            num_negatives=num_negatives,
-            embedding_decay=embedding_decay,
-            symmetric_negatives=symmetric_negatives,
-        )
-
-        self.divergence = (
-            DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
-        )
-
-    def forward(
-        self,
-        z_x: torch.Tensor,
-        z_y: torch.Tensor,
-        y: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor]:
-
-        if z_x.dim() != 3 or z_y.dim() != 3:
-            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
-        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
-            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
-
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
-
-        global_pos_logits = 0
-        global_neg_logits = 0
         global_log_baseline = 0
 
-        for idx in range(self.num_heads):
-            local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
-                z_x, z_y, y, idx
+        for idx in range(self.num_estimators):
+            local_log_baseline = log_baselines[idx]
+            local_pos_logits = waymark_logits[idx] - local_log_baseline
+            local_neg_logits = waymark_logits[idx + 1] - local_log_baseline
+            local_attraction, local_repulsion = self.divergence(
+                local_pos_logits, local_neg_logits
             )
             global_pos_logits = global_pos_logits + local_pos_logits
             global_neg_logits = global_neg_logits + local_neg_logits
+            global_attraction = global_attraction + local_attraction
+            global_repulsion = global_repulsion + local_repulsion
             global_log_baseline = global_log_baseline + local_log_baseline
 
-        global_pos_logits = global_pos_logits / self.num_heads
-        global_neg_logits = global_neg_logits / self.num_heads
-        global_log_baseline = global_log_baseline / self.num_heads
-        global_attraction, global_repulsion = self.divergence(
-            global_pos_logits, global_neg_logits
-        )
-
         with torch.no_grad():
             accuracy, recall, precision = classifier_metrics(
-                global_pos_logits.flatten(), global_neg_logits.flatten()
+                logmeanexp(global_pos_logits, -1).flatten(), global_neg_logits.flatten()
             )
         return (
             global_pos_logits.mean(),
@@ -534,82 +413,6 @@ class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
             global_log_baseline.mean(),
             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
         )
-
-
-class MixtureOfExpertsDensityRatioEstimator(ProductOfExpertsDensityRatioEstimator):
-    def forward(
-        self,
-        z_x: torch.Tensor,
-        z_y: torch.Tensor,
-        y: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor]:
-        if z_x.dim() != 3 or z_y.dim() != 3:
-            raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
-        if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
-            raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
-
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
-
-        global_pos_logits = torch.zeros(1, device=z_x[0].device) - float("inf")
-        global_neg_logits = torch.zeros(1, device=z_x[0].device) - float("inf")
-        global_log_baseline = torch.zeros(1, device=z_x[0].device) - float("inf")
-
-        for idx in range(self.num_heads):
-            local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
-                z_x=z_x, z_y=z_y, y=y, idx=idx
-            )
-            global_pos_logits = torch.logaddexp(global_pos_logits, local_pos_logits)
-            global_neg_logits = torch.logaddexp(global_neg_logits, local_neg_logits)
-            global_log_baseline = torch.logaddexp(
-                global_log_baseline, local_log_baseline
-            )
-
-        global_pos_logits = global_pos_logits - np.log(self.num_heads)
-        global_neg_logits = global_neg_logits - np.log(self.num_heads)
-        global_log_baseline = global_log_baseline - np.log(self.num_heads)
-        global_attraction, global_repulsion = self.divergence(
-            global_pos_logits, global_neg_logits
-        )
-
-        with torch.no_grad():
-            accuracy, recall, precision = classifier_metrics(
-                global_pos_logits.flatten(), global_neg_logits.flatten()
-            )
-        return (
-            global_pos_logits.mean(),
-            global_neg_logits.mean(),
-            global_pos_logits.sigmoid().mean(),
-            global_neg_logits.sigmoid().mean(),
-            accuracy,
-            recall,
-            precision,
-            global_log_baseline.mean(),
-            global_attraction.mean() + global_repulsion.mean() + embedding_decay,
-        )
-
-
-class EncoderProjectorLoss(nn.Module):
-    def __init__(self, encoder_loss, projector_loss):
-        super().__init__()
-        self.encoder_loss = encoder_loss
-        self.projector_loss = projector_loss
-
-    def forward(self, h_x, h_y, z_x, z_y, x, y, **kwargs):
-        encoder_loss = self.encoder_loss(z_x=h_x, z_y=h_y, x=x, y=y)
-        projector_loss = self.projector_loss(z_x=z_x, z_y=z_y, x=x, y=y)
-        return tuple([(h + z) / 2 for (h, z) in zip(encoder_loss, projector_loss)])
-
-
-class SymmetricLoss(nn.Module):
-    def __init__(self, loss):
-        super().__init__()
-        self.loss = loss
-
-    def forward(self, z_x, z_y, x, y, **kwargs):
-        xy_loss = self.loss(z_x=z_x, z_y=z_y, y=y)
-        yx_loss = self.loss(z_x=z_y, z_y=z_x, y=x)
-        return tuple([(xy + yx) / 2 for (xy, yx) in zip(xy_loss, yx_loss)])
 
 
 class RedundancyReduction(nn.Module):
@@ -730,3 +533,316 @@ class VICReg(nn.Module):
             + invariance * self.invariance_weight
             + covariance * self.covariance_weight
         )
+
+
+# class MultiheadDensityRatioEstimator(nn.Module):
+#     def __init__(
+#         self,
+#         num_heads: int,
+#         kernels: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
+#         kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
+#         temperature: Union[float, List[float]] = 1,
+#         divergence: Union[str, Callable, List[Union[str, Callable]]] = "kld",
+#         baseline: Union[
+#             str, float, Callable, List[Union[str, float, Callable]]
+#         ] = "batch",
+#         num_negatives: Optional[int] = None,
+#         embedding_decay: float = 0,
+#         symmetric_negatives: bool = False,
+#     ) -> None:
+
+#         super().__init__()
+
+#         if isinstance(kernel, list):
+#             assert (
+#                 len(kernel) == num_heads
+#             ), "Length of kernels list should match num_heads"
+#             self.kernel = [
+#                 PAIRWISE_KERNELS[k] if isinstance(k, str) else k for k in kernel
+#             ]
+#         else:
+#             kernel = PAIRWISE_KERNELS[kernel] if isinstance(kernel, str) else kernel
+#             self.kernel = [kernel] * num_heads
+
+#         if isinstance(kernel_scale, list):
+#             assert (
+#                 len(kernel_scale) == num_heads
+#             ), "Length of kernel_scale list should match num_heads"
+#             self.kernel_scale = kernel_scale
+#         else:
+#             self.kernel_scale = [kernel_scale] * num_heads
+
+#         if isinstance(temperature, list):
+#             assert (
+#                 len(temperature) == num_heads
+#             ), "Length of temperature list should match num_heads"
+#             self.inverse_temperature = [1 / t for t in temperature]
+#         else:
+#             self.inverse_temperature = [1 / temperature] * num_heads
+
+#         if isinstance(divergence, list):
+#             assert (
+#                 len(divergence) == num_heads
+#             ), "Length of divergence list should match num_heads"
+#             self.divergence = [
+#                 DIVERGENCES[d] if isinstance(d, str) else d for d in divergence
+#             ]
+#         else:
+#             divergence = (
+#                 DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
+#             )
+#             self.divergence = [divergence] * num_heads
+
+#         if isinstance(baseline, list):
+#             assert (
+#                 len(baseline) == num_heads
+#             ), "Length of baseline list should match num_heads"
+#             self.baseline = ModuleList()
+#             for b in baseline:
+#                 if isinstance(b, str):
+#                     self.baseline.append(BASELINES[b]())
+#                 elif isinstance(b, (int, float)):
+#                     self.baseline.append(BASELINES["constant"](b))
+#                 else:
+#                     self.baseline.append(b)
+#         else:
+#             if isinstance(baseline, str):
+#                 baseline = BASELINES[baseline]()
+#             elif isinstance(baseline, (int, float)):
+#                 baseline = BASELINES["constant"](baseline)
+#             self.baseline = ModuleList([deepcopy(baseline) for _ in range(num_heads)])
+
+#         self.num_negatives = num_negatives
+#         self.embedding_decay = embedding_decay
+#         self.symmetric_negatives = symmetric_negatives
+#         self.num_heads = num_heads
+
+#     def local_forward(
+#         self,
+#         z_x: Tuple[torch.Tensor],
+#         z_y: Tuple[torch.Tensor],
+#         y: Optional[torch.Tensor],
+#         idx: int,
+#         **kwargs,
+#     ) -> Tuple[torch.Tensor]:
+#         if self.kernel_scale[idx] == "auto":
+#             embedding_features = z_x[idx].shape[1]
+#             kernel_scale = np.sqrt(embedding_features)
+#         else:
+#             kernel_scale = self.kernel_scale[idx]
+
+#         logits = (
+#             self.kernel[idx](z_y[:, idx], z_x[:, idx], kernel_scale)
+#             * self.inverse_temperature[idx]
+#         )
+#         local_pos_logits = diagonal(logits).unsqueeze(1)
+#         local_neg_logits = remove_diagonal(logits)
+#         if self.symmetric_negatives:
+#             logits = (
+#                 self.kernel[idx](z_y[:, idx], z_y[:, idx], kernel_scale)
+#                 * self.inverse_temperature[idx]
+#             )
+#             local_neg_logits = torch.cat(
+#                 [local_neg_logits, remove_diagonal(logits)], dim=-1
+#             )
+#         if self.num_negatives:
+#             local_neg_logits = random_sample_columns(
+#                 local_neg_logits, self.num_negatives
+#             )
+#         local_log_baseline = self.baseline[idx](
+#             logits=local_neg_logits, y=y, z_y=z_y[:, idx]
+#         )
+#         local_pos_logits = local_pos_logits - local_log_baseline
+#         local_neg_logits = local_neg_logits - local_log_baseline
+#         return local_pos_logits, local_neg_logits, local_log_baseline
+
+#     def forward(
+#         self,
+#         z_x: torch.Tensor,
+#         z_y: torch.Tensor,
+#         y: Optional[torch.Tensor] = None,
+#         **kwargs,
+#     ) -> Tuple[torch.Tensor]:
+#         if z_x.dim() != 3 or z_y.dim() != 3:
+#             raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+#         if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+#             raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
+
+#         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+
+#         global_pos_logits = 0
+#         global_neg_logits = 0
+#         global_log_baseline = 0
+#         global_attraction = 0
+#         global_repulsion = 0
+
+#         for idx in range(self.num_heads):
+#             local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
+#                 z_x=z_x, z_y=z_y, y=y, idx=idx
+#             )
+#             local_attraction, local_repulsion = self.divergence[idx](
+#                 local_pos_logits, local_neg_logits
+#             )
+
+#             global_pos_logits = global_pos_logits + local_pos_logits
+#             global_neg_logits = global_neg_logits + local_neg_logits
+#             global_log_baseline = global_log_baseline + local_log_baseline
+#             global_attraction = global_attraction + local_attraction
+#             global_repulsion = global_repulsion + local_repulsion
+
+#         global_pos_logits = global_pos_logits / self.num_heads
+#         global_neg_logits = global_neg_logits / self.num_heads
+#         global_log_baseline = global_log_baseline / self.num_heads
+#         global_attraction = global_attraction / self.num_heads
+#         global_repulsion = global_repulsion / self.num_heads
+
+#         with torch.no_grad():
+#             accuracy, recall, precision = classifier_metrics(
+#                 global_pos_logits.flatten(), global_neg_logits.flatten()
+#             )
+#         return (
+#             global_pos_logits.mean(),
+#             global_neg_logits.mean(),
+#             global_pos_logits.sigmoid().mean(),
+#             global_neg_logits.sigmoid().mean(),
+#             accuracy,
+#             recall,
+#             precision,
+#             global_log_baseline.mean(),
+#             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
+#         )
+
+
+# class ProductOfExpertsDensityRatioEstimator(MultiheadDensityRatioEstimator):
+#     def __init__(
+#         self,
+#         num_heads: int,
+#         kernel: Union[str, Callable, List[Union[str, Callable]]] = "cauchy",
+#         kernel_scale: Union[float, str, List[Union[float, str]]] = 1.0,
+#         temperature: Union[float, List[float]] = 1,
+#         divergence: Union[str, Callable] = "kld",
+#         baseline: Union[
+#             str, float, Callable, List[Union[str, float, Callable]]
+#         ] = "batch",
+#         num_negatives: Optional[int] = None,
+#         embedding_decay: float = 0,
+#         symmetric_negatives: bool = False,
+#     ) -> None:
+
+#         super().__init__(
+#             num_heads=num_heads,
+#             kernel=kernel,
+#             kernel_scale=kernel_scale,
+#             temperature=temperature,
+#             baseline=baseline,
+#             num_negatives=num_negatives,
+#             embedding_decay=embedding_decay,
+#             symmetric_negatives=symmetric_negatives,
+#         )
+
+#         self.divergence = (
+#             DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
+#         )
+
+#     def forward(
+#         self,
+#         z_x: torch.Tensor,
+#         z_y: torch.Tensor,
+#         y: Optional[torch.Tensor] = None,
+#         **kwargs,
+#     ) -> Tuple[torch.Tensor]:
+
+#         if z_x.dim() != 3 or z_y.dim() != 3:
+#             raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+#         if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+#             raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
+
+#         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+
+#         global_pos_logits = 0
+#         global_neg_logits = 0
+#         global_log_baseline = 0
+
+#         for idx in range(self.num_heads):
+#             local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
+#                 z_x, z_y, y, idx
+#             )
+#             global_pos_logits = global_pos_logits + local_pos_logits
+#             global_neg_logits = global_neg_logits + local_neg_logits
+#             global_log_baseline = global_log_baseline + local_log_baseline
+
+#         global_pos_logits = global_pos_logits / self.num_heads
+#         global_neg_logits = global_neg_logits / self.num_heads
+#         global_log_baseline = global_log_baseline / self.num_heads
+#         global_attraction, global_repulsion = self.divergence(
+#             global_pos_logits, global_neg_logits
+#         )
+
+#         with torch.no_grad():
+#             accuracy, recall, precision = classifier_metrics(
+#                 global_pos_logits.flatten(), global_neg_logits.flatten()
+#             )
+#         return (
+#             global_pos_logits.mean(),
+#             global_neg_logits.mean(),
+#             global_pos_logits.sigmoid().mean(),
+#             global_neg_logits.sigmoid().mean(),
+#             accuracy,
+#             recall,
+#             precision,
+#             global_log_baseline.mean(),
+#             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
+#         )
+
+
+# class MixtureOfExpertsDensityRatioEstimator(ProductOfExpertsDensityRatioEstimator):
+#     def forward(
+#         self,
+#         z_x: torch.Tensor,
+#         z_y: torch.Tensor,
+#         y: Optional[torch.Tensor] = None,
+#         **kwargs,
+#     ) -> Tuple[torch.Tensor]:
+#         if z_x.dim() != 3 or z_y.dim() != 3:
+#             raise ValueError("z_x and z_y must be 3D tensors for multihead loss")
+#         if z_x.shape[1] != self.num_heads or z_y.shape[1] != self.num_heads:
+#             raise ValueError("z_x and z_y must have shape[1] equal to self.num_heads")
+
+#         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+
+#         global_pos_logits = torch.zeros(1, device=z_x[0].device) - float("inf")
+#         global_neg_logits = torch.zeros(1, device=z_x[0].device) - float("inf")
+#         global_log_baseline = torch.zeros(1, device=z_x[0].device) - float("inf")
+
+#         for idx in range(self.num_heads):
+#             local_pos_logits, local_neg_logits, local_log_baseline = self.local_forward(
+#                 z_x=z_x, z_y=z_y, y=y, idx=idx
+#             )
+#             global_pos_logits = torch.logaddexp(global_pos_logits, local_pos_logits)
+#             global_neg_logits = torch.logaddexp(global_neg_logits, local_neg_logits)
+#             global_log_baseline = torch.logaddexp(
+#                 global_log_baseline, local_log_baseline
+#             )
+
+#         global_pos_logits = global_pos_logits - np.log(self.num_heads)
+#         global_neg_logits = global_neg_logits - np.log(self.num_heads)
+#         global_log_baseline = global_log_baseline - np.log(self.num_heads)
+#         global_attraction, global_repulsion = self.divergence(
+#             global_pos_logits, global_neg_logits
+#         )
+
+#         with torch.no_grad():
+#             accuracy, recall, precision = classifier_metrics(
+#                 global_pos_logits.flatten(), global_neg_logits.flatten()
+#             )
+#         return (
+#             global_pos_logits.mean(),
+#             global_neg_logits.mean(),
+#             global_pos_logits.sigmoid().mean(),
+#             global_neg_logits.sigmoid().mean(),
+#             accuracy,
+#             recall,
+#             precision,
+#             global_log_baseline.mean(),
+#             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
+#         )

@@ -45,8 +45,10 @@ class LogMeanExp(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, log_moving_average = ctx.saved_tensors
         log_n = np.log(input.numel())
-        grad_output = grad_output * input.exp() / log_moving_average.add(log_n).exp()
-        return grad_output, None, None
+        # ratio = input.exp() / log_moving_average.add(log_n).exp()
+        # Compute the ratio in the log domain
+        ratio = torch.exp(input - (log_moving_average + log_n))
+        return grad_output * ratio, None, None
 
 
 class MomentumBaseline(nn.Module):

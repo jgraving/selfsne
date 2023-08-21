@@ -31,7 +31,7 @@ from sklearn.neighbors import (
 )
 from sklearn.metrics import (
     f1_score,
-    balanced_accuracy_score,
+    accuracy_score,
     precision_score,
     recall_score,
 )
@@ -141,13 +141,13 @@ def knn_classification(
     train_pred = mode(train_pred_labels, axis=1)[0]
 
     # Compute performance metrics for the training data
-    train_acc = balanced_accuracy_score(train_labels, train_pred, adjusted=True)
+    train_acc = accuracy_score(train_labels, train_pred)
     train_f1 = f1_score(train_labels, train_pred, average="weighted")
     train_precision = precision_score(train_labels, train_pred, average="weighted")
     train_recall = recall_score(train_labels, train_pred, average="weighted")
 
     # Compute performance metrics for the testing data
-    test_acc = balanced_accuracy_score(test_labels, test_pred, adjusted=True)
+    test_acc = accuracy_score(test_labels, test_pred)
     test_f1 = f1_score(test_labels, test_pred, average="weighted")
     test_precision = precision_score(test_labels, test_pred, average="weighted")
     test_recall = recall_score(test_labels, test_pred, average="weighted")
@@ -234,14 +234,14 @@ def linear_classification(
     # Evaluation on train data
     y_pred_train = model.predict(normalized_train_embedding)
     f1_train = f1_score(train_labels, y_pred_train, average="weighted")
-    acc_train = balanced_accuracy_score(train_labels, y_pred_train)
+    acc_train = accuracy_score(train_labels, y_pred_train)
     precision_train = precision_score(train_labels, y_pred_train, average="weighted")
     recall_train = recall_score(train_labels, y_pred_train, average="weighted")
 
     # Evaluation on test data
     y_pred_test = model.predict(normalized_test_embedding)
     f1_test = f1_score(test_labels, y_pred_test, average="weighted")
-    acc_test = balanced_accuracy_score(test_labels, y_pred_test)
+    acc_test = accuracy_score(test_labels, y_pred_test)
     precision_test = precision_score(test_labels, y_pred_test, average="weighted")
     recall_test = recall_score(test_labels, y_pred_test, average="weighted")
 

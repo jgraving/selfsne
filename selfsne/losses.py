@@ -415,6 +415,29 @@ class TRELLIS(nn.Module):
         )
 
 
+class EncoderProjectorLoss(nn.Module):
+    def __init__(self, encoder_loss, projector_loss):
+        super().__init__()
+        self.encoder_loss = encoder_loss
+        self.projector_loss = projector_loss
+
+    def forward(self, h_x, h_y, z_x, z_y, x, y, **kwargs):
+        encoder_loss = self.encoder_loss(z_x=h_x, z_y=h_y, x=x, y=y)
+        projector_loss = self.projector_loss(z_x=z_x, z_y=z_y, x=x, y=y)
+        return tuple([(h + z) / 2 for (h, z) in zip(encoder_loss, projector_loss)])
+
+
+class SymmetricLoss(nn.Module):
+    def __init__(self, loss):
+        super().__init__()
+        self.loss = loss
+
+    def forward(self, z_x, z_y, x, y, **kwargs):
+        xy_loss = self.loss(z_x=z_x, z_y=z_y, y=y)
+        yx_loss = self.loss(z_x=z_y, z_y=z_x, y=x)
+        return tuple([(xy + yx) / 2 for (xy, yx) in zip(xy_loss, yx_loss)])
+
+
 class RedundancyReduction(nn.Module):
     """
     Redundancy Reduction loss function [1] that creates an embedding by minimizing

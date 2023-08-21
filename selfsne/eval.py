@@ -181,8 +181,7 @@ def linear_reconstruction(
     verbose=True,
 ):
     # Step 1: Initialize the Model
-    model = LinearRegression()
-    multioutput_model = MultiOutputRegressor(model, n_jobs=n_jobs)
+    model = LinearRegression(n_jobs=n_jobs)
 
     r2_score = R2Score()
     r2_score.fit(train_dataset)
@@ -195,16 +194,16 @@ def linear_reconstruction(
 
     # Step 3: Train the Model
     # Train the model with a single call to `fit`
-    multioutput_model.fit(normalized_train_embedding, train_dataset)
+    model.fit(normalized_train_embedding, train_dataset)
 
     # Step 4: Evaluate the Model
 
     # Evaluation on train data
-    train_pred = multioutput_model.predict(normalized_train_embedding)
+    train_pred = model.predict(normalized_train_embedding)
     train_r2_score = r2_score(train_pred, train_dataset).item()
 
     # Evaluation on test data
-    test_pred = multioutput_model.predict(normalized_test_embedding)
+    test_pred = model.predict(normalized_test_embedding)
     test_r2_score = r2_score(test_pred, test_dataset).item()
 
     if verbose:
@@ -218,7 +217,7 @@ def linear_classification(
     train_labels, train_embedding, test_labels, test_embedding, verbose=True
 ):
     # Step 1: Initialize the Model
-    model = LogisticRegression(penalty="none", max_iter=2000, n_jobs=-1)
+    model = LogisticRegression(penalty="none", max_iter=1000, n_jobs=-1, solver="saga")
 
     # Step 2: Preprocessing
     # Scale the embeddings

@@ -217,7 +217,7 @@ def linear_classification(
     train_labels, train_embedding, test_labels, test_embedding, verbose=True
 ):
     # Step 1: Initialize the Model
-    model = LogisticRegression(penalty="none", max_iter=1000, n_jobs=-1, solver="saga")
+    model = LogisticRegression(max_iter=2000, n_jobs=-1, verbose=verbose)
 
     # Step 2: Preprocessing
     # Scale the embeddings

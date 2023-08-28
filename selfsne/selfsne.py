@@ -154,6 +154,7 @@ class SelfSNE(pl.LightningModule):
         learning_rate=1e-3,
         optimizer="adam",
         momentum=0,
+        betas=(0.9, 0.95),
         dampening=0,
         nesterov=False,
         weight_decay=0.0,
@@ -413,6 +414,7 @@ class SelfSNE(pl.LightningModule):
                 params_list,
                 lr=self.hparams.learning_rate,
                 weight_decay=self.hparams.weight_decay,
+                betas=self.hparams.betas,
             )
         elif self.hparams.optimizer.lower() == "sgd":
             optimizer = optim.SGD(

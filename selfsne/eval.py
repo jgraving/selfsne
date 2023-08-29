@@ -65,13 +65,13 @@ class R2Score(nn.Module):
 
 
 def knn_reconstruction(
-    train_dataset, train_embedding, test_dataset, test_embedding, k=1, verbose=True
+    train_dataset, train_embedding, test_dataset, test_embedding, k=1, verbose=True, metric='minkowski'
 ):
     if verbose:
         print("Fitting k-NN regressor...")
 
     # Initialize the k-NN regressor for test set with n_neighbors=k
-    knn_regressor = KNeighborsRegressor(n_neighbors=k, n_jobs=-1)
+    knn_regressor = KNeighborsRegressor(n_neighbors=k, n_jobs=-1, metric=metric)
     knn_regressor.fit(train_embedding, train_dataset)
 
     r2_score = R2Score()
@@ -111,13 +111,13 @@ def knn_reconstruction(
 
 
 def knn_classification(
-    train_labels, train_embedding, test_labels, test_embedding, k=1, verbose=True
+    train_labels, train_embedding, test_labels, test_embedding, k=1, verbose=True, metric='minkowski'
 ):
     if verbose:
         print("Fitting k-NN classifier...")
 
     # Initialize the k-NN classifier for test set with n_neighbors=k
-    knn_classifier = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
+    knn_classifier = KNeighborsClassifier(n_neighbors=k, n_jobs=-1, metric=metric)
     knn_classifier.fit(train_embedding, train_labels)
 
     if verbose:

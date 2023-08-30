@@ -57,8 +57,22 @@ class Residual(nn.Module):
         return (self.residual(x) + self.module(x)) * RSQRT2
 
 
-def ParametricResidual(in_features, out_features, module):
-    return Residual(module, init_selu(nn.Linear(in_features, out_features)))
+def Residual1d(in_features, out_features, module):
+    return Residual(
+        module,
+        init_selu(nn.Linear(in_features, out_features))
+        if in_features != out_features
+        else nn.Identity(),
+    )
+
+
+def Residual2d(in_channels, out_channels, module):
+    return Residual(
+        module,
+        init_selu(nn.Conv2d(in_channels, out_channels, kernel_size=1))
+        if in_channels != out_channels
+        else nn.Identity(),
+    )
 
 
 class VarPool1d(nn.AvgPool1d):
@@ -484,8 +498,8 @@ def ResNet2d(
     in_channels,
     out_channels,
     hidden_channels=64,
-    num_layers=4,
-    n_blocks=4,
+    num_layers=2,
+    num_blocks=4,
     global_pooling=True,
     batch_norm=False,
     input_stride=2,
@@ -505,48 +519,96 @@ def ResNet2d(
         nn.Sequential(
             *[
                 nn.Sequential(
-                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
-                    if batch_norm
-                    else nn.Identity(),
-                    init_selu(
-                        nn.Conv2d(
-                            hidden_channels * (2 ** block_idx),
-                            hidden_channels * (2 ** (block_idx + 1)),
-                            1,
-                        )
-                    ),
-                    Residual(
-                        nn.Sequential(
-                            *[
-                                nn.Sequential(
-                                    nn.BatchNorm2d(
-                                        hidden_channels * (2 ** (block_idx + 1))
+                    nn.Sequential(
+                        Residual2d(
+                            in_channels=hidden_channels
+                            * (2 ** np.maximum(0, block_idx - 1)),
+                            out_channels=hidden_channels * (2 ** block_idx),
+                            module=nn.Sequential(
+                                nn.BatchNorm2d(
+                                    hidden_channels
+                                    * (2 ** np.maximum(0, block_idx - 1))
+                                )
+                                if batch_norm
+                                else nn.Identity(),
+                                init_selu(
+                                    nn.Conv2d(
+                                        hidden_channels
+                                        * (2 ** np.maximum(0, block_idx - 1)),
+                                        hidden_channels * (2 ** block_idx),
+                                        kernel_size=3,
+                                        padding=1,
                                     )
+                                ),
+                                nn.SELU(),
+                                nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
+                                if batch_norm
+                                else nn.Identity(),
+                                init_selu(
+                                    nn.Conv2d(
+                                        hidden_channels * (2 ** block_idx),
+                                        hidden_channels * (2 ** block_idx),
+                                        kernel_size=3,
+                                        padding=1,
+                                    )
+                                ),
+                                nn.SELU(),
+                            ),
+                        ),
+                        *[
+                            Residual2d(
+                                in_channels=hidden_channels * (2 ** block_idx),
+                                out_channels=hidden_channels * (2 ** block_idx),
+                                module=nn.Sequential(
+                                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
                                     if batch_norm
                                     else nn.Identity(),
                                     init_selu(
                                         nn.Conv2d(
-                                            hidden_channels * (2 ** (block_idx + 1)),
-                                            hidden_channels * (2 ** (block_idx + 1)),
+                                            hidden_channels * (2 ** block_idx),
+                                            hidden_channels * (2 ** block_idx),
                                             kernel_size=3,
                                             padding=1,
                                         )
                                     ),
                                     nn.SELU(),
-                                )
-                                for _ in range(num_layers)
-                            ]
+                                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
+                                    if batch_norm
+                                    else nn.Identity(),
+                                    init_selu(
+                                        nn.Conv2d(
+                                            hidden_channels * (2 ** block_idx),
+                                            hidden_channels * (2 ** block_idx),
+                                            kernel_size=3,
+                                            padding=1,
+                                        )
+                                    ),
+                                    nn.SELU(),
+                                ),
+                            )
+                            for _ in range(num_layers - 1)
+                        ],
+                    ),
+                    init_selu(
+                        nn.Conv2d(
+                            hidden_channels * (2 ** block_idx),
+                            hidden_channels * (2 ** block_idx),
+                            3,
+                            stride=2,
+                            padding=1,
                         )
                     ),
-                    VarPool2d(2),
+                    nn.SELU(),
                 )
-                for block_idx in range(n_blocks)
+                for block_idx in range(num_blocks)
             ]
         ),
-        nn.BatchNorm2d(hidden_channels * (2 ** n_blocks))
+        nn.BatchNorm2d(hidden_channels * (2 ** (num_blocks - 1)))
         if batch_norm
         else nn.Identity(),
-        init_selu(nn.Conv2d(hidden_channels * (2 ** n_blocks), out_channels, 1)),
+        init_selu(
+            nn.Conv2d(hidden_channels * (2 ** (num_blocks - 1)), out_channels, 1)
+        ),
         GlobalVarPool2d() if global_pooling else nn.Identity(),
     )
 

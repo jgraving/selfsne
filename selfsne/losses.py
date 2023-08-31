@@ -175,6 +175,7 @@ class LikelihoodRatioEstimator(nn.Module):
         num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
         symmetric_negatives: bool = False,
+        remove_neg_diagonal: bool = True,
     ) -> None:
 
         super().__init__()
@@ -201,6 +202,7 @@ class LikelihoodRatioEstimator(nn.Module):
         self.embedding_decay = embedding_decay
         self.inverse_temperature = 1 / temperature
         self.symmetric_negatives = symmetric_negatives
+        self.remove_neg_diagonal = remove_neg_diagonal
 
     def forward(
         self,
@@ -243,10 +245,16 @@ class LikelihoodRatioEstimator(nn.Module):
 
         logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
-        neg_logits = remove_diagonal(logits)
+        neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
         if self.symmetric_negatives:
             logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
-            neg_logits = torch.cat([neg_logits, remove_diagonal(logits)], dim=-1)
+            neg_logits = torch.cat(
+                [
+                    neg_logits,
+                    remove_diagonal(logits) if self.remove_neg_diagonal else logits,
+                ],
+                dim=-1,
+            )
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
         log_baseline = self.baseline(logits=neg_logits, y=y, z_y=z_y)
@@ -291,6 +299,7 @@ class TRELLIS(nn.Module):
         num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
         symmetric_negatives: bool = False,
+        remove_neg_diagonal: bool = True,
     ) -> None:
 
         super().__init__()
@@ -324,6 +333,7 @@ class TRELLIS(nn.Module):
             self.register_buffer(
                 "alphas", torch.linspace(0, 1, self.num_waymarks + 2)[1:-1]
             )
+        self.remove_neg_diagonal = remove_neg_diagonal
 
     def forward(
         self,
@@ -340,10 +350,16 @@ class TRELLIS(nn.Module):
 
         logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
-        neg_logits = remove_diagonal(logits)
+        neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
         if self.symmetric_negatives:
             logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
-            neg_logits = torch.cat([neg_logits, remove_diagonal(logits)], dim=-1)
+            neg_logits = torch.cat(
+                [
+                    neg_logits,
+                    remove_diagonal(logits) if self.remove_neg_diagonal else logits,
+                ],
+                dim=-1,
+            )
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
         if self.num_estimators > 1:

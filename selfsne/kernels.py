@@ -340,7 +340,7 @@ def pairwise_von_mises(
     eps = torch.finfo(x1.dtype).eps
     x1_norm = x1.norm(dim=-1, keepdim=True)
     x2_norm = x2.norm(dim=-1, keepdim=True)
-    return pairwise_inner_product(x1_norm, x2_norm, scale) / (
+    return pairwise_inner_product(x1, x2, scale) / (
         x1_norm @ x2_norm.T
     ).clamp(min=eps)
 

@@ -202,6 +202,17 @@ class Bias(torch.nn.Module):
         return x + self.bias
 
 
+class ProjectedBias(nn.Module):
+    def __init__(self, num_features: int, param_dim: int):
+        super(ProjectedBias, self).__init__()
+        self.param = nn.Parameter(torch.randn(num_features, param_dim))
+        self.projection = init_selu(nn.Linear(param_dim, 1))
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        bias = self.projection(self.param).expand_as(input)
+        return input + bias
+
+
 class PairSampler(nn.Module):
     def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
         super().__init__()

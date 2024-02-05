@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from selfsne.utils import logmeanexp
+from selfsne.utils import logmeanexp, straight_through_estimator
 
 
 def density_ratio(pos_logits, neg_logits):
@@ -29,22 +29,23 @@ def density_ratio(pos_logits, neg_logits):
     return attraction, repulsion
 
 
+def total_variation_distance(pos_logits, neg_logits):
+    f_prime_pos = straight_through_estimator(
+        pos_logits, (pos_logits > 0) * 0.5 - (pos_logits <= 0) * 0.5
+    )
+    f_prime_neg = straight_through_estimator(
+        neg_logits, (neg_logits > 0) * 0.5 - (neg_logits <= 0) * 0.5
+    )
+
+    attraction = -f_prime_pos.mean()
+    repulsion = (neg_logits.exp() * f_prime_neg - 0.5 * neg_logits.expm1().abs()).mean()
+
+    return attraction, repulsion
+
+
 def wasserstein(pos_logits, neg_logits):
     attraction = -pos_logits.mean()
     repulsion = neg_logits.mean()
-    return attraction, repulsion
-
-
-def binary_cross_entropy(pos_logits, neg_logits):
-    attraction = -F.logsigmoid(pos_logits).mean()
-    repulsion = -F.logsigmoid(-neg_logits).mean()
-    return attraction, repulsion
-
-
-def jensen_shannon_divergence(pos_logits, neg_logits):
-    attraction, repulsion = binary_cross_entropy(pos_logits, neg_logits)
-    attraction = 2 * attraction - np.log(4)
-    repulsion = 2 * repulsion - np.log(4)
     return attraction, repulsion
 
 
@@ -107,6 +108,19 @@ class AlphaNCE(BaseNCE):
 
     def forward(self, pos_logits, neg_logits):
         return self.divergence(pos_logits, neg_logits)
+
+
+def binary_cross_entropy(pos_logits, neg_logits):
+    attraction = -F.logsigmoid(pos_logits).mean()
+    repulsion = -F.logsigmoid(-neg_logits).mean()
+    return attraction, repulsion
+
+
+def jensen_shannon_divergence(pos_logits, neg_logits):
+    attraction, repulsion = binary_cross_entropy(pos_logits, neg_logits)
+    attraction = 2 * attraction - np.log(4)
+    repulsion = 2 * repulsion - np.log(4)
+    return attraction, repulsion
 
 
 def kullback_leibler_divergence(pos_logits, neg_logits):

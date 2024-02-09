@@ -57,6 +57,10 @@ class Residual(nn.Module):
         return (self.residual(x) + self.module(x)) * RSQRT2
 
 
+def ParametricResidual(in_features, out_features, module):
+    return Residual(module, init_selu(nn.Linear(in_features, out_features)))
+
+
 def Residual1d(in_features, out_features, module):
     return Residual(
         module,

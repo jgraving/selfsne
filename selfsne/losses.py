@@ -68,36 +68,67 @@ from typing import Optional, Union, Tuple, List, Callable
 from copy import deepcopy
 
 
+# def classifier_metrics(pos_logits, neg_logits):
+#     """
+#     Calculates accuracy, recall, and precision given positive and negative logits.
+
+#     Args:
+#         pos_logits (torch.Tensor): A tensor of positive logits of shape (batch_size,).
+#         neg_logits (torch.Tensor): A tensor of negative logits of shape (batch_size,).
+#         threshold (float): A threshold to convert logits to binary predictions. Defaults to 0.5.
+
+#     Returns:
+#         accuracy (float): The accuracy score
+#         recall (float): The recall score.
+#         precision (float): The precision score.
+#     """
+#     # Combine positive and negative logits
+#     logits = torch.cat((pos_logits, neg_logits), dim=0)
+
+#     # Create binary labels (1 for positive, 0 for negative)
+#     target = torch.cat(
+#         (
+#             torch.ones_like(pos_logits, dtype=torch.long, device=logits.device),
+#             torch.zeros_like(neg_logits, dtype=torch.long, device=logits.device),
+#         ),
+#         dim=0,
+#     )
+#     return (
+#         binary_accuracy(logits, target),
+#         binary_recall(logits, target),
+#         binary_precision(logits, target),
+#     )
+
+
 def classifier_metrics(pos_logits, neg_logits):
     """
-    Calculates accuracy, recall, and precision given positive and negative logits.
+    Calculates probabilistic accuracy, recall, and precision given positive and negative logits.
 
     Args:
-        pos_logits (torch.Tensor): A tensor of positive logits of shape (batch_size,).
-        neg_logits (torch.Tensor): A tensor of negative logits of shape (batch_size,).
-        threshold (float): A threshold to convert logits to binary predictions. Defaults to 0.5.
+        pos_logits (torch.Tensor): A tensor of logits for the positive class of shape (batch_size,).
+        neg_logits (torch.Tensor): A tensor of logits for the negative class of shape (batch_size,).
 
     Returns:
-        accuracy (float): The accuracy score
-        recall (float): The recall score.
-        precision (float): The precision score.
+        accuracy (float): The probabilistic accuracy score.
+        recall (float): The probabilistic recall score.
+        precision (float): The probabilistic precision score.
     """
-    # Combine positive and negative logits
-    logits = torch.cat((pos_logits, neg_logits), dim=0)
+    # Convert logits to probabilities using the sigmoid function
+    pos_probs = torch.sigmoid(pos_logits)
+    neg_probs = torch.sigmoid(neg_logits)
+    
+    # Calculate expected probabilities for TP, FP, TN, FN
+    TP = pos_probs.mean()
+    FP = neg_probs.mean()
+    TN = (1 - neg_probs).mean()
+    FN = (1 - pos_probs).mean()
+    
+    # Calculate metrics based on probabilistic definitions
+    accuracy = (TP + TN) / 2
+    precision = TP / (TP + FP)
+    recall = TP  # Simplifies TP / (TP + FN) = TP / 1 where FN = (1 - TP)
 
-    # Create binary labels (1 for positive, 0 for negative)
-    target = torch.cat(
-        (
-            torch.ones_like(pos_logits, dtype=torch.long, device=logits.device),
-            torch.zeros_like(neg_logits, dtype=torch.long, device=logits.device),
-        ),
-        dim=0,
-    )
-    return (
-        binary_accuracy(logits, target),
-        binary_recall(logits, target),
-        binary_precision(logits, target),
-    )
+    return accuracy, recall, precision
 
 
 class LikelihoodRatioEstimator(nn.Module):

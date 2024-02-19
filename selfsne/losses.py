@@ -126,9 +126,11 @@ def classifier_metrics(pos_logits, neg_logits):
     # Calculate metrics based on probabilistic definitions
     accuracy = (TP + TN) / 2
     precision = TP / (TP + FP)
+    npv = TN / (TN + FN)
     recall = TP  # Simplifies TP / (TP + FN) = TP / 1 where FN = (1 - TP)
+    spec = TN
 
-    return accuracy, recall, precision
+    return accuracy, recall, precision, spec, npv
 
 
 class LikelihoodRatioEstimator(nn.Module):
@@ -296,7 +298,7 @@ class LikelihoodRatioEstimator(nn.Module):
         rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](pos_logits, neg_logits)
         jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
         with torch.no_grad():
-            accuracy, recall, precision = classifier_metrics(
+            accuracy, recall, precision, spec, npv = classifier_metrics(
                 pos_logits.flatten(), neg_logits.flatten()
             )
         return (
@@ -310,6 +312,8 @@ class LikelihoodRatioEstimator(nn.Module):
             accuracy,
             recall,
             precision,
+            spec,
+            npv,
             log_baseline.mean(),
             attraction.mean() + repulsion.mean() + embedding_decay,
         )

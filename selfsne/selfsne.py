@@ -260,6 +260,8 @@ class SelfSNE(pl.LightningModule):
                 accuracy,
                 recall,
                 precision,
+                spec,
+                npv,
                 log_baseline,
                 similarity,
             ) = self.similarity_loss(z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y)
@@ -275,6 +277,8 @@ class SelfSNE(pl.LightningModule):
             self.log(mode + "accuracy", accuracy.item(), prog_bar=True)
             self.log(mode + "recall", recall.item(), prog_bar=True)
             self.log(mode + "precision", precision.item(), prog_bar=True)
+            self.log(mode + "specificity", spec.item(), prog_bar=True)
+            self.log(mode + "NPV", npv.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)

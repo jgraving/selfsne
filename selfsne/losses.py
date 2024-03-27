@@ -290,7 +290,7 @@ class LikelihoodRatioEstimator(nn.Module):
             )
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-        log_baseline = self.baseline(logits=neg_logits, y=y, z_y=z_y)
+        log_baseline = self.baseline(pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y)
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)

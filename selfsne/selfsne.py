@@ -278,7 +278,7 @@ class SelfSNE(pl.LightningModule):
             self.log(mode + "recall", recall.item(), prog_bar=True)
             self.log(mode + "precision", precision.item(), prog_bar=True)
             self.log(mode + "specificity", spec.item(), prog_bar=True)
-            self.log(mode + "NPV", npv.item(), prog_bar=True)
+            self.log(mode + "npv", npv.item(), prog_bar=True)
 
         if self.redundancy_loss is not None:
             redundancy = self.redundancy_loss(z_x, z_y)

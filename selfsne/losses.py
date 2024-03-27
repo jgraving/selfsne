@@ -102,7 +102,7 @@ from copy import deepcopy
 
 def classifier_metrics(pos_logits, neg_logits):
     """
-    Calculates probabilistic accuracy, recall, and precision given positive and negative logits.
+    Calculates probabilistic accuracy, recall/sensitivity, precision/PPV, NPV, and specificity given positive and negative logits.
 
     Args:
         pos_logits (torch.Tensor): A tensor of logits for the positive class of shape (batch_size,).

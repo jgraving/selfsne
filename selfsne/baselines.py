@@ -628,3 +628,28 @@ BASELINES = {
     "parametric": ParametricBaseline,
     "constant": ConstantBaseline,
 }
+
+
+def baseline_factory(baseline_key, divergence_key):
+    if baseline_key in ["parametric", "constant"]:
+        modified_baseline_key = baseline_key
+    else:
+        divergence_to_prefix = {
+            "kld": "",  # kld baselines use no prefix
+            "rkld": "reverse_",
+            "jsd": "harmonic_",
+            "hellinger": "geometric_",
+            "jeffreys": "arithmetic_",
+        }
+
+        prefix = divergence_to_prefix.get(divergence_key)
+        if prefix is None:
+            raise ValueError(f"Unsupported divergence key: {divergence_key}")
+
+        modified_baseline_key = f"{prefix}{baseline_key}"
+
+    baseline_class = BASELINES.get(modified_baseline_key)
+    if not baseline_class:
+        raise ValueError(f"No baseline found for key: {modified_baseline_key}")
+
+    return baseline_class

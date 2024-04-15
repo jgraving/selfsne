@@ -637,9 +637,7 @@ def baseline_factory(baseline_key, divergence_key):
         divergence_to_prefix = {
             "kld": "",  # kld baselines use no prefix
             "rkld": "reverse_",
-            "jsd": "harmonic_",
-            "hellinger": "geometric_",
-            "jeffreys": "arithmetic_",
+            "jsd": "geometric_",
         }
 
         prefix = divergence_to_prefix.get(divergence_key)

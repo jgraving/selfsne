@@ -181,13 +181,13 @@ class ReverseBatchConditionalBaseline(nn.Module):
 
 class ParametricBaseline(nn.Module):
     def __init__(
-        self, param_dim: int = 256, activation: Optional[nn.Module] = nn.LogSigmoid()
+        self, param_dim: int = 256, activation: Optional[nn.Module] = nn.Identity()
     ):
         """
         Initializes a parametric baseline module.
 
         Args:
-            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
+            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.Identity().
         """
         super().__init__()
         self.param = nn.Parameter(torch.randn(1, param_dim))
@@ -240,7 +240,7 @@ class ParametricConditionalBaseline(nn.Module):
         self,
         encoder: nn.Module,
         embedding_input: bool = True,
-        activation: Optional[nn.Module] = nn.LogSigmoid(),
+        activation: Optional[nn.Module] = nn.Identity(),
     ):
         """
         Initializes a parametric conditional baseline module.
@@ -248,7 +248,7 @@ class ParametricConditionalBaseline(nn.Module):
         Args:
             encoder (nn.Module): Encoder module to encode the input tensor y.
             embedding_input (bool, optional): Whether to pass embedded data z_y to the encoder instead of data y. Defaults to True.
-            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.LogSigmoid().
+            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.Identity().
         """
         super().__init__()
         self.encoder = encoder

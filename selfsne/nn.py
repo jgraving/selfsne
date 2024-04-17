@@ -60,6 +60,15 @@ class Residual(nn.Module):
         else:
             return self.module(x)
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Ensure that use_residual exists with a default value of True
+        if "use_residual" not in state:
+            self.use_residual = True
+            self.residual = (
+                self.residual if self.residual is not None else nn.Identity()
+            )
+
 
 def ParametricResidual(in_features, out_features, module, use_residual=True):
     return Residual(

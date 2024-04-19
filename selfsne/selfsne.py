@@ -263,6 +263,8 @@ class SelfSNE(pl.LightningModule):
                 spec,
                 npv,
                 log_baseline,
+                inverse_temperature,
+                kernel_scale,
                 similarity,
             ) = self.similarity_loss(z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y)
             self.log(mode + "similarity", similarity.item(), prog_bar=True)
@@ -272,6 +274,8 @@ class SelfSNE(pl.LightningModule):
             self.log(mode + "rkld", rkld.item(), prog_bar=True)
             self.log(mode + "jsd", jsd.item(), prog_bar=True)
             self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
+            self.log(mode + "kernel_temp", 1/inverse_temperature.item(), prog_bar=True)
+            self.log(mode + "kernel_scale", kernel_scale.item(), prog_bar=True)
             self.log(mode + "pos_prob", pos_prob.item(), prog_bar=True)
             self.log(mode + "neg_prob", neg_prob.item(), prog_bar=True)
             self.log(mode + "accuracy", accuracy.item(), prog_bar=True)

@@ -116,13 +116,13 @@ def classifier_metrics(pos_logits, neg_logits):
     # Convert logits to probabilities using the sigmoid function
     pos_probs = torch.sigmoid(pos_logits)
     neg_probs = torch.sigmoid(neg_logits)
-    
+
     # Calculate expected probabilities for TP, FP, TN, FN
     TP = pos_probs.mean()
     FP = neg_probs.mean()
     TN = (1 - neg_probs).mean()
     FN = (1 - pos_probs).mean()
-    
+
     # Calculate metrics based on probabilistic definitions
     accuracy = (TP + TN) / 2
     precision = TP / (TP + FP)
@@ -151,9 +151,10 @@ class LikelihoodRatioEstimator(nn.Module):
             For example, "cauchy" can be used to produce t-SNE or UMAP embeddings, "normal" can be used to
             produce SNE embeddings, and "vonmises" can be used for (hyper)spherical embeddings.
         kernel_scale (Union[float, str]): Positive scale value for calculating logits.
-            For loc-scale family kernels sqrt(embedding_dims) is recommended,
-            which is calculated automatically when kernel_scale = "auto". Default is 1.0.
-        temperature (float): The temperature for the logits. Larger values create more uniform embeddings. Default is 1.
+            Can also be "parametric" to learn the scale as part of the model. Default is 1.0.
+        temperature (Union[float, str]): The temperature for the logits. Larger values create more
+            uniform embeddings. Can also be "parametric" to learn the temperature as part of the model.
+            Default is 1.0.
         divergence (Union[str, callable]): Divergence function used for instance classification.
             Must be one of selfsne.divergences.DIVERGENCES or a callable that takes in two 2D tensors and returns a scalar.
         baseline (Union[str, float, callable]): The baseline for calculating the log density ratio.
@@ -202,7 +203,7 @@ class LikelihoodRatioEstimator(nn.Module):
         self,
         kernel: Union[str, callable] = "cauchy",
         kernel_scale: Union[float, str] = 1.0,
-        temperature: float = 1,
+        temperature: float = 1.0,
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = "batch",
         num_negatives: Optional[int] = None,
@@ -217,8 +218,6 @@ class LikelihoodRatioEstimator(nn.Module):
         else:
             self.kernel = kernel
 
-        self.kernel_scale = kernel_scale
-
         if isinstance(divergence, str):
             self.divergence = DIVERGENCES[divergence]
         else:
@@ -231,9 +230,33 @@ class LikelihoodRatioEstimator(nn.Module):
         else:
             self.baseline = baseline
 
+        if isinstance(temperature, str):
+            if temperature == "parametric":
+                self.temperature = BASELINES["parametric"](activation=nn.Softplus())
+            else:
+                raise ValueError(
+                    "Invalid string value for temperature. Only 'parametric' is allowed."
+                )
+        elif isinstance(temperature, (int, float)):
+            self.temperature = BASELINES["constant"](1 / float(temperature))
+        else:
+            self.temperature = temperature  # You might consider adding validation or handling for other types
+
+        # Check and set kernel_scale based on type
+        if isinstance(kernel_scale, str):
+            if kernel_scale == "parametric":
+                self.kernel_scale = BASELINES["parametric"](activation=nn.Softplus())
+            else:
+                raise ValueError(
+                    "Invalid string value for kernel_scale. Only 'parametric' is allowed."
+                )
+        elif isinstance(kernel_scale, (int, float)):
+            self.kernel_scale = BASELINES["constant"](float(kernel_scale))
+        else:
+            self.kernel_scale = kernel_scale  # Similar to temperature, consider validation or handling for other types
+
         self.num_negatives = num_negatives
         self.embedding_decay = embedding_decay
-        self.inverse_temperature = 1 / temperature
         self.symmetric_negatives = symmetric_negatives
         self.remove_neg_diagonal = remove_neg_diagonal
 
@@ -272,15 +295,15 @@ class LikelihoodRatioEstimator(nn.Module):
 
         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
-        if self.kernel_scale == "auto":
-            embedding_features = z_x.shape[1]
-            self.kernel_scale = np.sqrt(embedding_features)
+        kernel_scale = self.kernel_scale()
+        inverse_temperature = self.temperature()
 
-        logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
+        logits = self.kernel(z_y, z_x, kernel_scale) * inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
+
         if self.symmetric_negatives:
-            logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
+            logits = self.kernel(z_y, z_y, kernel_scale) * inverse_temperature
             neg_logits = torch.cat(
                 [
                     neg_logits,
@@ -288,16 +311,23 @@ class LikelihoodRatioEstimator(nn.Module):
                 ],
                 dim=-1,
             )
+
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-        log_baseline = self.baseline(pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y)
+        log_baseline = self.baseline(
+            pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
+        )
+
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
-        kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
-        rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](pos_logits, neg_logits)
-        jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
+
         with torch.no_grad():
+            kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
+            rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](
+                pos_logits, neg_logits
+            )
+            jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
             accuracy, recall, precision, spec, npv = classifier_metrics(
                 pos_logits.flatten(), neg_logits.flatten()
             )
@@ -315,6 +345,8 @@ class LikelihoodRatioEstimator(nn.Module):
             spec,
             npv,
             log_baseline.mean(),
+            inverse_temperature.mean(),
+            kernel_scale.mean(),
             attraction.mean() + repulsion.mean() + embedding_decay,
         )
 
@@ -322,148 +354,148 @@ class LikelihoodRatioEstimator(nn.Module):
 DensityRatioEstimator = LikelihoodRatioEstimator
 
 
-class TRELLIS(nn.Module):
-    def __init__(
-        self,
-        num_waymarks: int = 1,
-        kernel: Union[str, callable] = "cauchy",
-        kernel_scale: Union[float, str] = 1.0,
-        temperature: float = 1,
-        divergence: Union[str, callable] = "kld",
-        baseline: Union[str, float, callable] = "batch",
-        num_negatives: Optional[int] = None,
-        embedding_decay: float = 0,
-        symmetric_negatives: bool = False,
-        remove_neg_diagonal: bool = True,
-    ) -> None:
+# class TRELLIS(nn.Module):
+#     def __init__(
+#         self,
+#         num_waymarks: int = 1,
+#         kernel: Union[str, callable] = "cauchy",
+#         kernel_scale: Union[float, str] = 1.0,
+#         temperature: float = 1,
+#         divergence: Union[str, callable] = "kld",
+#         baseline: Union[str, float, callable] = "batch",
+#         num_negatives: Optional[int] = None,
+#         embedding_decay: float = 0,
+#         symmetric_negatives: bool = False,
+#         remove_neg_diagonal: bool = True,
+#     ) -> None:
 
-        super().__init__()
-        self.num_waymarks = num_waymarks
-        self.num_estimators = num_waymarks + 1
-        if isinstance(kernel, str):
-            self.kernel = PAIRWISE_KERNELS[kernel]
-        else:
-            self.kernel = kernel
+#         super().__init__()
+#         self.num_waymarks = num_waymarks
+#         self.num_estimators = num_waymarks + 1
+#         if isinstance(kernel, str):
+#             self.kernel = PAIRWISE_KERNELS[kernel]
+#         else:
+#             self.kernel = kernel
 
-        self.kernel_scale = kernel_scale
+#         self.kernel_scale = kernel_scale
 
-        if isinstance(divergence, str):
-            self.divergence = DIVERGENCES[divergence]
-        else:
-            self.divergence = divergence
+#         if isinstance(divergence, str):
+#             self.divergence = DIVERGENCES[divergence]
+#         else:
+#             self.divergence = divergence
 
-        if isinstance(baseline, str):
-            baseline = BASELINES[baseline]()
-        elif isinstance(baseline, (int, float)):
-            baseline = BASELINES["constant"](baseline)
+#         if isinstance(baseline, str):
+#             baseline = BASELINES[baseline]()
+#         elif isinstance(baseline, (int, float)):
+#             baseline = BASELINES["constant"](baseline)
 
-        self.baselines = ModuleList(
-            [deepcopy(baseline) for _ in range(self.num_estimators)]
-        )
-        self.num_negatives = num_negatives
-        self.symmetric_negatives = symmetric_negatives
-        self.embedding_decay = embedding_decay
-        self.inverse_temperature = 1 / temperature
-        if self.num_estimators > 1:
-            self.register_buffer(
-                "alphas", torch.linspace(0, 1, self.num_waymarks + 2)[1:-1]
-            )
-        self.remove_neg_diagonal = remove_neg_diagonal
+#         self.baselines = ModuleList(
+#             [deepcopy(baseline) for _ in range(self.num_estimators)]
+#         )
+#         self.num_negatives = num_negatives
+#         self.symmetric_negatives = symmetric_negatives
+#         self.embedding_decay = embedding_decay
+#         self.inverse_temperature = 1 / temperature
+#         if self.num_estimators > 1:
+#             self.register_buffer(
+#                 "alphas", torch.linspace(0, 1, self.num_waymarks + 2)[1:-1]
+#             )
+#         self.remove_neg_diagonal = remove_neg_diagonal
 
-    def forward(
-        self,
-        z_x: torch.Tensor,
-        z_y: torch.Tensor,
-        y: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor]:
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
+#     def forward(
+#         self,
+#         z_x: torch.Tensor,
+#         z_y: torch.Tensor,
+#         y: Optional[torch.Tensor] = None,
+#         **kwargs,
+#     ) -> Tuple[torch.Tensor]:
+#         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
-        if self.kernel_scale == "auto":
-            embedding_features = z_x.shape[1]
-            self.kernel_scale = np.sqrt(embedding_features)
+#         if self.kernel_scale == "auto":
+#             embedding_features = z_x.shape[1]
+#             self.kernel_scale = np.sqrt(embedding_features)
 
-        logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
-        pos_logits = diagonal(logits).unsqueeze(1)
-        neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
-        if self.symmetric_negatives:
-            logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
-            neg_logits = torch.cat(
-                [
-                    neg_logits,
-                    remove_diagonal(logits) if self.remove_neg_diagonal else logits,
-                ],
-                dim=-1,
-            )
-        if self.num_negatives:
-            neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-        if self.num_estimators > 1:
-            waymark_logits = log_lerp(
-                pos_logits, neg_logits, self.alphas.view(-1, 1, 1)
-            )
-            waymark_logits = torch.cat(
-                [
-                    pos_logits.expand_as(waymark_logits[0, None]),
-                    waymark_logits,
-                    neg_logits.expand_as(waymark_logits[0, None]),
-                ],
-                dim=0,
-            )
-            log_baselines = [
-                self.baselines[idx](
-                    logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
-                )
-                for idx in range(self.num_estimators)
-            ]
-        else:
-            waymark_logits = torch.stack(
-                [
-                    pos_logits.expand_as(neg_logits),
-                    neg_logits,
-                ],
-                dim=0,
-            )
-            log_baselines = [
-                self.baselines[idx](
-                    logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
-                )
-                for idx in range(self.num_estimators)
-            ]
+#         logits = self.kernel(z_y, z_x, self.kernel_scale) * self.inverse_temperature
+#         pos_logits = diagonal(logits).unsqueeze(1)
+#         neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
+#         if self.symmetric_negatives:
+#             logits = self.kernel(z_y, z_y, self.kernel_scale) * self.inverse_temperature
+#             neg_logits = torch.cat(
+#                 [
+#                     neg_logits,
+#                     remove_diagonal(logits) if self.remove_neg_diagonal else logits,
+#                 ],
+#                 dim=-1,
+#             )
+#         if self.num_negatives:
+#             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
+#         if self.num_estimators > 1:
+#             waymark_logits = log_lerp(
+#                 pos_logits, neg_logits, self.alphas.view(-1, 1, 1)
+#             )
+#             waymark_logits = torch.cat(
+#                 [
+#                     pos_logits.expand_as(waymark_logits[0, None]),
+#                     waymark_logits,
+#                     neg_logits.expand_as(waymark_logits[0, None]),
+#                 ],
+#                 dim=0,
+#             )
+#             log_baselines = [
+#                 self.baselines[idx](
+#                     logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
+#                 )
+#                 for idx in range(self.num_estimators)
+#             ]
+#         else:
+#             waymark_logits = torch.stack(
+#                 [
+#                     pos_logits.expand_as(neg_logits),
+#                     neg_logits,
+#                 ],
+#                 dim=0,
+#             )
+#             log_baselines = [
+#                 self.baselines[idx](
+#                     logits=waymark_logits[idx + 1], y=y, z_y=z_y.squeeze(1)
+#                 )
+#                 for idx in range(self.num_estimators)
+#             ]
 
-        global_pos_logits = 0
-        global_neg_logits = 0
-        global_attraction = 0
-        global_repulsion = 0
-        global_log_baseline = 0
+#         global_pos_logits = 0
+#         global_neg_logits = 0
+#         global_attraction = 0
+#         global_repulsion = 0
+#         global_log_baseline = 0
 
-        for idx in range(self.num_estimators):
-            local_log_baseline = log_baselines[idx]
-            local_pos_logits = waymark_logits[idx] - local_log_baseline
-            local_neg_logits = waymark_logits[idx + 1] - local_log_baseline
-            local_attraction, local_repulsion = self.divergence(
-                local_pos_logits, local_neg_logits
-            )
-            global_pos_logits = global_pos_logits + local_pos_logits
-            global_neg_logits = global_neg_logits + local_neg_logits
-            global_attraction = global_attraction + local_attraction
-            global_repulsion = global_repulsion + local_repulsion
-            global_log_baseline = global_log_baseline + local_log_baseline
+#         for idx in range(self.num_estimators):
+#             local_log_baseline = log_baselines[idx]
+#             local_pos_logits = waymark_logits[idx] - local_log_baseline
+#             local_neg_logits = waymark_logits[idx + 1] - local_log_baseline
+#             local_attraction, local_repulsion = self.divergence(
+#                 local_pos_logits, local_neg_logits
+#             )
+#             global_pos_logits = global_pos_logits + local_pos_logits
+#             global_neg_logits = global_neg_logits + local_neg_logits
+#             global_attraction = global_attraction + local_attraction
+#             global_repulsion = global_repulsion + local_repulsion
+#             global_log_baseline = global_log_baseline + local_log_baseline
 
-        with torch.no_grad():
-            accuracy, recall, precision = classifier_metrics(
-                logmeanexp(global_pos_logits, -1).flatten(), global_neg_logits.flatten()
-            )
-        return (
-            global_pos_logits.mean(),
-            global_neg_logits.mean(),
-            global_pos_logits.sigmoid().mean(),
-            global_neg_logits.sigmoid().mean(),
-            accuracy,
-            recall,
-            precision,
-            global_log_baseline.mean(),
-            global_attraction.mean() + global_repulsion.mean() + embedding_decay,
-        )
+#         with torch.no_grad():
+#             accuracy, recall, precision = classifier_metrics(
+#                 logmeanexp(global_pos_logits, -1).flatten(), global_neg_logits.flatten()
+#             )
+#         return (
+#             global_pos_logits.mean(),
+#             global_neg_logits.mean(),
+#             global_pos_logits.sigmoid().mean(),
+#             global_neg_logits.sigmoid().mean(),
+#             accuracy,
+#             recall,
+#             precision,
+#             global_log_baseline.mean(),
+#             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
+#         )
 
 
 class EncoderProjectorLoss(nn.Module):

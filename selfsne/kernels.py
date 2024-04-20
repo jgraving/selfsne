@@ -67,7 +67,6 @@ def studentt(
     x1: torch.Tensor,
     x2: torch.Tensor,
     scale: Union[float, torch.Tensor] = 1.0,
-    df: Union[float, torch.Tensor] = 1.0,
 ) -> torch.Tensor:
     """
     Computes the log Student's t kernel between two sets of points x1 and x2, with a given scale.
@@ -84,14 +83,13 @@ def studentt(
         torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).pow(2).sum(-1).div(df * scale ** 2).log1p().neg() * (df + 1) / 2
+    return (x1 - x2).pow(2).sum(-1).div(scale).log1p().neg() * (scale + 1) / 2
 
 
 def pairwise_studentt(
     x1: torch.Tensor,
     x2: torch.Tensor,
     scale: Union[float, torch.Tensor] = 1.0,
-    df: Union[float, torch.Tensor] = 1.0,
 ) -> torch.Tensor:
     """
     Computes the pairwise log Student's t kernel between two sets of points x1 and x2, with a given scale.
@@ -109,7 +107,7 @@ def pairwise_studentt(
 
     """
     return (
-        torch.cdist(x1, x2, p=2).div(scale).pow(2).div(df).log1p().neg() * (df + 1) / 2
+        torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + 1) / 2
     )
 
 

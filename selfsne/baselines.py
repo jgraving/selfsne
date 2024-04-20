@@ -181,7 +181,7 @@ class ReverseBatchConditionalBaseline(nn.Module):
 
 class ParametricBaseline(nn.Module):
     def __init__(
-        self, param_dim: int = 256, activation: Optional[nn.Module] = nn.Identity()
+        self, param_dim: int = 1024, activation: Optional[nn.Module] = nn.Identity()
     ):
         """
         Initializes a parametric baseline module.

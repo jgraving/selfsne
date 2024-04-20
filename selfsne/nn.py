@@ -48,53 +48,37 @@ def init_selu(x):
 
 
 class Residual(nn.Module):
-    def __init__(self, module, residual=nn.Identity(), use_residual=True):
+    def __init__(self, module, residual=nn.Identity()):
         super().__init__()
         self.module = module
-        self.use_residual = use_residual
-        self.residual = residual if use_residual else None
+        self.residual = residual
 
     def forward(self, x):
-        if self.use_residual:
-            return (self.residual(x) + self.module(x)) * RSQRT2
-        else:
-            return self.module(x)
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        # Ensure that use_residual exists with a default value of True
-        if "use_residual" not in state:
-            self.use_residual = True
-            self.residual = (
-                self.residual if self.residual is not None else nn.Identity()
-            )
+        return (self.residual(x) + self.module(x)) * RSQRT2
 
 
-def ParametricResidual(in_features, out_features, module, use_residual=True):
+def ParametricResidual(in_features, out_features, module):
     return Residual(
         module,
         init_selu(nn.Linear(in_features, out_features)),
-        use_residual,
     )
 
 
-def Residual1d(in_features, out_features, module, use_residual=True):
+def Residual1d(in_features, out_features, module):
     return Residual(
         module,
         init_selu(nn.Linear(in_features, out_features))
         if in_features != out_features
         else nn.Identity(),
-        use_residual,
     )
 
 
-def Residual2d(in_channels, out_channels, module, use_residual=True):
+def Residual2d(in_channels, out_channels, module):
     return Residual(
         module,
         init_selu(nn.Conv2d(in_channels, out_channels, kernel_size=1))
         if in_channels != out_channels
         else nn.Identity(),
-        use_residual,
     )
 
 
@@ -538,7 +522,6 @@ def ResNet2d(
     batch_norm=False,
     input_stride=2,
     input_kernel=7,
-    use_residual=True,
 ):
     return nn.Sequential(
         init_selu(
@@ -589,7 +572,6 @@ def ResNet2d(
                                 ),
                                 nn.SELU(),
                             ),
-                            use_residual=use_residual,
                         ),
                         *[
                             Residual2d(
@@ -621,7 +603,6 @@ def ResNet2d(
                                     ),
                                     nn.SELU(),
                                 ),
-                                use_residual=use_residual,
                             )
                             for _ in range(num_layers - 1)
                         ],

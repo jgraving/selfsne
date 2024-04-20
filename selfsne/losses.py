@@ -295,8 +295,8 @@ class LikelihoodRatioEstimator(nn.Module):
 
         embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
 
-        kernel_scale = self.kernel_scale()
-        inverse_temperature = self.temperature()
+        kernel_scale = self.kernel_scale(z_y=z_y)
+        inverse_temperature = self.temperature(z_y=z_y)
 
         logits = self.kernel(z_y, z_x, kernel_scale) * inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)

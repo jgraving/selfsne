@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 import pytorch_lightning as pl
 import numpy as np
 
@@ -481,6 +483,26 @@ def sort_by_variance(embedding):
     sorted_embedding = embedding[:, indices]
 
     return sorted_embedding
+
+
+def check_directory_access(directory):
+    # Check if the directory exists
+    if not os.path.exists(directory):
+        return "Directory does not exist."
+
+    # Check if the directory is accessible
+    if not os.access(directory, os.F_OK):
+        return "Directory is not accessible."
+
+    # Check if the directory is readable
+    if not os.access(directory, os.R_OK):
+        return "Directory is not readable."
+
+    # Check if the directory is writable
+    if not os.access(directory, os.W_OK):
+        return "Directory is not writable."
+
+    return "Directory is accessible, readable, and writable."
 
 
 class Trainer(pl.Trainer):

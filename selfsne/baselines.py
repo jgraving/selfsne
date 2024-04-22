@@ -15,6 +15,7 @@
 
 import torch
 from torch import nn
+from torch.nn import init
 
 import numpy as np
 
@@ -181,7 +182,10 @@ class ReverseBatchConditionalBaseline(nn.Module):
 
 class ParametricBaseline(nn.Module):
     def __init__(
-        self, param_dim: int = 1024, activation: Optional[nn.Module] = nn.Identity()
+        self,
+        param_dim: int = 1024,
+        activation: Optional[nn.Module] = nn.Identity(),
+        bias_init: float = 0.0,  # Default bias initialization value
     ):
         """
         Initializes a parametric baseline module.
@@ -192,10 +196,10 @@ class ParametricBaseline(nn.Module):
         super().__init__()
         self.param = nn.Parameter(torch.randn(1, param_dim))
         self.projection = init_selu(nn.Linear(param_dim, 1))
-        if activation is None:
-            self.activation = nn.Identity()
-        else:
-            self.activation = activation
+        init.constant_(
+            self.projection.bias, bias_init
+        )  # Initializing bias to bias_init
+        self.activation = activation if activation is not None else nn.Identity()
 
     def forward(
         self,

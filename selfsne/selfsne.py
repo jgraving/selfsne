@@ -454,8 +454,8 @@ class SelfSNE(pl.LightningModule):
         else:
             return optimizer
 
-    def load_from_checkpoint(self, *args, **kwargs):
-        return super().load_from_checkpoint(*args, **kwargs, **self.kwargs)
+#     # def load_from_checkpoint(self, *args, **kwargs):
+#     #     return super().load_from_checkpoint(*args, **kwargs, **self.kwargs)
 
 
-SelfSNE.load_from_checkpoint.__doc__ = pl.LightningModule.load_from_checkpoint.__doc__
+# SelfSNE.load_from_checkpoint.__doc__ = pl.LightningModule.load_from_checkpoint.__doc__

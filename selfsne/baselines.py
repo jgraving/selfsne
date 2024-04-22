@@ -243,8 +243,10 @@ class ParametricConditionalBaseline(nn.Module):
     def __init__(
         self,
         encoder: nn.Module,
+        param_dim: int = 1024,
         embedding_input: bool = True,
         activation: Optional[nn.Module] = nn.Identity(),
+        bias_init: float = 0.0,  # Default bias initialization value
     ):
         """
         Initializes a parametric conditional baseline module.
@@ -256,11 +258,9 @@ class ParametricConditionalBaseline(nn.Module):
         """
         super().__init__()
         self.encoder = encoder
+        self.parametric_baseline = ParametricBaseline(param_dim, bias_init=bias_init)
         self.embedding_input = embedding_input
-        if activation is None:
-            self.activation = nn.Identity()
-        else:
-            self.activation = activation
+        self.activation = activation if activation is not None else nn.Identity()
 
     def forward(
         self,
@@ -284,7 +284,10 @@ class ParametricConditionalBaseline(nn.Module):
         else:
             assert y is not None, "y must be provided when embedding_input=False"
             encoded = self.encoder(y)
-        return self.activation(encoded)
+
+        scalar_baseline = self.parametric_baseline()
+
+        return self.activation(scalar_baseline + encoded)
 
 
 ConditionalBaseline = ParametricConditionalBaseline

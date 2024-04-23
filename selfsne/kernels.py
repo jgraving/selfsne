@@ -363,7 +363,7 @@ def wrapped_cauchy(
         torch.Tensor: The row-wise wrapped Cauchy kernel matrix, of shape (batch_size,).
 
     """
-    return (torch.cosh(scale) - von_mises(x1, x2, 1)).log().neg()
+    return (torch.sinh(scale)).log() - (torch.cosh(scale) - von_mises(x1, x2, 1)).log()
 
 
 def pairwise_wrapped_cauchy(

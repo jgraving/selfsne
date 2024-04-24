@@ -20,7 +20,6 @@ import numpy as np
 
 from typing import Union
 
-
 def laplace(
     x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
@@ -129,7 +128,7 @@ def cauchy(
         torch.Tensor: The row-wise Cauchy kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).pow(2).sum(-1).div(scale ** 2).log1p().neg()
+    return (x1 - x2).pow(2).sum(-1).div(scale ** 2).log1p().neg() - scale.log()
 
 
 def pairwise_cauchy(
@@ -150,7 +149,7 @@ def pairwise_cauchy(
         torch.Tensor: The pairwise Cauchy kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2, p=2).div(scale).pow(2).log1p().neg()
+    return torch.cdist(x1, x2, p=2).div(scale).pow(2).log1p().neg() - scale.log()
 
 
 def inverse(

@@ -200,24 +200,40 @@ class BatchCenter(nn.Module):
             return x - self.running_mean
 
 
-class Bias(torch.nn.Module):
-    def __init__(self, num_features):
-        super(Bias, self).__init__()
-        self.bias = torch.nn.Parameter(torch.zeros(1, num_features))
-
-    def forward(self, x):
-        return x + self.bias
-
-
-class ProjectedBias(nn.Module):
-    def __init__(self, num_features: int, param_dim: int):
-        super(ProjectedBias, self).__init__()
-        self.param = nn.Parameter(torch.randn(num_features, param_dim))
+class Scale(nn.Module):
+    def __init__(self, param_dim: int = 1024):
+        super().__init__()
+        self.param = nn.Parameter(torch.randn(1, param_dim))
         self.projection = init_selu(nn.Linear(param_dim, 1))
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        bias = self.projection(self.param).expand_as(input)
+        scale = F.softplus(self.projection(self.param))
+        return input * scale
+
+
+class Bias(nn.Module):
+    def __init__(self, param_dim: int = 1024):
+        super().__init__()
+        self.param = nn.Parameter(torch.randn(1, param_dim))
+        self.projection = init_selu(nn.Linear(param_dim, 1))
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        bias = self.projection(self.param)
         return input + bias
+
+
+class ScaleBias(nn.Module):
+    def __init__(self, param_dim: int = 1024):
+        super().__init__()
+        self.scale_param = nn.Parameter(torch.randn(1, param_dim))
+        self.bias_param = nn.Parameter(torch.randn(1, param_dim))
+        self.scale_projection = init_selu(nn.Linear(param_dim, 1))
+        self.bias_projection = init_selu(nn.Linear(param_dim, 1))
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        scale = F.softplus(self.scale_projection(self.scale_param))
+        bias = self.bias_projection(self.bias_param)
+        return input * scale + bias
 
 
 class PairSampler(nn.Module):

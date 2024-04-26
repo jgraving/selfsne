@@ -65,13 +65,20 @@ class R2Score(nn.Module):
 
 
 def knn_reconstruction(
-    train_dataset, train_embedding, test_dataset, test_embedding, k=1, verbose=True, metric='minkowski'
+    train_dataset,
+    train_embedding,
+    test_dataset,
+    test_embedding,
+    k=1,
+    verbose=True,
+    metric="minkowski",
+    n_jobs=1,
 ):
     if verbose:
         print("Fitting k-NN regressor...")
 
     # Initialize the k-NN regressor for test set with n_neighbors=k
-    knn_regressor = KNeighborsRegressor(n_neighbors=k, n_jobs=-1, metric=metric)
+    knn_regressor = KNeighborsRegressor(n_neighbors=k, n_jobs=n_jobs, metric=metric)
     knn_regressor.fit(train_embedding, train_dataset)
 
     r2_score = R2Score()
@@ -111,13 +118,20 @@ def knn_reconstruction(
 
 
 def knn_classification(
-    train_labels, train_embedding, test_labels, test_embedding, k=1, verbose=True, metric='minkowski'
+    train_labels,
+    train_embedding,
+    test_labels,
+    test_embedding,
+    k=1,
+    verbose=True,
+    metric="minkowski",
+    n_jobs=1,
 ):
     if verbose:
         print("Fitting k-NN classifier...")
 
     # Initialize the k-NN classifier for test set with n_neighbors=k
-    knn_classifier = KNeighborsClassifier(n_neighbors=k, n_jobs=-1, metric=metric)
+    knn_classifier = KNeighborsClassifier(n_neighbors=k, n_jobs=n_jobs, metric=metric)
     knn_classifier.fit(train_embedding, train_labels)
 
     if verbose:
@@ -177,7 +191,7 @@ def linear_reconstruction(
     train_embedding,
     test_dataset,
     test_embedding,
-    n_jobs=-1,
+    n_jobs=1,
     verbose=True,
 ):
     # Step 1: Initialize the Model
@@ -214,10 +228,16 @@ def linear_reconstruction(
 
 
 def linear_classification(
-    train_labels, train_embedding, test_labels, test_embedding, verbose=True
+    train_labels, train_embedding, test_labels, test_embedding, verbose=True, n_jobs=1
 ):
     # Step 1: Initialize the Model
-    model = LogisticRegression(max_iter=2000, n_jobs=-1, verbose=verbose)
+    model = LogisticRegression(
+        penalty="none",
+        solver="saga",
+        max_iter=1000,
+        verbose=verbose >= 2,
+        n_jobs=n_jobs,
+    )
 
     # Step 2: Preprocessing
     # Scale the embeddings
@@ -245,7 +265,7 @@ def linear_classification(
     precision_test = precision_score(test_labels, y_pred_test, average="weighted")
     recall_test = recall_score(test_labels, y_pred_test, average="weighted")
 
-    if verbose:
+    if verbose >= 1:
         print("Train Accuracy:", acc_train)
         print("Test Accuracy:", acc_test)
         print("Train Precision:", precision_train)

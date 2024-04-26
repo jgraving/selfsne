@@ -20,6 +20,7 @@ import numpy as np
 
 from typing import Union
 
+
 def laplace(
     x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
@@ -105,9 +106,7 @@ def pairwise_studentt(
         torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return (
-        torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + 1) / 2
-    )
+    return torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + 1) / 2
 
 
 def cauchy(
@@ -337,9 +336,7 @@ def pairwise_von_mises(
     eps = torch.finfo(x1.dtype).eps
     x1_norm = x1.norm(dim=-1, keepdim=True)
     x2_norm = x2.norm(dim=-1, keepdim=True)
-    return pairwise_inner_product(x1, x2, scale) / (
-        x1_norm @ x2_norm.T
-    ).clamp(min=eps)
+    return pairwise_inner_product(x1, x2, scale) / (x1_norm @ x2_norm.T).clamp(min=eps)
 
 
 def wrapped_cauchy(

@@ -22,6 +22,8 @@ import torch.nn.functional as F
 
 from selfsne.utils import logmeanexp, straight_through_estimator
 
+LOG2 = np.log(2)
+
 
 def density_ratio(pos_logits, neg_logits):
     attraction = -pos_logits.mean()
@@ -110,6 +112,9 @@ class AlphaNCE(BaseNCE):
         return self.divergence(pos_logits, neg_logits)
 
 
+AlphaJS = AlphaNCE
+
+
 def binary_cross_entropy(pos_logits, neg_logits):
     attraction = -F.logsigmoid(pos_logits).mean()
     repulsion = -F.logsigmoid(-neg_logits).mean()
@@ -192,6 +197,103 @@ def softened_reverse_kullback_leibler_divergence(pos_logits, neg_logits):
     )
     repulsion = 2 * F.logsigmoid(neg_logits).mean() + np.log(4)
     return attraction, repulsion
+
+
+def kullback_leibler_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return logits * ratio - ratio + 1
+
+
+def reverse_kullback_leibler_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return -logits + ratio - 1
+
+
+def jensen_shannon_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return (
+        2 * logits * ratio
+        - 2 * (ratio + 1) * torch.log1p(ratio)
+        + 2 * logits
+        + 2 * LOG2
+    )
+
+
+def binary_cross_entropy_f(logits):
+    ratio = torch.exp(logits)
+    return logits * ratio - (ratio + 1) * torch.log1p(ratio)
+
+
+def noise_contrastive_estimation_f(logits, K=1):
+    logK = np.log(K)
+    return logits * torch.exp(logits) - (torch.exp(logits) + 1) * torch.log1p(
+        torch.exp(logits) / K
+    )
+
+
+def reverse_noise_contrastive_estimation_f(logits, K=1):
+    logK = np.log(K)
+    return (logits + logK).exp().log1p() - (logits + logK).exp().log1p()
+
+
+def generalized_jensen_shannon_f(logits, alpha=0.5):
+    log_alpha = np.log(alpha)
+    log_1_alpha = np.log(1 - alpha)
+    ratio = torch.exp(logits)
+    return (
+        torch.exp(log_alpha + logits) * logits
+        - (1 - alpha + torch.exp(log_alpha + logits)).log1p()
+        - log_alpha
+        - log_1_alpha
+    )
+
+
+def jeffreys_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return 0.5 * (logits * ratio - logits + ratio - 1)
+
+
+def squared_hellinger_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return 2 * (1 - torch.sqrt(ratio)) ** 2
+
+
+def pearson_chi_squared_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return 0.5 * (ratio - 1) ** 2
+
+
+def neymann_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return 0.5 * (ratio - 1) ** 2 / ratio
+
+
+def squared_le_cam_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return (ratio - 1) ** 2 / (1 + ratio)
+
+
+def softened_reverse_kullback_leibler_divergence_f(logits):
+    ratio = torch.exp(logits)
+    return 2 * (ratio + 1) * torch.log(ratio / (ratio + 1)) - 4 * LOG2
+
+
+# Factory dictionary for f(r) generator functions
+GENERATORS = {
+    "kld": kullback_leibler_divergence_f,
+    "rkld": reverse_kullback_leibler_divergence_f,
+    "jsd": jensen_shannon_divergence_f,
+    "bce": binary_cross_entropy_f,
+    "nce": noise_contrastive_estimation_f,
+    "rnce": reverse_noise_contrastive_estimation_f,
+    "alpha_js": generalized_jensen_shannon_f,
+    "jeffreys": jeffreys_divergence_f,
+    "hellinger": squared_hellinger_divergence_f,
+    "pearson": pearson_chi_squared_divergence_f,
+    "neymann": neymann_divergence_f,
+    "le_cam": squared_le_cam_divergence_f,
+    "soft_rkld": softened_reverse_kullback_leibler_divergence_f,
+}
 
 
 DIVERGENCES = {

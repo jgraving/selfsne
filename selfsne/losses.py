@@ -293,8 +293,6 @@ class LikelihoodRatioEstimator(nn.Module):
                 [5] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
         """
 
-        embedding_decay = self.embedding_decay * (z_x.pow(2).mean() + z_y.pow(2).mean())
-
         kernel_scale = self.kernel_scale(z_y=z_y)
         inverse_temperature = self.temperature(z_y=z_y)
 
@@ -321,6 +319,11 @@ class LikelihoodRatioEstimator(nn.Module):
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
+
+        embedding_prior = diagonal(
+            self.kernel(z_y, torch.zeros_like(z_y), kernel_scale)
+        ).unsqueeze(1)
+        embedding_decay = -self.embedding_decay * embedding_prior.mean()
 
         with torch.no_grad():
             kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)

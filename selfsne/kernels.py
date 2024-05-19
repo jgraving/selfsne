@@ -304,7 +304,7 @@ def von_mises(
     Returns:
         torch.Tensor: The row-wise von Mises-Fisher kernel matrix, of shape (batch_size,).
     """
-    return torch.cosine_similarity(x1, x2, dim=-1) / scale
+    return torch.cosine_similarity(x1, x2, dim=-1).div(scale)
 
 
 def pairwise_von_mises(
@@ -328,10 +328,10 @@ def pairwise_von_mises(
     Returns:
         torch.Tensor: The pairwise von Mises-Fisher kernel matrix, of shape (batch_size_1, batch_size_2).
     """
-    x1_norm = F.normalize(x1, p=2, dim=-1)
-    x2_norm = F.normalize(x2, p=2, dim=-1)
+    x1_norm = F.normalize(x1, p=2, dim=-1, eps=1e-8)
+    x2_norm = F.normalize(x2, p=2, dim=-1, eps=1e-8)
 
-    return torch.mm(x1_norm, x2_norm.t()) / scale
+    return (x1_norm @ x2_norm.T).div(scale)
 
 
 def wrapped_cauchy(

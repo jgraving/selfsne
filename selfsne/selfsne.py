@@ -61,7 +61,7 @@ def get_lr_scheduler(
 
         linear_warmup = (
             lr_scheduler.LinearLR(
-                optimizer, start_factor=1e-8, total_iters=warmup_steps
+                optimizer, start_factor=1 / warmup_steps, total_iters=warmup_steps
             )
             if warmup_steps > 0
             else lr_scheduler.ConstantLR(optimizer, factor=1.0)

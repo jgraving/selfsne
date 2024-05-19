@@ -292,9 +292,9 @@ def von_mises(
     Computes the log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
 
     The log von Mises-Fisher kernel is defined as:
-    K(x1, x2) = 1/scale * x1_norm.T @ x2_norm
+    K(x1, x2) = 1/scale * cosine_similarity(x1, x2)
 
-    where x1_norm = x1 / ||x1||_2 and x2_norm = x2 / ||x2||_2 are the normalized versions of x1 and x2.
+    where cosine_similarity(x1, x2) is the cosine similarity between x1 and x2.
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -303,12 +303,8 @@ def von_mises(
 
     Returns:
         torch.Tensor: The row-wise von Mises-Fisher kernel matrix, of shape (batch_size,).
-
     """
-    eps = torch.finfo(x1.dtype).eps
-    x1_norm = x1.norm(dim=-1)
-    x2_norm = x2.norm(dim=-1)
-    return inner_product(x1, x2, scale) / (x1_norm * x2_norm).clamp(min=eps)
+    return torch.cosine_similarity(x1, x2, dim=-1) / scale
 
 
 def pairwise_von_mises(
@@ -320,9 +316,9 @@ def pairwise_von_mises(
     Computes the pairwise log von Mises-Fisher kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log von Mises-Fisher kernel is defined as:
-    K(x1_i, x2_j) = 1/scale * x1_i_norm.T @ x2_j_norm
+    K(x1_i, x2_j) = 1/scale * cosine_similarity(x1_i, x2_j)
 
-    where x1_i_norm = x1_i / ||x1_i||_2 and x2_j_norm = x2_j / ||x2_j||_2 are the normalized versions of x1_i and x2_j.
+    where cosine_similarity(x1_i, x2_j) is the cosine similarity between x1_i and x2_j.
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -331,12 +327,11 @@ def pairwise_von_mises(
 
     Returns:
         torch.Tensor: The pairwise von Mises-Fisher kernel matrix, of shape (batch_size_1, batch_size_2).
-
     """
-    eps = torch.finfo(x1.dtype).eps
-    x1_norm = x1.norm(dim=-1, keepdim=True)
-    x2_norm = x2.norm(dim=-1, keepdim=True)
-    return pairwise_inner_product(x1, x2, scale) / (x1_norm @ x2_norm.T).clamp(min=eps)
+    x1_norm = F.normalize(x1, p=2, dim=-1)
+    x2_norm = F.normalize(x2, p=2, dim=-1)
+
+    return torch.mm(x1_norm, x2_norm.t()) / scale
 
 
 def wrapped_cauchy(

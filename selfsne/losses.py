@@ -507,7 +507,10 @@ class EncoderProjectorLoss(nn.Module):
     def forward(self, h_x, h_y, z_x, z_y, x, y, **kwargs):
         encoder_loss = self.encoder_loss(z_x=h_x, z_y=h_y, x=x, y=y)
         projector_loss = self.projector_loss(z_x=z_x, z_y=z_y, x=x, y=y)
-        return tuple([(h + z) / 2 for (h, z) in zip(encoder_loss, projector_loss)])
+        combined_loss = {}
+        for key in encoder_loss.keys():
+            combined_loss[key] = (encoder_loss[key] + projector_loss[key]) / 2
+        return combined_loss
 
 
 class SymmetricLoss(nn.Module):
@@ -518,7 +521,10 @@ class SymmetricLoss(nn.Module):
     def forward(self, z_x, z_y, x, y, **kwargs):
         xy_loss = self.loss(z_x=z_x, z_y=z_y, y=y)
         yx_loss = self.loss(z_x=z_y, z_y=z_x, y=x)
-        return tuple([(xy + yx) / 2 for (xy, yx) in zip(xy_loss, yx_loss)])
+        symmetric_loss = {}
+        for key in xy_loss.keys():
+            symmetric_loss[key] = (xy_loss[key] + yx_loss[key]) / 2
+        return symmetric_loss
 
 
 class RedundancyReduction(nn.Module):

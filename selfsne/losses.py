@@ -109,9 +109,7 @@ def classifier_metrics(pos_logits, neg_logits):
         neg_logits (torch.Tensor): A tensor of logits for the negative class of shape (batch_size,).
 
     Returns:
-        accuracy (float): The probabilistic accuracy score.
-        recall (float): The probabilistic recall score.
-        precision (float): The probabilistic precision score.
+        dict: A dictionary containing the calculated metrics.
     """
     # Convert logits to probabilities using the sigmoid function
     pos_probs = torch.sigmoid(pos_logits)
@@ -130,7 +128,13 @@ def classifier_metrics(pos_logits, neg_logits):
     recall = TP  # Simplifies TP / (TP + FN) = TP / 1 where FN = (1 - TP)
     spec = TN
 
-    return accuracy, recall, precision, spec, npv
+    return {
+        "accuracy": accuracy,
+        "recall": recall,
+        "precision": precision,
+        "specificity": spec,
+        "npv": npv,
+    }
 
 
 class LikelihoodRatioEstimator(nn.Module):
@@ -268,7 +272,7 @@ class LikelihoodRatioEstimator(nn.Module):
         **kwargs,
     ) -> Tuple[torch.Tensor]:
         """
-        Computes similarity loss.
+        Computes loss and metrics.
 
         Args:
             z_x (torch.Tensor): Input tensor with shape (batch_size, embedding_features)
@@ -280,82 +284,71 @@ class LikelihoodRatioEstimator(nn.Module):
                 Default: None.
 
         Returns:
-            Tuple[torch.Tensor]: A tuple containing six tensors:
-                [0] The mean of the positive logits, i.e., the diagonal entries of the
-                    kernel matrix (shape: (1,))
-                [1] The mean of the negative logits, i.e., the off-diagonal entries of
-                    the kernel matrix (shape: (1,))
-                [2] The mean of the positive probs, i.e., the diagonal entries of the
-                    kernel matrix (shape: (1,))
-                [3] The mean of the negative probs, i.e., the off-diagonal entries of
-                    the kernel matrix (shape: (1,))
-                [4] The mean of the log-baseline (shape: (1,))
-                [5] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
+            dict: A dictionary containing the calculated loss and metrics.
         """
 
         kernel_scale = self.kernel_scale(z_y=z_y)
         inverse_temperature = self.temperature(z_y=z_y)
 
-    logits = self.kernel(z_y, z_x, kernel_scale) * inverse_temperature
-    pos_logits = diagonal(logits).unsqueeze(1)
-    neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
+        logits = self.kernel(z_y, z_x, kernel_scale) * inverse_temperature
+        pos_logits = diagonal(logits).unsqueeze(1)
+        neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
 
-    if self.symmetric_negatives:
-        logits = self.kernel(z_y, z_y, kernel_scale) * inverse_temperature
-        neg_logits = torch.cat(
-            [
-                neg_logits,
-                remove_diagonal(logits) if self.remove_neg_diagonal else logits,
-            ],
-            dim=-1,
+        if self.symmetric_negatives:
+            logits = self.kernel(z_y, z_y, kernel_scale) * inverse_temperature
+            neg_logits = torch.cat(
+                [
+                    neg_logits,
+                    remove_diagonal(logits) if self.remove_neg_diagonal else logits,
+                ],
+                dim=-1,
+            )
+
+        if self.num_negatives:
+            neg_logits = random_sample_columns(neg_logits, self.num_negatives)
+        log_baseline = self.baseline(
+            pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
         )
 
-    if self.num_negatives:
-        neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-    log_baseline = self.baseline(
-        pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
-    )
+        pos_logits = pos_logits - log_baseline
+        neg_logits = neg_logits - log_baseline
+        attraction, repulsion = self.divergence(pos_logits, neg_logits)
 
-    pos_logits = pos_logits - log_baseline
-    neg_logits = neg_logits - log_baseline
-    attraction, repulsion = self.divergence(pos_logits, neg_logits)
+        embedding_prior = diagonal(
+            self.kernel(z_y, torch.zeros_like(z_y), kernel_scale)
+        ).unsqueeze(1)
+        embedding_decay = -self.embedding_decay * embedding_prior.mean()
 
-    embedding_prior = diagonal(
-        self.kernel(z_y, torch.zeros_like(z_y), kernel_scale)
-    ).unsqueeze(1)
-    embedding_decay = -self.embedding_decay * embedding_prior.mean()
+        with torch.no_grad():
+            kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
+            kld_lower_bound = kld_attraction + kld_repulsion
+            rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](
+                pos_logits, neg_logits
+            )
+            rkld_lower_bound = rkld_attraction + rkld_repulsion
+            jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
+            jsd_lower_bound = jsd_attraction + jsd_repulsion
+            metrics = classifier_metrics(pos_logits.flatten(), neg_logits.flatten())
 
-    with torch.no_grad():
-        kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
-        rkld_attraction, rkld_repulsion = DIVERGENCES["rkld"](
-            pos_logits, neg_logits
-        )
-        jsd_attraction, jsd_repulsion = DIVERGENCES["jsd"](pos_logits, neg_logits)
-        accuracy, recall, precision, spec, npv = classifier_metrics(
-            pos_logits.flatten(), neg_logits.flatten()
-        )
+        lower_bound = attraction.mean() + repulsion.mean()
+        loss = lower_bound + embedding_decay
 
-    similarity_loss = attraction.mean() + repulsion.mean() + embedding_decay
-
-    return {
-        "pos_logits": pos_logits.mean(),
-        "neg_logits": neg_logits.mean(),
-        "kld": kld_attraction + kld_repulsion,
-        "rkld": rkld_attraction + rkld_repulsion,
-        "jsd": jsd_attraction + jsd_repulsion,
-        "true_pos_prob": pos_logits.sigmoid().mean(),
-        "true_neg_prob": neg_logits.neg().sigmoid().mean(),
-        "accuracy": accuracy,
-        "recall": recall,
-        "precision": precision,
-        "specificity": spec,
-        "npv": npv,
-        "log_baseline": log_baseline.mean(),
-        "inverse_temperature": inverse_temperature.mean(),
-        "kernel_scale": kernel_scale.mean(),
-        "similarity": similarity_loss,
-        "loss": similarity_loss,
-    }
+        return {
+            "pos_logits": pos_logits.mean(),
+            "neg_logits": neg_logits.mean(),
+            "true_pos_prob": pos_logits.sigmoid().mean(),
+            "true_neg_prob": neg_logits.neg().sigmoid().mean(),
+            "log_baseline": log_baseline.mean(),
+            "inverse_temperature": inverse_temperature.mean(),
+            "kernel_scale": kernel_scale.mean(),
+            "lower_bound": -lower_bound,
+            "kld": -kld_lower_bound,
+            "rkld": -rkld_lower_bound,
+            "jsd": -jsd_lower_bound,
+            "embedding_decay": embedding_decay,
+            "loss": loss,
+            **metrics,
+        }
 
 
 DensityRatioEstimator = LikelihoodRatioEstimator

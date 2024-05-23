@@ -214,7 +214,7 @@ def jensen_shannon_divergence_f(logits):
     return (
         2 * logits * ratio
         - 2 * (ratio + 1) * torch.log1p(ratio)
-        + 2 * logits
+        + 2 * ratio * LOG2
         + 2 * LOG2
     )
 

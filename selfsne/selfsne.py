@@ -26,8 +26,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-from selfsne.utils import stop_gradient
-
 
 def get_lr_scheduler(
     optimizer: optim.Optimizer,
@@ -141,17 +139,8 @@ class SelfSNE(pl.LightningModule):
         projector_x=nn.Identity(),
         pair_sampler=None,
         projector=nn.Identity(),
-        decoder=nn.Identity(),
-        prior=None,
         similarity_loss=None,
-        redundancy_loss=None,
-        reconstruction_loss=None,
-        similarity_weight=1.0,
-        redundancy_weight=1.0,
-        rate_weight=1.0,
-        rate_start_step=0,
-        rate_warmup_steps=0,
-        learning_rate=1e-3,
+        learning_rate=3e-4,
         optimizer="adam",
         momentum=0,
         betas=(0.9, 0.95),
@@ -162,8 +151,6 @@ class SelfSNE(pl.LightningModule):
         projector_weight_decay=None,
         encoder_x_weight_decay=None,
         projector_x_weight_decay=None,
-        decoder_weight_decay=None,
-        prior_weight_decay=None,
         lr_scheduler=False,
         lr_warmup_steps=0,
         lr_target_steps=0,
@@ -176,24 +163,16 @@ class SelfSNE(pl.LightningModule):
         self.projector = projector
         self.encoder_x = encoder_x
         self.projector_x = projector_x
-        self.decoder = decoder
         self.pair_sampler = pair_sampler
-        self.prior = prior
         self.similarity_loss = similarity_loss
-        self.redundancy_loss = redundancy_loss
-        self.reconstruction_loss = reconstruction_loss
         self.save_hyperparameters(
             ignore=[
                 "encoder",
                 "projector",
                 "encoder_x",
                 "projector_x",
-                "decoder",
                 "pair_sampler",
-                "prior",
-                "baseline",
                 "similarity_loss",
-                "redundancy_loss",
             ],
         )
         self.hparams.encoder_weight_decay = (
@@ -213,12 +192,6 @@ class SelfSNE(pl.LightningModule):
             projector_x_weight_decay
             if projector_x_weight_decay is not None
             else weight_decay
-        )
-        self.hparams.decoder_weight_decay = (
-            decoder_weight_decay if decoder_weight_decay is not None else weight_decay
-        )
-        self.hparams.prior_weight_decay = (
-            prior_weight_decay if prior_weight_decay is not None else weight_decay
         )
 
     def forward(self, batch):
@@ -249,105 +222,14 @@ class SelfSNE(pl.LightningModule):
                 z_y = self.projector(h_y)
 
         if self.similarity_loss is not None:
-            (
-                pos_logits,
-                neg_logits,
-                kld,
-                rkld,
-                jsd,
-                pos_prob,
-                neg_prob,
-                accuracy,
-                recall,
-                precision,
-                spec,
-                npv,
-                log_baseline,
-                inverse_temperature,
-                kernel_scale,
-                similarity,
-            ) = self.similarity_loss(z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y)
-            self.log(mode + "similarity", similarity.item(), prog_bar=True)
-            self.log(mode + "pos_logits", pos_logits.item(), prog_bar=True)
-            self.log(mode + "neg_logits", neg_logits.item(), prog_bar=True)
-            self.log(mode + "kld", kld.item(), prog_bar=True)
-            self.log(mode + "rkld", rkld.item(), prog_bar=True)
-            self.log(mode + "jsd", jsd.item(), prog_bar=True)
-            self.log(mode + "log_baseline", log_baseline.item(), prog_bar=True)
-            self.log(mode + "kernel_temp", 1/inverse_temperature.item(), prog_bar=True)
-            self.log(mode + "kernel_scale", kernel_scale.item(), prog_bar=True)
-            self.log(mode + "pos_prob", pos_prob.item(), prog_bar=True)
-            self.log(mode + "neg_prob", neg_prob.item(), prog_bar=True)
-            self.log(mode + "accuracy", accuracy.item(), prog_bar=True)
-            self.log(mode + "recall", recall.item(), prog_bar=True)
-            self.log(mode + "precision", precision.item(), prog_bar=True)
-            self.log(mode + "specificity", spec.item(), prog_bar=True)
-            self.log(mode + "npv", npv.item(), prog_bar=True)
-
-        if self.redundancy_loss is not None:
-            redundancy = self.redundancy_loss(z_x, z_y)
-            self.log(mode + "redundancy", redundancy.item(), prog_bar=True)
-
-        if self.reconstruction_loss is not None:
-            y_hat = self.decoder(stop_gradient(z_y))
-            reconstruction = self.reconstruction_loss(y_hat, y).mean()
-            self.log(mode + "reconstruction", reconstruction.item(), prog_bar=True)
-
-        if self.prior is not None:
-            prior_log_prob = -self.prior.log_prob(stop_gradient(z_y)).mean()
-            rate = -self.prior.rate(z_y).mean()
-            self.log(mode + "rate", rate.item(), prog_bar=True)
-            if hasattr(self.prior, "entropy"):
-                self.log(
-                    mode + "prior_entropy", self.prior.entropy().item(), prog_bar=True
-                )
-            if hasattr(self.prior, "mixture") and hasattr(
-                self.prior.mixture, "entropy"
-            ):
-                self.log(
-                    mode + "cluster_perplexity",
-                    self.prior.mixture.entropy().exp().item(),
-                    prog_bar=True,
-                )
-            self.log(mode + "rate_weight", float(self.rate_weight), prog_bar=True)
-
-        loss = (
-            (prior_log_prob if self.prior is not None else 0)
-            + ((rate * self.rate_weight) if self.prior is not None else 0)
-            + (
-                (similarity * self.hparams.similarity_weight)
-                if self.similarity_loss is not None
-                else 0
+            loss_dict = self.similarity_loss(
+                z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y
             )
-            + (
-                (redundancy * self.hparams.redundancy_weight)
-                if self.redundancy_loss is not None
-                else 0
-            )
-            + (reconstruction if self.reconstruction_loss is not None else 0)
-        )
-        self.log(mode + "loss", loss.item(), prog_bar=True)
 
-        return loss
+        for key, value in loss_dict.items():
+            self.log(f"{mode}{key}", value.item(), prog_bar=True)
 
-    @property
-    def rate_weight(self):
-        if self.hparams.rate_start_step + self.hparams.rate_warmup_steps == 0:
-            rate_weight = self.hparams.rate_weight
-        elif (
-            self.hparams.rate_start_step
-            <= self.current_epoch
-            < self.hparams.rate_start_step + self.hparams.rate_warmup_steps
-        ):
-            rate_weight = self.hparams.rate_weight * (
-                (self.current_epoch - self.hparams.rate_start_step + 1)
-                / self.hparams.rate_warmup_steps
-            )
-        elif self.current_epoch >= self.hparams.rate_start_step:
-            rate_weight = self.hparams.rate_weight
-        else:
-            rate_weight = 0
-        return rate_weight
+        return loss_dict["loss"]
 
     def training_step(self, batch, batch_idx):
         return self.loss(batch, batch_idx, mode="")
@@ -362,8 +244,6 @@ class SelfSNE(pl.LightningModule):
         prediction = {}
 
         prediction["embedding"] = self(batch)
-        if self.prior is not None and hasattr(self.prior, "assign_labels"):
-            prediction["labels"] = self.prior.assign_labels(prediction["embedding"])
 
         return prediction
 
@@ -398,25 +278,6 @@ class SelfSNE(pl.LightningModule):
         if self.similarity_loss is not None:
             params_list.append({"params": self.similarity_loss.parameters()})
 
-        if self.redundancy_loss is not None:
-            params_list.append({"params": self.redundancy_loss.parameters()})
-
-        if self.reconstruction_loss is not None:
-            params_list.append(
-                {
-                    "params": self.decoder.parameters(),
-                    "weight_decay": self.hparams.decoder_weight_decay,
-                }
-            )
-
-        if self.prior is not None:
-            params_list.append(
-                {
-                    "params": self.prior.parameters(),
-                    "weight_decay": self.hparams.prior_weight_decay,
-                    "lr": self.prior.hparams.lr,
-                }
-            )
         if self.hparams.optimizer.lower() == "adam":
             optimizer = optim.AdamW(
                 params_list,
@@ -453,9 +314,3 @@ class SelfSNE(pl.LightningModule):
             ]
         else:
             return optimizer
-
-#     # def load_from_checkpoint(self, *args, **kwargs):
-#     #     return super().load_from_checkpoint(*args, **kwargs, **self.kwargs)
-
-
-# SelfSNE.load_from_checkpoint.__doc__ = pl.LightningModule.load_from_checkpoint.__doc__

@@ -83,7 +83,7 @@ def studentt(
         torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).pow(2).sum(-1).div(scale).log1p().neg() * (scale + 1) / 2
+    return (x1 - x2).pow(2).sum(-1).div(scale).log1p().neg() * (scale + x1.shape[-1]) / 2
 
 
 def pairwise_studentt(
@@ -106,7 +106,7 @@ def pairwise_studentt(
         torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + 1) / 2
+    return torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + x1.shape[-1]) / 2
 
 
 def cauchy(

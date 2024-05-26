@@ -100,39 +100,47 @@ from copy import deepcopy
 #     )
 
 
-def classifier_metrics(pos_logits, neg_logits):
+def classifier_metrics(pos_logits, neg_logits, threshold=True):
     """
-    Calculates probabilistic accuracy, recall/sensitivity, precision/PPV, NPV, and specificity given positive and negative logits.
+    Calculates accuracy, recall/sensitivity, precision/PPV, NPV, and specificity given positive and negative logits.
 
     Args:
         pos_logits (torch.Tensor): A tensor of logits for the positive class of shape (batch_size,).
         neg_logits (torch.Tensor): A tensor of logits for the negative class of shape (batch_size,).
+        threshold (bool): If True, apply hard thresholding to logits. If False, use the mean of sigmoid-transformed logits.
 
     Returns:
         dict: A dictionary containing the calculated metrics.
     """
-    # Convert logits to probabilities using the sigmoid function
-    pos_probs = torch.sigmoid(pos_logits)
-    neg_probs = torch.sigmoid(neg_logits)
+    dtype = pos_logits.dtype
 
-    # Calculate expected probabilities for TP, FP, TN, FN
-    TP = pos_probs.mean()
-    FP = neg_probs.mean()
-    TN = (1 - neg_probs).mean()
-    FN = (1 - pos_probs).mean()
+    if threshold:
+        # Apply hard thresholding to logits
+        TP = (pos_logits > 0).to(dtype).mean()  # True Positive
+        FP = (neg_logits > 0).to(dtype).mean()  # False Positive
+        TN = (neg_logits <= 0).to(dtype).mean()  # True Negative
+        FN = (pos_logits <= 0).to(dtype).mean()  # False Negative
+    else:
+        # Use mean of sigmoid-transformed logits
+        pos_probs = torch.sigmoid(pos_logits).mean()
+        neg_probs = torch.sigmoid(neg_logits).mean()
+        TP = pos_probs  # True Positive probabilities for positive class
+        FP = neg_probs  # False Positive probabilities for negative class
+        TN = 1 - neg_probs  # True Negative probabilities for negative class
+        FN = 1 - pos_probs  # False Negative probabilities for positive class
 
-    # Calculate metrics based on probabilistic definitions
-    accuracy = (TP + TN) / 2
+    # Calculate metrics
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
     precision = TP / (TP + FP)
     npv = TN / (TN + FN)
-    recall = TP  # Simplifies TP / (TP + FN) = TP / 1 where FN = (1 - TP)
-    spec = TN
+    recall = TP / (TP + FN)
+    specificity = TN / (TN + FP)
 
     return {
         "accuracy": accuracy,
         "recall": recall,
         "precision": precision,
-        "specificity": spec,
+        "specificity": specificity,
         "npv": npv,
     }
 
@@ -290,7 +298,7 @@ class LikelihoodRatioEstimator(nn.Module):
         kernel_scale = self.kernel_scale(z_y=z_y)
         inverse_temperature = self.temperature(z_y=z_y)
 
-        logits = self.kernel(z_y, z_x, kernel_scale) * inverse_temperature
+        logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
         neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
 

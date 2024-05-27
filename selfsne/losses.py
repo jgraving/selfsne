@@ -553,14 +553,12 @@ class RedundancyReduction(nn.Module):
         invariance = diagonal(correlation).add_(-1).pow_(2).mean()
         redundancy = off_diagonal(correlation).pow_(2).mean()
 
-        loss = (
-            invariance * self.invariance_weight + redundancy * self.redundancy_weight
-        )
+        loss = invariance * self.invariance_weight + redundancy * self.redundancy_weight
 
         return {
-            'loss': loss,
-            'invariance': invariance,
-            'redundancy': redundancy,
+            "loss": loss,
+            "invariance": invariance,
+            "redundancy": redundancy,
         }
 
 
@@ -623,11 +621,12 @@ class VICReg(nn.Module):
         )
 
         return {
-            'loss': loss,
-            'variance': variance,
-            'invariance': invariance,
-            'covariance': covariance,
+            "loss": loss,
+            "variance": variance,
+            "invariance": invariance,
+            "covariance": covariance,
         }
+
 
 # class TRELLIS(nn.Module):
 #     def __init__(

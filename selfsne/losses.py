@@ -64,7 +64,7 @@ from selfsne.utils import (
     random_sample_columns,
 )
 
-from typing import Optional, Union, Tuple, List, Callable
+from typing import Optional, Union, Tuple, List, Callable, Dict
 from copy import deepcopy
 
 

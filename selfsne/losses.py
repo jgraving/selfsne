@@ -425,38 +425,55 @@ class LikelihoodRatioEstimator(nn.Module):
 DensityRatioEstimator = LikelihoodRatioEstimator
 
 
-
-
 class EncoderProjectorLoss(nn.Module):
     def __init__(self, encoder_loss, projector_loss):
         super().__init__()
         self.encoder_loss = encoder_loss
         self.projector_loss = projector_loss
+        self.identity = nn.Identity()
 
     def forward(
         self, x, y, encoder, projector, encoder_x=None, projector_x=None, **kwargs
     ):
-        encoder_loss = self.encoder_loss(
+        # Encode once to get h_x and h_y
+        h_x, h_y = self.encoder_loss.encode(
             x=x,
             y=y,
             encoder=encoder,
-            projector=projector,
+            projector=self.identity,
             encoder_x=encoder_x,
+            projector_x=self.identity,
+        )
+
+        # Apply the projector to h_x and h_y to get z_x and z_y
+        z_x, z_y = self.encoder_loss.encode(
+            x=h_x,
+            y=h_y,
+            encoder=self.identity,
+            projector=projector,
+            encoder_x=self.identity,
             projector_x=projector_x,
+        )
+
+        encoder_loss_result = self.encoder_loss(
+            x=h_x,
+            y=h_y,
+            encoder=self.identity,
+            projector=self.identity,
             **kwargs,
         )
-        projector_loss = self.projector_loss(
-            x=x,
-            y=y,
-            encoder=encoder,
-            projector=projector,
-            encoder_x=encoder_x,
-            projector_x=projector_x,
+        projector_loss_result = self.projector_loss(
+            x=z_x,
+            y=z_y,
+            encoder=self.identity,
+            projector=self.identity,
             **kwargs,
         )
         combined_loss = {}
-        for key in encoder_loss.keys():
-            combined_loss[key] = (encoder_loss[key] + projector_loss[key]) / 2
+        for key in encoder_loss_result.keys():
+            combined_loss[key] = (
+                encoder_loss_result[key] + projector_loss_result[key]
+            ) / 2
         return combined_loss
 
 
@@ -464,26 +481,33 @@ class SymmetricLoss(nn.Module):
     def __init__(self, loss):
         super().__init__()
         self.loss = loss
+        self.identity = nn.Identity()
 
     def forward(
         self, x, y, encoder, projector, encoder_x=None, projector_x=None, **kwargs
     ):
-        xy_loss = self.loss(
+        # Encode once to get z_x and z_y
+        z_x, z_y = self.loss.encode(
             x=x,
             y=y,
             encoder=encoder,
             projector=projector,
             encoder_x=encoder_x,
             projector_x=projector_x,
+        )
+
+        xy_loss = self.loss(
+            x=z_x,
+            y=z_y,
+            encoder=self.identity,
+            projector=self.identity,
             **kwargs,
         )
         yx_loss = self.loss(
-            x=y,
-            y=x,
-            encoder=encoder,
-            projector=projector,
-            encoder_x=encoder_x,
-            projector_x=projector_x,
+            x=z_y,
+            y=z_x,
+            encoder=self.identity,
+            projector=self.identity,
             **kwargs,
         )
         symmetric_loss = {}

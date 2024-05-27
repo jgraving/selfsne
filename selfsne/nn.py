@@ -242,8 +242,13 @@ class PairSampler(nn.Module):
         self.x_sampler = x_sampler
         self.y_sampler = y_sampler
 
-    def forward(self, x):
-        return self.x_sampler(x), self.y_sampler(x)
+    def forward(self, x, y=None):
+        sampled_x = self.x_sampler(x)
+        if y is None:
+            sampled_y = self.y_sampler(x)
+        else:
+            sampled_y = self.y_sampler(y)
+        return sampled_x, sampled_y
 
 
 class PairAugmenter(nn.Module):

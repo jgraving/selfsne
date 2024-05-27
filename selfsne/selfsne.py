@@ -26,6 +26,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
+from selfsne.nn import PairSampler
+
 
 def get_lr_scheduler(
     optimizer: optim.Optimizer,
@@ -137,7 +139,7 @@ class SelfSNE(pl.LightningModule):
         encoder,
         encoder_x=None,
         projector_x=nn.Identity(),
-        pair_sampler=None,
+        pair_sampler=PairSampler(),
         projector=nn.Identity(),
         similarity_loss=None,
         learning_rate=3e-4,
@@ -198,13 +200,7 @@ class SelfSNE(pl.LightningModule):
         return self.projector(self.encoder(batch))
 
     def loss(self, batch, batch_idx, mode=""):
-        if self.pair_sampler is not None:
-            x, y = self.pair_sampler(batch)
-        elif isinstance(batch, (list, tuple)) and len(batch) == 2:
-            x, y = batch
-        else:
-            x = batch
-            y = batch
+        x, y = self.pair_sampler(batch)
 
         if self.similarity_loss is not None:
             loss_dict = self.similarity_loss(

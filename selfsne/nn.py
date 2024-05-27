@@ -242,7 +242,13 @@ class PairSampler(nn.Module):
         self.x_sampler = x_sampler
         self.y_sampler = y_sampler
 
-    def forward(self, x, y=None):
+    def forward(self, batch):
+        if isinstance(batch, (list, tuple)) and len(batch) == 2:
+            x, y = batch
+        else:
+            x = batch
+            y = None
+
         sampled_x = self.x_sampler(x)
         if y is None:
             sampled_y = self.y_sampler(x)

@@ -388,20 +388,38 @@ class LikelihoodRatioEstimator(nn.Module):
         projector_x: Optional[nn.Module] = None,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
-        z_x, z_y = self.encode(x, y, encoder, projector, encoder_x, projector_x)
+
+        z_x, z_y = self.encode(
+            x=x,
+            y=y,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+        )
 
         kernel_scale = self.kernel_scale(z_y=z_y)
         inverse_temperature = self.temperature(z_y=z_y)
 
         pos_logits, neg_logits = self.compute_logits(
-            z_x, z_y, kernel_scale, inverse_temperature
+            z_x=z_x,
+            z_y=z_y,
+            kernel_scale=kernel_scale,
+            inverse_temperature=inverse_temperature,
         )
 
         log_baseline = self.baseline(
             pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
         )
 
-        return self.compute_loss_and_metrics(pos_logits, neg_logits, z_y, log_baseline, kernel_scale, inverse_temperature)
+        return self.compute_loss_and_metrics(
+            pos_logits=pos_logits,
+            neg_logits=neg_logits,
+            z_y=z_y,
+            log_baseline=log_baseline,
+            kernel_scale=kernel_scale,
+            inverse_temperature=inverse_temperature,
+        )
 
 
 DensityRatioEstimator = LikelihoodRatioEstimator

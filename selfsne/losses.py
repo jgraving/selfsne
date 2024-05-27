@@ -425,6 +425,186 @@ class LikelihoodRatioEstimator(nn.Module):
 DensityRatioEstimator = LikelihoodRatioEstimator
 
 
+
+
+class EncoderProjectorLoss(nn.Module):
+    def __init__(self, encoder_loss, projector_loss):
+        super().__init__()
+        self.encoder_loss = encoder_loss
+        self.projector_loss = projector_loss
+
+    def forward(
+        self, x, y, encoder, projector, encoder_x=None, projector_x=None, **kwargs
+    ):
+        encoder_loss = self.encoder_loss(
+            x=x,
+            y=y,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+            **kwargs,
+        )
+        projector_loss = self.projector_loss(
+            x=x,
+            y=y,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+            **kwargs,
+        )
+        combined_loss = {}
+        for key in encoder_loss.keys():
+            combined_loss[key] = (encoder_loss[key] + projector_loss[key]) / 2
+        return combined_loss
+
+
+class SymmetricLoss(nn.Module):
+    def __init__(self, loss):
+        super().__init__()
+        self.loss = loss
+
+    def forward(
+        self, x, y, encoder, projector, encoder_x=None, projector_x=None, **kwargs
+    ):
+        xy_loss = self.loss(
+            x=x,
+            y=y,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+            **kwargs,
+        )
+        yx_loss = self.loss(
+            x=y,
+            y=x,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+            **kwargs,
+        )
+        symmetric_loss = {}
+        for key in xy_loss.keys():
+            symmetric_loss[key] = (xy_loss[key] + yx_loss[key]) / 2
+        return symmetric_loss
+
+
+class RedundancyReduction(nn.Module):
+    """
+    Redundancy Reduction loss function that creates an embedding by minimizing
+    mean squared error between an identity matrix and the empirical cross-correlation matrix
+    between positive pairs. This helps to maximize feature invariance to differences between
+    positive pairs while minimizing redundancy (correlation) between features, preserving global
+    structure in the embedding as a form of nonlinear Canonical Correlation Analysis (CCA).
+
+    Args:
+        num_features (int): Number of embedding features.
+        invariance_weight (float, optional): Weighting for the invariance term in the loss.
+            Default: 1.0.
+        redundancy_weight (float, optional): Weighting for the redundancy term in the loss.
+            Default: 1.0.
+
+    Returns:
+        loss_dict (dict): A dictionary containing the computed redundancy reduction loss components.
+    """
+
+    def __init__(
+        self,
+        num_features: int = 2,
+        invariance_weight: float = 1.0,
+        redundancy_weight: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.norm = nn.BatchNorm1d(num_features, affine=False)
+        self.invariance_weight = invariance_weight
+        self.redundancy_weight = redundancy_weight
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> Dict[str, torch.Tensor]:
+        batch_size, _ = x.shape
+
+        correlation = self.norm(x).T @ self.norm(y) / batch_size
+        invariance = diagonal(correlation).add_(-1).pow_(2).mean()
+        redundancy = off_diagonal(correlation).pow_(2).mean()
+
+        loss = (
+            invariance * self.invariance_weight + redundancy * self.redundancy_weight
+        )
+
+        return {
+            'loss': loss,
+            'invariance': invariance,
+            'redundancy': redundancy,
+        }
+
+
+class VICReg(nn.Module):
+    """
+    Variance-Invariance-Covariance (VIC) regularization loss function that creates an
+    embedding by combining three terms:
+    (1) a variance stabilizing term (hinge loss for feature-wise std. dev.),
+    (2) an invariance term (mean squared error between positive pairs),
+    (3) a covariance regularization term (minimize squared covariance) based on redundancy reduction.
+    This helps to preserve global structure in the embedding as a form of Laplacian Eigenmaps.
+
+    Args:
+        num_features (int): Number of embedding features.
+        eps (float, optional): A value added to the variance term for numerical stability. Default: 1e-8.
+        variance_weight (float, optional): Weighting for the variance term in the loss. Default: 1.0.
+        invariance_weight (float, optional): Weighting for the invariance term in the loss. Default: 1.0.
+        covariance_weight (float, optional): Weighting for the covariance term in the loss. Default: 1.0.
+
+    Returns:
+        loss_dict (dict): A dictionary containing the computed VICReg loss components.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-8,
+        variance_weight: float = 1.0,
+        invariance_weight: float = 1.0,
+        covariance_weight: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.variance_weight = variance_weight
+        self.invariance_weight = invariance_weight
+        self.covariance_weight = covariance_weight
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> Dict[str, torch.Tensor]:
+        batch_size, embedding_features = x.shape
+        invariance = F.mse_loss(x, y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        cov_x = (x.T @ x) / (batch_size - 1)
+        cov_y = (y.T @ y) / (batch_size - 1)
+        std_x = diagonal(cov_x).add(self.eps).sqrt()
+        std_y = diagonal(cov_y).add(self.eps).sqrt()
+        variance = F.relu(1 - std_x).mean() / 2 + F.relu(1 - std_y).mean() / 2
+        covariance = (
+            off_diagonal(cov_x).pow_(2).sum().div(embedding_features) / 2
+            + off_diagonal(cov_y).pow_(2).sum().div(embedding_features) / 2
+        )
+
+        loss = (
+            variance * self.variance_weight
+            + invariance * self.invariance_weight
+            + covariance * self.covariance_weight
+        )
+
+        return {
+            'loss': loss,
+            'variance': variance,
+            'invariance': invariance,
+            'covariance': covariance,
+        }
+
 # class TRELLIS(nn.Module):
 #     def __init__(
 #         self,
@@ -567,156 +747,6 @@ DensityRatioEstimator = LikelihoodRatioEstimator
 #             global_log_baseline.mean(),
 #             global_attraction.mean() + global_repulsion.mean() + embedding_decay,
 #         )
-
-
-class EncoderProjectorLoss(nn.Module):
-    def __init__(self, encoder_loss, projector_loss):
-        super().__init__()
-        self.encoder_loss = encoder_loss
-        self.projector_loss = projector_loss
-
-    def forward(self, h_x, h_y, z_x, z_y, x, y, **kwargs):
-        encoder_loss = self.encoder_loss(z_x=h_x, z_y=h_y, x=x, y=y)
-        projector_loss = self.projector_loss(z_x=z_x, z_y=z_y, x=x, y=y)
-        combined_loss = {}
-        for key in encoder_loss.keys():
-            combined_loss[key] = (encoder_loss[key] + projector_loss[key]) / 2
-        return combined_loss
-
-
-class SymmetricLoss(nn.Module):
-    def __init__(self, loss):
-        super().__init__()
-        self.loss = loss
-
-    def forward(self, z_x, z_y, x, y, **kwargs):
-        xy_loss = self.loss(z_x=z_x, z_y=z_y, y=y)
-        yx_loss = self.loss(z_x=z_y, z_y=z_x, y=x)
-        symmetric_loss = {}
-        for key in xy_loss.keys():
-            symmetric_loss[key] = (xy_loss[key] + yx_loss[key]) / 2
-        return symmetric_loss
-
-
-class RedundancyReduction(nn.Module):
-    """
-    Redundancy Reduction loss function [1] that creates an embedding by minimizing
-    mean squared error between an identity matrix and the empirical cross-correlation matrix
-    between positive pairs. This helps to maximize feature invariance to differences between
-    positive pairs while minimizing redundancy (correlation) between features, preserving global
-    structure in the embedding as a form of nonlinear Canonical Correlation Analysis (CCA) [2].
-
-    Args:
-        num_features (int): Number of embedding features.
-        invariance_weight (float, optional): Weighting for the invariance term in the loss.
-            Default: 1.0.
-        redundancy_weight (float, optional): Weighting for the redundancy term in the loss.
-            Default: 1.0.
-
-    Returns:
-        loss (torch.Tensor): The computed redundancy reduction loss.
-
-    References:
-        [1] Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021).
-        Barlow Twins: Self-Supervised Learning via Redundancy Reduction.
-        In International Conference on Machine Learning (pp. 12310-12320).
-        PMLR.
-        [2] Balestriero, R., & LeCun, Y. (2022). Contrastive and Non-Contrastive
-        Self-Supervised Learning Recover Global and Local Spectral Embedding
-        Methods. doi:10.48550/arxiv.2205.11508
-    """
-
-    def __init__(
-        self,
-        num_features: int = 2,
-        invariance_weight: float = 1.0,
-        redundancy_weight: float = 1.0,
-    ) -> None:
-        super().__init__()
-        self.norm = nn.BatchNorm1d(num_features, affine=False)
-        self.invariance_weight = invariance_weight
-        self.redundancy_weight = redundancy_weight
-
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        batch_size, _ = x.shape
-
-        correlation = self.norm(x).T @ self.norm(y) / batch_size
-        invariance = diagonal(correlation).add_(-1).pow_(2).mean()
-        redundancy = off_diagonal(correlation).pow_(2).mean()
-
-        return invariance * self.invariance_weight + redundancy * self.redundancy_weight
-
-
-class VICReg(nn.Module):
-    """
-    Variance-Invariance-Covariance (VIC) regularization loss function [1] that creates an
-    embedding by combining three terms:
-    (1) a variance stabilizing term (hinge loss for feature-wise std. dev.),
-    (2) an invariance term (mean squared error between positive pairs),
-    (3) a covariance regularization term (minimize squared covariance) based on redundancy reduction [2].
-    This helps to preserve global structure in the embedding as a form of Laplacian Eigenmaps [3].
-
-    Args:
-        num_features (int): Number of embedding features.
-        eps (float, optional): A value added to the variance term for numerical stability. Default: 1e-8.
-        variance_weight (float, optional): Weighting for the variance term in the loss. Default: 1.0.
-        invariance_weight (float, optional): Weighting for the invariance term in the loss. Default: 1.0.
-        covariance_weight (float, optional): Weighting for the covariance term in the loss. Default: 1.0.
-
-    Returns:
-        loss (torch.Tensor): The computed loss.
-
-    References:
-        [1] Bardes, A., Ponce, J., & LeCun, Y. (2021). VICReg:
-        Variance-Invariance-Covariance Regularization for self-supervised
-        learning. arXiv preprint arXiv:2105.04906.
-        [2] Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021).
-        Barlow Twins: Self-Supervised Learning via Redundancy Reduction.
-        In International Conference on Machine Learning (pp. 12310-12320).
-        PMLR.
-        [3] Balestriero, R., & LeCun, Y. (2022). Contrastive and Non-Contrastive
-        Self-Supervised Learning Recover Global and Local Spectral Embedding
-        Methods. doi:10.48550/arxiv.2205.11508
-    """
-
-    def __init__(
-        self,
-        num_features: int,
-        eps: float = 1e-8,
-        variance_weight: float = 1.0,
-        invariance_weight: float = 1.0,
-        covariance_weight: float = 1.0,
-    ) -> None:
-        super().__init__()
-        self.num_features = num_features
-        self.eps = eps
-        self.variance_weight = variance_weight
-        self.invariance_weight = invariance_weight
-        self.covariance_weight = covariance_weight
-
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        batch_size, embedding_features = x.shape
-        invariance = F.mse_loss(x, y)
-
-        x = x - x.mean(dim=0)
-        y = y - y.mean(dim=0)
-
-        cov_x = (x.T @ x) / (batch_size - 1)
-        cov_y = (y.T @ y) / (batch_size - 1)
-        std_x = diagonal(cov_x).add(self.eps).sqrt()
-        std_y = diagonal(cov_y).add(self.eps).sqrt()
-        variance = F.relu(1 - std_x).mean() / 2 + F.relu(1 - std_y).mean() / 2
-        covariance = (
-            off_diagonal(cov_x).pow_(2).sum().div(embedding_features) / 2
-            + off_diagonal(cov_y).pow_(2).sum().div(embedding_features) / 2
-        )
-
-        return (
-            variance * self.variance_weight
-            + invariance * self.invariance_weight
-            + covariance * self.covariance_weight
-        )
-
 
 # class MultiheadDensityRatioEstimator(nn.Module):
 #     def __init__(

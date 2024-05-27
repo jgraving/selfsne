@@ -222,6 +222,7 @@ class LikelihoodRatioEstimator(nn.Module):
         embedding_decay: float = 0,
         symmetric_negatives: bool = False,
         remove_neg_diagonal: bool = True,
+        concat_chunk_encode: bool = False,
     ) -> None:
 
         super().__init__()
@@ -271,32 +272,42 @@ class LikelihoodRatioEstimator(nn.Module):
         self.embedding_decay = embedding_decay
         self.symmetric_negatives = symmetric_negatives
         self.remove_neg_diagonal = remove_neg_diagonal
+        self.concat_chunk_encode = concat_chunk_encode
 
-    def forward(
+    def encode(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        encoder: nn.Module,
+        projector: nn.Module,
+        encoder_x: Optional[nn.Module] = None,
+        projector_x: Optional[nn.Module] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        if encoder_x is not None:
+            h_x = encoder_x(x)
+            z_x = projector_x(h_x)
+            h_y = encoder(y)
+            z_y = projector(h_y)
+        else:
+            if self.concat_chunk_encode:
+                h_x, h_y = torch.chunk(encoder(torch.cat([x, y])), 2)
+                z_x, z_y = torch.chunk(projector(torch.cat([h_x, h_y])), 2)
+            else:
+                h_x = encoder(x)
+                h_y = encoder(y)
+                z_x = projector(h_x)
+                z_y = projector(h_y)
+
+        return z_x, z_y
+
+    def compute_logits(
         self,
         z_x: torch.Tensor,
         z_y: torch.Tensor,
-        y: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor]:
-        """
-        Computes loss and metrics.
-
-        Args:
-            z_x (torch.Tensor): Input tensor with shape (batch_size, embedding_features)
-                representing the features of the x domain.
-            z_y (torch.Tensor): Input tensor with shape (batch_size, embedding_features)
-                representing the embedding of the y labels.
-            y (torch.Tensor, optional): Input tensor with shape (batch_size, **data_features) representing
-                the original y data. Used when the baseline is a LearnedConditionalBaseline.
-                Default: None.
-
-        Returns:
-            dict: A dictionary containing the calculated loss and metrics.
-        """
-
-        kernel_scale = self.kernel_scale(z_y=z_y)
-        inverse_temperature = self.temperature(z_y=z_y)
+        kernel_scale: torch.Tensor,
+        inverse_temperature: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
         pos_logits = diagonal(logits).unsqueeze(1)
@@ -314,9 +325,18 @@ class LikelihoodRatioEstimator(nn.Module):
 
         if self.num_negatives:
             neg_logits = random_sample_columns(neg_logits, self.num_negatives)
-        log_baseline = self.baseline(
-            pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
-        )
+
+        return pos_logits, neg_logits
+
+    def compute_loss_and_metrics(
+        self,
+        pos_logits: torch.Tensor,
+        neg_logits: torch.Tensor,
+        z_y: torch.Tensor,
+        log_baseline: torch.Tensor,
+        kernel_scale: torch.Tensor,
+        inverse_temperature: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
 
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
@@ -357,6 +377,31 @@ class LikelihoodRatioEstimator(nn.Module):
             "loss": loss,
             **metrics,
         }
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        encoder: nn.Module,
+        projector: nn.Module,
+        encoder_x: Optional[nn.Module] = None,
+        projector_x: Optional[nn.Module] = None,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        z_x, z_y = self.encode(x, y, encoder, projector, encoder_x, projector_x)
+
+        kernel_scale = self.kernel_scale(z_y=z_y)
+        inverse_temperature = self.temperature(z_y=z_y)
+
+        pos_logits, neg_logits = self.compute_logits(
+            z_x, z_y, kernel_scale, inverse_temperature
+        )
+
+        log_baseline = self.baseline(
+            pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
+        )
+
+        return self.compute_loss_and_metrics(pos_logits, neg_logits, z_y, log_baseline, kernel_scale, inverse_temperature)
 
 
 DensityRatioEstimator = LikelihoodRatioEstimator

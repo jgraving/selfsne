@@ -206,24 +206,14 @@ class SelfSNE(pl.LightningModule):
             x = batch
             y = batch
 
-        if self.encoder_x is not None:
-            h_x = self.encoder_x(x)
-            z_x = self.projector_x(h_x)
-            h_y = self.encoder(y)
-            z_y = self.projector(h_y)
-        else:
-            if self.hparams.concat_chunk_encode:
-                h_x, h_y = torch.chunk(self.encoder(torch.cat([x, y])), 2)
-                z_x, z_y = torch.chunk(self.projector(torch.cat([h_x, h_y])), 2)
-            else:
-                h_x = self.encoder(x)
-                h_y = self.encoder(y)
-                z_x = self.projector(h_x)
-                z_y = self.projector(h_y)
-
         if self.similarity_loss is not None:
             loss_dict = self.similarity_loss(
-                z_x=z_x, z_y=z_y, h_x=h_x, h_y=h_y, x=x, y=y
+                x=x,
+                y=y,
+                encoder=self.encoder,
+                projector=self.projector,
+                encoder_x=self.encoder_x,
+                projector_x=self.projector_x,
             )
 
         for key, value in loss_dict.items():

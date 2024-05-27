@@ -364,8 +364,8 @@ class LikelihoodRatioEstimator(nn.Module):
         return {
             "pos_logits": pos_logits.mean(),
             "neg_logits": neg_logits.mean(),
-            "true_pos_prob": pos_logits.sigmoid().mean(),
-            "true_neg_prob": neg_logits.neg().sigmoid().mean(),
+            "pos_prob": pos_logits.sigmoid().mean(),
+            "neg_prob": neg_logits.sigmoid().mean(),
             "log_baseline": log_baseline.mean(),
             "inverse_temperature": inverse_temperature.mean(),
             "kernel_scale": kernel_scale.mean(),

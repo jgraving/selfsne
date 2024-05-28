@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from selfsne.nn import PairSampler
+from selfsne.utils import add_model_params
 
 
 def get_lr_scheduler(
@@ -234,28 +235,19 @@ class SelfSNE(pl.LightningModule):
         return prediction
 
     def configure_optimizers(self):
-        params_list = [
-            {
-                "params": self.encoder.parameters(),
-                "weight_decay": self.hparams.encoder_weight_decay,
-            },
-            {
-                "params": self.projector.parameters(),
-                "weight_decay": self.hparams.projector_weight_decay,
-            },
-        ]
+        params_list = []
+
+        add_model_params(params_list, self.encoder, self.hparams.encoder_weight_decay)
+        add_model_params(
+            params_list, self.projector, self.hparams.projector_weight_decay
+        )
+
         if self.encoder_x is not None:
-            params_list.append(
-                {
-                    "params": self.encoder_x.parameters(),
-                    "weight_decay": self.hparams.encoder_x_weight_decay,
-                },
+            add_model_params(
+                params_list, self.encoder_x, self.hparams.encoder_x_weight_decay
             )
-            params_list.append(
-                {
-                    "params": self.projector_x.parameters(),
-                    "weight_decay": self.hparams.projector_x_weight_decay,
-                }
+            add_model_params(
+                params_list, self.projector_x, self.hparams.projector_x_weight_decay
             )
 
         if self.pair_sampler is not None:

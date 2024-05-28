@@ -375,6 +375,24 @@ def off_diagonal(x: torch.Tensor) -> torch.Tensor:
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
 
+def set_weight_decay(model, weight_decay):
+    decay = []
+    no_decay = []
+    for name, param in model.named_parameters():
+        if "bias" in name or "bn" in name:
+            no_decay.append(param)
+        else:
+            decay.append(param)
+    return [
+        {"params": no_decay, "weight_decay": 0.0},
+        {"params": decay, "weight_decay": weight_decay},
+    ]
+
+
+def add_model_params(params_list, model, weight_decay):
+    params_list.extend(set_weight_decay(model, weight_decay))
+
+
 def remove_diagonal(x: torch.Tensor) -> torch.Tensor:
     r"""
     Removes the diagonal elements of a square matrix and returns the off-diagonal elements as a matrix.

@@ -348,7 +348,7 @@ class EmbeddingEncoder(nn.Module):
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         self.encoder = encoder
 
-    def forward(self, **kwargs) -> torch.Tensor:
+    def forward(self, dummy, **kwargs) -> torch.Tensor:
         """
         Forward pass through the embedding layer and then the encoder.
 

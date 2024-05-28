@@ -314,11 +314,11 @@ class LikelihoodRatioEstimator(nn.Module):
         neg_logits = remove_diagonal(logits) if self.remove_neg_diagonal else logits
 
         if self.symmetric_negatives:
-            logits = self.kernel(z_y, z_y, kernel_scale) * inverse_temperature
+            logits = self.kernel(z_x, z_x, kernel_scale) * inverse_temperature
             neg_logits = torch.cat(
                 [
                     neg_logits,
-                    remove_diagonal(logits) if self.remove_neg_diagonal else logits,
+                    remove_diagonal(logits),
                 ],
                 dim=-1,
             )
@@ -332,7 +332,7 @@ class LikelihoodRatioEstimator(nn.Module):
         self,
         pos_logits: torch.Tensor,
         neg_logits: torch.Tensor,
-        z_y: torch.Tensor,
+        z_x: torch.Tensor,
         log_baseline: torch.Tensor,
         kernel_scale: torch.Tensor,
         inverse_temperature: torch.Tensor,
@@ -343,7 +343,7 @@ class LikelihoodRatioEstimator(nn.Module):
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
 
         embedding_prior = diagonal(
-            self.kernel(z_y, torch.zeros_like(z_y), kernel_scale)
+            self.kernel(z_x, torch.zeros_like(z_x), kernel_scale)
         ).unsqueeze(1)
         embedding_decay = -self.embedding_decay * embedding_prior.mean()
 
@@ -398,8 +398,8 @@ class LikelihoodRatioEstimator(nn.Module):
             projector_x=projector_x,
         )
 
-        kernel_scale = self.kernel_scale(z_y=z_y)
-        inverse_temperature = self.temperature(z_y=z_y)
+        kernel_scale = self.kernel_scale(z_x=z_x)
+        inverse_temperature = self.temperature(z_x=z_x)
 
         pos_logits, neg_logits = self.compute_logits(
             z_x=z_x,
@@ -409,13 +409,13 @@ class LikelihoodRatioEstimator(nn.Module):
         )
 
         log_baseline = self.baseline(
-            pos_logits=pos_logits, neg_logits=neg_logits, y=y, z_y=z_y
+            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
         )
 
         return self.compute_loss_and_metrics(
             pos_logits=pos_logits,
             neg_logits=neg_logits,
-            z_y=z_y,
+            z_x=z_x,
             log_baseline=log_baseline,
             kernel_scale=kernel_scale,
             inverse_temperature=inverse_temperature,

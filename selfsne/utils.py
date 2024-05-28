@@ -422,6 +422,8 @@ def split_logits(
     """
     batch_size, num_classes = logits.shape
 
+    labels = labels.reshape(-1, 1)
+
     # extract positive logits
     pos_logits = logits.gather(1, labels)
 

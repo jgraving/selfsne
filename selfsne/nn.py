@@ -334,6 +334,30 @@ class InputNorm3d(nn.BatchNorm3d):
         return x_norm
 
 
+class EmbeddingEncoder(nn.Module):
+    def __init__(self, num_embeddings: int, embedding_dim: int, encoder: nn.Module):
+        """
+        Initialize the EmbeddingEncoder module.
+
+        Args:
+            num_embeddings (int): The size of the embedding dictionary.
+            embedding_dim (int): The dimension of each embedding vector.
+            encoder (nn.Module): The encoder module to encode the embedding parameters.
+        """
+        super(EmbeddingEncoder, self).__init__()
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+        self.encoder = encoder
+
+    def forward(self, **kwargs) -> torch.Tensor:
+        """
+        Forward pass through the embedding layer and then the encoder.
+
+        Returns:
+            torch.Tensor: The output after passing the embedding parameters through the encoder.
+        """
+        return self.encoder(self.embedding.weight)
+
+
 class PadShift(nn.Module):
     def forward(self, x):
         return F.pad(x, pad=(1, 0))[..., :-1]

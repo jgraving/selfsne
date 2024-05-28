@@ -62,42 +62,11 @@ from selfsne.utils import (
     off_diagonal,
     stop_gradient,
     random_sample_columns,
+    split_logits,
 )
 
 from typing import Optional, Union, Tuple, List, Callable, Dict
 from copy import deepcopy
-
-
-# def classifier_metrics(pos_logits, neg_logits):
-#     """
-#     Calculates accuracy, recall, and precision given positive and negative logits.
-
-#     Args:
-#         pos_logits (torch.Tensor): A tensor of positive logits of shape (batch_size,).
-#         neg_logits (torch.Tensor): A tensor of negative logits of shape (batch_size,).
-#         threshold (float): A threshold to convert logits to binary predictions. Defaults to 0.5.
-
-#     Returns:
-#         accuracy (float): The accuracy score
-#         recall (float): The recall score.
-#         precision (float): The precision score.
-#     """
-#     # Combine positive and negative logits
-#     logits = torch.cat((pos_logits, neg_logits), dim=0)
-
-#     # Create binary labels (1 for positive, 0 for negative)
-#     target = torch.cat(
-#         (
-#             torch.ones_like(pos_logits, dtype=torch.long, device=logits.device),
-#             torch.zeros_like(neg_logits, dtype=torch.long, device=logits.device),
-#         ),
-#         dim=0,
-#     )
-#     return (
-#         binary_accuracy(logits, target),
-#         binary_recall(logits, target),
-#         binary_precision(logits, target),
-#     )
 
 
 def classifier_metrics(pos_logits, neg_logits, threshold=True):
@@ -223,6 +192,7 @@ class LikelihoodRatioEstimator(nn.Module):
         symmetric_negatives: bool = False,
         remove_neg_diagonal: bool = True,
         concat_chunk_encode: bool = False,
+        classification: bool = False,
     ) -> None:
 
         super().__init__()
@@ -273,6 +243,7 @@ class LikelihoodRatioEstimator(nn.Module):
         self.symmetric_negatives = symmetric_negatives
         self.remove_neg_diagonal = remove_neg_diagonal
         self.concat_chunk_encode = concat_chunk_encode
+        self.classification = classification
 
     def encode(
         self,
@@ -282,6 +253,7 @@ class LikelihoodRatioEstimator(nn.Module):
         projector: nn.Module,
         encoder_x: Optional[nn.Module] = None,
         projector_x: Optional[nn.Module] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         if encoder_x is not None:
@@ -301,12 +273,13 @@ class LikelihoodRatioEstimator(nn.Module):
 
         return z_x, z_y
 
-    def compute_logits(
+    def logits(
         self,
         z_x: torch.Tensor,
         z_y: torch.Tensor,
         kernel_scale: torch.Tensor,
         inverse_temperature: torch.Tensor,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
@@ -328,7 +301,7 @@ class LikelihoodRatioEstimator(nn.Module):
 
         return pos_logits, neg_logits
 
-    def compute_loss_and_metrics(
+    def loss_and_metrics(
         self,
         pos_logits: torch.Tensor,
         neg_logits: torch.Tensor,
@@ -336,6 +309,7 @@ class LikelihoodRatioEstimator(nn.Module):
         log_baseline: torch.Tensor,
         kernel_scale: torch.Tensor,
         inverse_temperature: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
 
         pos_logits = pos_logits - log_baseline
@@ -366,6 +340,8 @@ class LikelihoodRatioEstimator(nn.Module):
             "neg_logits": neg_logits.mean(),
             "pos_prob": pos_logits.sigmoid().mean(),
             "neg_prob": neg_logits.sigmoid().mean(),
+            "attraction": attraction,
+            "repulsion": repulsion,
             "log_baseline": log_baseline.mean(),
             "inverse_temperature": inverse_temperature.mean(),
             "kernel_scale": kernel_scale.mean(),
@@ -401,7 +377,7 @@ class LikelihoodRatioEstimator(nn.Module):
         kernel_scale = self.kernel_scale(z_x=z_x)
         inverse_temperature = self.temperature(z_x=z_x)
 
-        pos_logits, neg_logits = self.compute_logits(
+        pos_logits, neg_logits = self.logits(
             z_x=z_x,
             z_y=z_y,
             kernel_scale=kernel_scale,
@@ -412,7 +388,7 @@ class LikelihoodRatioEstimator(nn.Module):
             pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
         )
 
-        return self.compute_loss_and_metrics(
+        return self.loss_and_metrics(
             pos_logits=pos_logits,
             neg_logits=neg_logits,
             z_x=z_x,
@@ -423,6 +399,66 @@ class LikelihoodRatioEstimator(nn.Module):
 
 
 DensityRatioEstimator = LikelihoodRatioEstimator
+
+
+class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
+    def logits(
+        self,
+        z_x: torch.Tensor,
+        z_y: torch.Tensor,
+        labels: torch.Tensor,
+        kernel_scale: torch.Tensor,
+        inverse_temperature: torch.Tensor,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
+
+        return split_logits(logits, labels)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        encoder: nn.Module,
+        projector: nn.Module,
+        encoder_x: Optional[nn.Module] = None,
+        projector_x: Optional[nn.Module] = None,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+
+        z_x, z_y = self.encode(
+            x=x,
+            y=y,
+            encoder=encoder,
+            projector=projector,
+            encoder_x=encoder_x,
+            projector_x=projector_x,
+        )
+
+        kernel_scale = self.kernel_scale(z_x=z_x)
+        inverse_temperature = self.temperature(z_x=z_x)
+
+        pos_logits, neg_logits = self.logits(
+            z_x=z_x,
+            z_y=z_y,
+            labels=y,
+            kernel_scale=kernel_scale,
+            inverse_temperature=inverse_temperature,
+        )
+
+        log_baseline = self.baseline(
+            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+        )
+
+        return self.loss_and_metrics(
+            pos_logits=pos_logits,
+            neg_logits=neg_logits,
+            z_x=z_x,
+            log_baseline=log_baseline,
+            kernel_scale=kernel_scale,
+            inverse_temperature=inverse_temperature,
+        )
 
 
 class EncoderProjectorLoss(nn.Module):

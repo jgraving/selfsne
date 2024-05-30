@@ -99,11 +99,12 @@ def classifier_metrics(pos_logits, neg_logits, threshold=True):
         FN = 1 - pos_probs  # False Negative probabilities for positive class
 
     # Calculate metrics
-    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    accuracy = (TP + TN) / 2
     precision = TP / (TP + FP)
     npv = TN / (TN + FN)
     recall = TP / (TP + FN)
-    specificity = TN / (TN + FP)
+    recall = TP
+    specificity = TN
 
     return {
         "accuracy": accuracy,

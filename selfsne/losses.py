@@ -102,7 +102,7 @@ def classifier_metrics(pos_logits, neg_logits, threshold=True):
     accuracy = (TP + TN) / 2
     precision = TP / (TP + FP)
     npv = TN / (TN + FN)
-    recall = TP / (TP + FN)
+    apv = (precision + npv) / 2
     recall = TP
     specificity = TN
 
@@ -112,6 +112,7 @@ def classifier_metrics(pos_logits, neg_logits, threshold=True):
         "precision": precision,
         "specificity": specificity,
         "npv": npv,
+        "apv": apv,
     }
 
 

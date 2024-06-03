@@ -416,7 +416,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
 
         logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
 
-        return split_logits(logits, labels)
+        return split_logits(logits, labels), logits
 
     def forward(
         self,
@@ -441,7 +441,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         kernel_scale = self.kernel_scale(z_x=z_x)
         inverse_temperature = self.temperature(z_x=z_x)
 
-        pos_logits, neg_logits = self.logits(
+        (pos_logits, neg_logits), logits = self.logits(
             z_x=z_x,
             z_y=z_y,
             labels=y,
@@ -460,7 +460,52 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             log_baseline=log_baseline,
             kernel_scale=kernel_scale,
             inverse_temperature=inverse_temperature,
+            labels=y,
+            logits=logits,
         )
+
+    def loss_and_metrics(
+        self,
+        pos_logits: torch.Tensor,
+        neg_logits: torch.Tensor,
+        z_x: torch.Tensor,
+        log_baseline: torch.Tensor,
+        kernel_scale: torch.Tensor,
+        inverse_temperature: torch.Tensor,
+        labels: torch.Tensor,
+        logits: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+
+        # Get the base metrics using super
+        metrics = super().loss_and_metrics(
+            pos_logits=pos_logits,
+            neg_logits=neg_logits,
+            z_x=z_x,
+            log_baseline=log_baseline,
+            kernel_scale=kernel_scale,
+            inverse_temperature=inverse_temperature,
+            **kwargs,
+        )
+
+        # Calculate top-1 and top-5 accuracy
+        metrics["top1_accuracy"] = self.calculate_topk_accuracy(logits, labels, k=1)
+        metrics["top5_accuracy"] = self.calculate_topk_accuracy(logits, labels, k=5)
+
+        return metrics
+
+    def calculate_topk_accuracy(
+        self, logits: torch.Tensor, labels: torch.Tensor, k: int
+    ) -> torch.Tensor:
+        # Get the top k predictions
+        topk_preds = torch.topk(logits, k, dim=1).indices
+        # Check if true labels are in the top k predictions
+        correct = topk_preds.eq(labels.view(-1, 1).expand_as(topk_preds)).any(dim=1)
+        # Convert correct predictions to the same dtype as logits
+        correct = correct.to(logits.dtype)
+        # Calculate the mean accuracy
+        accuracy = correct.mean()
+        return accuracy
 
 
 class EncoderProjectorLoss(nn.Module):

@@ -280,7 +280,7 @@ def pairwise_inner_product(
         torch.Tensor: The pairwise inner product kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return (x2 @ x1.T).div(scale)
+    return (x1 @ x2.T).div(scale)
 
 
 def von_mises(

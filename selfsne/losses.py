@@ -416,7 +416,9 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
 
         logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
 
-        return split_logits(logits, labels), logits
+        # extract positive logits
+        pos_logits = logits.gather(1, labels.reshape(-1, 1))
+        return pos_logits, logits
 
     def forward(
         self,
@@ -441,7 +443,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         kernel_scale = self.kernel_scale(z_x=z_x)
         inverse_temperature = self.temperature(z_x=z_x)
 
-        (pos_logits, neg_logits), logits = self.logits(
+        pos_logits, logits = self.logits(
             z_x=z_x,
             z_y=z_y,
             labels=y,
@@ -450,12 +452,12 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         )
 
         log_baseline = self.baseline(
-            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+            pos_logits=pos_logits, neg_logits=logits, x=x, z_x=z_x
         )
 
         return self.loss_and_metrics(
             pos_logits=pos_logits,
-            neg_logits=neg_logits,
+            neg_logits=logits,
             z_x=z_x,
             log_baseline=log_baseline,
             kernel_scale=kernel_scale,

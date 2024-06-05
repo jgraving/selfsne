@@ -379,7 +379,7 @@ def set_weight_decay(model, weight_decay):
     decay = []
     no_decay = []
     for name, param in model.named_parameters():
-        if "bias" in name or "bn" in name:
+        if "bias" in name:
             no_decay.append(param)
         else:
             decay.append(param)

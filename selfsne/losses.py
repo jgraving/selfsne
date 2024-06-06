@@ -146,16 +146,6 @@ class LikelihoodRatioEstimator(nn.Module):
         num_negatives (Optional[int]): Number of negative samples to use. Default is None.
         embedding_decay (float): Weight decay for the embeddings. Default is 0.0.
 
-
-    Returns:
-        Tuple[torch.Tensor]: A tuple containing four tensors:
-            [0] The mean of the positive logits, i.e., the diagonal entries of the
-                kernel matrix (shape: (1,))
-            [1] The mean of the negative logits, i.e., the off-diagonal entries of
-                the kernel matrix (shape: (1,))
-            [2] The mean of the log-baseline (shape: (1,))
-            [3] The similarity loss, the combined attraction and repulsion terms and embedding decay (shape: (1,))
-
     References:
         [1] Gutmann, M., & Hyvärinen, A. (2010). Noise-contrastive estimation:
             A new estimation principle for unnormalized statistical models.
@@ -194,7 +184,6 @@ class LikelihoodRatioEstimator(nn.Module):
         symmetric_negatives: bool = False,
         remove_neg_diagonal: bool = True,
         concat_chunk_encode: bool = False,
-        classification: bool = False,
     ) -> None:
 
         super().__init__()
@@ -245,7 +234,6 @@ class LikelihoodRatioEstimator(nn.Module):
         self.symmetric_negatives = symmetric_negatives
         self.remove_neg_diagonal = remove_neg_diagonal
         self.concat_chunk_encode = concat_chunk_encode
-        self.classification = classification
 
     def encode(
         self,

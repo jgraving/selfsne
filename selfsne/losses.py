@@ -392,38 +392,119 @@ DensityRatioEstimator = LikelihoodRatioEstimator
 
 
 class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
+    """
+    A generalized contrastive loss for unnormalized likelihood ratio estimation based on
+    Noise Contrastive Estimation (NCE). For representation learning the loss preserves embedding
+    structure by maximizing similarity for positive pairs and minimizing similarity
+    for negative (noise) pairs.
+
+    A user-selected similarity kernel is used to calculate the log likelihood ratio ("logits")
+    for each pair, which are then optimized by a user-selected divergence function to
+    maximize logits for positive pairs (attraction) and minimize logits for negative pairs
+    (repulsion).
+
+    Args:
+        kernel (Union[str, callable]): Similarity kernel used for calculating logits.
+            Must be one of selfsne.kernels.KERNELS or a callable that takes in two 2D tensors and returns a pairwise 2D tensor.
+            For example, "cauchy" can be used to produce t-SNE or UMAP embeddings, "normal" can be used to
+            produce SNE embeddings, and "vonmises" can be used for (hyper)spherical embeddings.
+        kernel_scale (Union[float, str]): Positive scale value for calculating logits.
+            Can also be "parametric" to learn the scale as part of the model. Default is 1.0.
+        temperature (Union[float, str]): The temperature for the logits. Larger values create more
+            uniform embeddings. Can also be "parametric" to learn the temperature as part of the model.
+            Default is 1.0.
+        divergence (Union[str, callable]): Divergence function used for instance classification.
+            Must be one of selfsne.divergences.DIVERGENCES or a callable that takes in two 2D tensors and returns a scalar.
+        baseline (Union[str, float, callable]): The baseline for calculating the log density ratio.
+            Must be a float, string (one of selfsne.baselines.BASELINES), or nn.Module such as from selfsne.baselines.
+            Default is "batch".
+        embedding_decay (float): Weight decay for the embeddings. Default is 0.0.
+        num_classes (int): Number of classes for the classifier. Default is 10.
+        embedding_dim (int): Dimensionality of the embeddings. Default is 128.
+
+
+    References:
+        [1] Gutmann, M., & Hyvärinen, A. (2010). Noise-contrastive estimation:
+            A new estimation principle for unnormalized statistical models.
+            In Proceedings of the thirteenth international conference on artificial
+            intelligence and statistics (pp. 297-304). JMLR Workshop and
+            Conference Proceedings.
+        [2] Oord, A. V. D., Li, Y., & Vinyals, O. (2018).
+            Representation learning with contrastive predictive coding.
+            arXiv preprint arXiv:1807.03748.
+        [3] Van Der Maaten, L. (2009). Learning a parametric embedding
+            by preserving local structure. In Artificial intelligence
+            and statistics (pp. 384-391). PMLR.
+        [4] Sainburg, T., McInnes, L., & Gentner, T. Q. (2021).
+            Parametric UMAP Embeddings for Representation and Semisupervised
+            Learning. Neural Computation, 33(11), 2881-2907.
+        [5] Hinton, G. E., & Roweis, S. (2002). Stochastic neighbor embedding.
+            Advances in neural information processing systems, 15.
+        [6] Chen, T., Kornblith, S., Norouzi, M., & Hinton, G. (2020).
+            A simple framework for contrastive learning of visual representations.
+            In International conference on machine learning (pp. 1597-1607). PMLR.
+        [7] Wang, M., & Wang, D. (2016). Vmf-sne: Embedding for spherical
+            data. In 2016 IEEE International Conference on Acoustics, Speech
+            and Signal Processing (ICASSP) (pp. 2344-2348). IEEE.
+
+    """
+
+    def __init__(
+        self,
+        kernel: Union[str, callable] = "cauchy",
+        kernel_scale: Union[float, str] = 1.0,
+        temperature: float = 1.0,
+        divergence: Union[str, callable] = "kld",
+        baseline: Union[str, float, callable] = "batch",
+        embedding_decay: float = 0,
+        num_classes: int = 10,
+        embedding_dim: int = 128,
+    ) -> None:
+        super().__init__(
+            kernel=kernel,
+            kernel_scale=kernel_scale,
+            temperature=temperature,
+            divergence=divergence,
+            baseline=baseline,
+            num_negatives=None,
+            embedding_decay=embedding_decay,
+            symmetric_negatives=False,
+            remove_neg_diagonal=False,
+            concat_chunk_encode=False,
+            **kwargs,
+        )
+
+        self.class_embedding = nn.Embedding(num_classes, embedding_dim)
+        self.identity = nn.Identity()
+
     def logits(
         self,
         z_x: torch.Tensor,
-        z_y: torch.Tensor,
-        labels: torch.Tensor,
         kernel_scale: torch.Tensor,
         inverse_temperature: torch.Tensor,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        logits = self.kernel(z_x, z_y, kernel_scale) * inverse_temperature
-
-        # extract positive logits
-        pos_logits = logits.gather(1, labels.reshape(-1, 1))
-        return pos_logits, logits
+        logits = (
+            self.kernel(z_x, self.class_embedding.weight, kernel_scale)
+            * inverse_temperature
+        )
+        return logits
 
     def forward(
         self,
         x: torch.Tensor,
         y: torch.Tensor,
-        encoder: nn.Module,
-        projector: nn.Module,
         encoder_x: Optional[nn.Module] = None,
         projector_x: Optional[nn.Module] = None,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
 
-        z_x, z_y = self.encode(
+        z_x, _ = self.encode(
             x=x,
             y=y,
-            encoder=encoder,
-            projector=projector,
+            encoder=self.identity,
+            projector=self.identity,
             encoder_x=encoder_x,
             projector_x=projector_x,
         )
@@ -431,13 +512,13 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         kernel_scale = self.kernel_scale(z_x=z_x)
         inverse_temperature = self.temperature(z_x=z_x)
 
-        pos_logits, logits = self.logits(
+        logits = self.logits(
             z_x=z_x,
-            z_y=z_y,
             labels=y,
             kernel_scale=kernel_scale,
             inverse_temperature=inverse_temperature,
         )
+        pos_logits = logits.gather(1, y.reshape(-1, 1))
 
         log_baseline = self.baseline(
             pos_logits=pos_logits, neg_logits=logits, x=x, z_x=z_x
@@ -451,7 +532,6 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             kernel_scale=kernel_scale,
             inverse_temperature=inverse_temperature,
             labels=y,
-            logits=logits,
         )
 
     def loss_and_metrics(
@@ -463,7 +543,6 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         kernel_scale: torch.Tensor,
         inverse_temperature: torch.Tensor,
         labels: torch.Tensor,
-        logits: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
 
@@ -479,8 +558,8 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         )
 
         # Calculate top-1 and top-5 accuracy
-        metrics["top1_accuracy"] = self.calculate_topk_accuracy(logits, labels, k=1)
-        metrics["top5_accuracy"] = self.calculate_topk_accuracy(logits, labels, k=5)
+        metrics["top1_accuracy"] = self.calculate_topk_accuracy(neg_logits, labels, k=1)
+        metrics["top5_accuracy"] = self.calculate_topk_accuracy(neg_logits, labels, k=5)
 
         return metrics
 

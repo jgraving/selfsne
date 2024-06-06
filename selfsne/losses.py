@@ -459,6 +459,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         embedding_decay: float = 0,
         num_classes: int = 10,
         embedding_dim: int = 128,
+        **kwargs,
     ) -> None:
         super().__init__(
             kernel=kernel,

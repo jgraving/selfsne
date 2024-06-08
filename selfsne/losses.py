@@ -567,21 +567,18 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             labels,
             task="multiclass",
             num_classes=self.num_classes,
-            average="macro",
         )
         metrics["multiclass_recall"] = recall(
             neg_logits,
             labels,
             task="multiclass",
             num_classes=self.num_classes,
-            average="macro",
         )
         metrics["multiclass_f1_score"] = f1_score(
             neg_logits,
             labels,
             task="multiclass",
             num_classes=self.num_classes,
-            average="macro",
         )
 
         return metrics

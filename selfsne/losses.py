@@ -452,6 +452,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         temperature: float = 1.0,
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = "batch",
+        num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
         num_classes: int = 10,
         embedding_dim: int = 128,
@@ -463,7 +464,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             temperature=temperature,
             divergence=divergence,
             baseline=baseline,
-            num_negatives=None,
+            num_negatives=num_negatives,
             embedding_decay=embedding_decay,
             symmetric_negatives=False,
             remove_neg_diagonal=False,
@@ -544,11 +545,12 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         labels: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
-
         # Get the base metrics using super
         metrics = super().loss_and_metrics(
             pos_logits=pos_logits,
-            neg_logits=neg_logits,
+            neg_logits=random_sample_columns(neg_logits, self.num_negatives)
+            if self.num_negatives
+            else neg_logits,
             z_x=z_x,
             log_baseline=log_baseline,
             kernel_scale=kernel_scale,

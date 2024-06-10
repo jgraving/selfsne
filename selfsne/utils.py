@@ -19,6 +19,7 @@ import pytorch_lightning as pl
 import numpy as np
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from einops import rearrange, repeat
@@ -378,11 +379,20 @@ def off_diagonal(x: torch.Tensor) -> torch.Tensor:
 def set_weight_decay(model, weight_decay):
     decay = []
     no_decay = []
-    for name, param in model.named_parameters():
-        if "bias" in name:
-            no_decay.append(param)
+
+    for module in model.modules():
+        if isinstance(
+            module, (nn.Embedding, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm)
+        ):
+            for param in module.parameters():
+                no_decay.append(param)
         else:
-            decay.append(param)
+            for name, param in module.named_parameters(recurse=False):
+                if "bias" in name:
+                    no_decay.append(param)
+                else:
+                    decay.append(param)
+
     return [
         {"params": no_decay, "weight_decay": 0.0},
         {"params": decay, "weight_decay": weight_decay},

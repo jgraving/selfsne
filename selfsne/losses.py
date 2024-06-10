@@ -48,8 +48,6 @@ from torch import diagonal
 from torch.nn import ModuleList
 import torch.nn.functional as F
 
-from torchmetrics.functional import accuracy, precision, recall, f1_score
-
 from selfsne.kernels import PAIRWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
@@ -561,26 +559,6 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         # Calculate top-1 and top-5 accuracy
         metrics["top1_accuracy"] = self.calculate_topk_accuracy(neg_logits, labels, k=1)
         metrics["top5_accuracy"] = self.calculate_topk_accuracy(neg_logits, labels, k=5)
-        # Calculate precision, recall, and F1-score using torchmetrics functional API
-        metrics["multiclass_precision"] = precision(
-            neg_logits,
-            labels,
-            task="multiclass",
-            num_classes=self.num_classes,
-        )
-        metrics["multiclass_recall"] = recall(
-            neg_logits,
-            labels,
-            task="multiclass",
-            num_classes=self.num_classes,
-        )
-        metrics["multiclass_f1_score"] = f1_score(
-            neg_logits,
-            labels,
-            task="multiclass",
-            num_classes=self.num_classes,
-        )
-
         return metrics
 
     def calculate_topk_accuracy(

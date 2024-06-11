@@ -94,6 +94,29 @@ class ReverseNCE(BaseNCE):
         return attraction, repulsion
 
 
+def reweighted_divergence(divergence_fn):
+    def wrapper(pos_logits, neg_logits):
+        n = pos_logits.numel()
+        m = neg_logits.numel()
+
+        if m / n >= 1:
+            log_ratio = np.log(m / n)
+            attraction, repulsion = divergence_fn(
+                pos_logits - log_ratio, neg_logits - log_ratio
+            )
+            repulsion = (m / n) * repulsion
+        else:
+            log_ratio = np.log(n / m)
+            attraction, repulsion = divergence_fn(
+                pos_logits + log_ratio, neg_logits + log_ratio
+            )
+            attraction = (n / m) * attraction
+
+        return attraction, repulsion
+
+    return wrapper
+
+
 class AlphaNCE(BaseNCE):
     def __init__(self, alpha=0.5, k=None, log_k=None):
         super(AlphaNCE, self).__init__(alpha=alpha, k=k, log_k=log_k)

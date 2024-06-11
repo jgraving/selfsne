@@ -28,7 +28,7 @@ def laplace(
     Computes the log Laplace kernel between two sets of points x1 and x2, with a given scale.
 
     The log Laplace kernel is defined as:
-    K(x1, x2) = - ||x1 - x2||_1 / scale
+    K(x1, x2) = - ||x1 - x2||_1 / (scale * sqrt(dim))
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -39,7 +39,8 @@ def laplace(
         torch.Tensor: The Laplace kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).abs().sum(-1).div(scale).neg()
+    dim_scale = scale * np.sqrt(x1.shape[-1])
+    return (x1 - x2).abs().sum(-1).div(dim_scale).neg()
 
 
 def pairwise_laplace(
@@ -49,7 +50,7 @@ def pairwise_laplace(
     Computes the pairwise log Laplace kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Laplace kernel is defined as:
-    K(x1_i, x2_j) = - ||x1_i - x2_j||_1 / scale
+    K(x1_i, x2_j) = - ||x1_i - x2_j||_1 / (scale * sqrt(dim))
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -60,7 +61,8 @@ def pairwise_laplace(
         torch.Tensor: The pairwise Laplace kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2, p=1).div(scale).neg()
+    dim_scale = scale * np.sqrt(x1.shape[-1])
+    return torch.cdist(x1, x2, p=1).div(dim_scale).neg()
 
 
 def studentt(
@@ -72,7 +74,7 @@ def studentt(
     Computes the log Student's t kernel between two sets of points x1 and x2, with a given scale.
 
     The log Student's t kernel is defined as:
-    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / scale^2 * df) * (df + 1) / 2
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / (scale^2 * dim)) * (df + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -83,7 +85,8 @@ def studentt(
         torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).pow(2).sum(-1).div(scale).log1p().neg() * (scale + 1) / 2
+    dim_scale = scale * x1.shape[-1]
+    return (x1 - x2).pow(2).sum(-1).div(dim_scale).log1p().neg() * (scale + 1) / 2
 
 
 def pairwise_studentt(
@@ -95,7 +98,7 @@ def pairwise_studentt(
     Computes the pairwise log Student's t kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Student's t kernel is defined as:
-    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2 * df) * (df + 1) / 2
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / (scale^2 * dim)) * (df + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -106,7 +109,10 @@ def pairwise_studentt(
         torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2, p=2).pow(2).div(scale).log1p().neg() * (scale + 1) / 2
+    dim_scale = scale * x1.shape[-1]
+    return (
+        torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).log1p().neg() * (scale + 1) / 2
+    )
 
 
 def cauchy(
@@ -116,7 +122,7 @@ def cauchy(
     Computes the log Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The log Cauchy kernel is defined as:
-    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / scale^2)
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / (scale^2 * dim))
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -127,7 +133,8 @@ def cauchy(
         torch.Tensor: The row-wise Cauchy kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).pow(2).sum(-1).div(scale ** 2).log1p().neg()
+    dim_scale = (scale ** 2) * x1.shape[-1]
+    return (x1 - x2).pow(2).sum(-1).div(dim_scale).log1p().neg()
 
 
 def pairwise_cauchy(
@@ -137,7 +144,7 @@ def pairwise_cauchy(
     Computes the pairwise log Cauchy kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log Cauchy kernel is defined as:
-    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / scale^2)
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / (scale^2 * dim))
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -148,7 +155,8 @@ def pairwise_cauchy(
         torch.Tensor: The pairwise Cauchy kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2, p=2).div(scale).pow(2).log1p().neg()
+    dim_scale = (scale ** 2) * x1.shape[-1]
+    return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).log1p().neg()
 
 
 def inverse(
@@ -158,7 +166,7 @@ def inverse(
     Computes the log inverse kernel between two sets of points x1 and x2, with a given scale.
 
     The log inverse kernel is defined as:
-    K(x1, x2) = -log(eps + ||x1 - x2||_2^2 / scale^2)
+    K(x1, x2) = -log(eps + ||x1 - x2||_2^2 / (scale^2 * dim))
 
     where eps is a small constant to avoid taking the logarithm of zero.
 
@@ -171,8 +179,9 @@ def inverse(
         torch.Tensor: The row-wise inverse kernel matrix, of shape (batch_size,).
 
     """
+    dim_scale = (scale ** 2) * x1.shape[-1]
     eps = torch.finfo(x1.dtype).eps
-    return -(x1 - x2).pow(2).sum(-1).div(scale ** 2).clamp(min=eps).log()
+    return -(x1 - x2).pow(2).sum(-1).div(dim_scale).clamp(min=eps).log()
 
 
 def pairwise_inverse(
@@ -182,7 +191,7 @@ def pairwise_inverse(
     Computes the pairwise log inverse kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log inverse kernel is defined as:
-    K(x1_i, x2_j) = -log(eps + ||x1_i - x2_j||_2^2 / scale^2)
+    K(x1_i, x2_j) = -log(eps + ||x1_i - x2_j||_2^2 / (scale^2 * dim))
 
     where eps is a small constant to avoid taking the logarithm of zero.
 
@@ -195,8 +204,9 @@ def pairwise_inverse(
         torch.Tensor: The pairwise inverse kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
+    dim_scale = (scale ** 2) * x1.shape[-1]
     eps = torch.finfo(x1.dtype).eps
-    return torch.cdist(x1, x2, p=2).div(scale).pow(2).clamp(min=eps).log().neg()
+    return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).clamp(min=eps).log().neg()
 
 
 def normal(
@@ -206,7 +216,7 @@ def normal(
     Computes the log normal kernel between two sets of points x1 and x2, with a given scale.
 
     The log normal kernel is defined as:
-    K(x1, x2) = -1/2 * ||x1 - x2||_2^2 / scale^2
+    K(x1, x2) = -1/2 * ||x1 - x2||_2^2 / (scale^2 * dim)
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -217,7 +227,8 @@ def normal(
         torch.Tensor: The row-wise normal kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 - x2).div(scale).pow(2).sum(-1).div(2).neg()
+    dim_scale = (scale ** 2) * x1.shape[-1]
+    return (x1 - x2).pow(2).sum(-1).div(dim_scale).div(2).neg()
 
 
 def pairwise_normal(
@@ -227,7 +238,7 @@ def pairwise_normal(
     Computes the pairwise log normal kernel between two sets of points x1 and x2, with a given scale.
 
     The pairwise log normal kernel is defined as:
-    K(x1_i, x2_j) = -1/2 * ||x1_i - x2_j||_2^2 / scale^2
+    K(x1_i, x2_j) = -1/2 * ||x1_i - x2_j||_2^2 / (scale^2 * dim)
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -238,7 +249,8 @@ def pairwise_normal(
         torch.Tensor: The pairwise normal kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return torch.cdist(x1, x2).div(scale).pow(2).div(2).neg()
+    dim_scale = (scale ** 2) * x1.shape[-1]
+    return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).div(2).neg()
 
 
 def inner_product(
@@ -259,7 +271,8 @@ def inner_product(
         torch.Tensor: The row-wise inner product kernel matrix, of shape (batch_size,).
 
     """
-    return (x1 * x2).sum(-1).div(scale)
+    dim_scale = scale * np.sqrt(x1.shape[-1])
+    return (x1 * x2).sum(-1).div(dim_scale)
 
 
 def pairwise_inner_product(
@@ -280,7 +293,8 @@ def pairwise_inner_product(
         torch.Tensor: The pairwise inner product kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return (x1 @ x2.T).div(scale)
+    dim_scale = scale * np.sqrt(x1.shape[-1])
+    return (x1 @ x2.T).div(dim_scale)
 
 
 def von_mises(

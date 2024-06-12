@@ -378,7 +378,7 @@ class LikelihoodRatioEstimator(nn.Module):
         )
 
         log_baseline = self.baseline(
-            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+            pos_logits=pos_logits, neg_logits=neg_logits, z_x=z_x, z_y=z_y
         )
 
         return self.loss_and_metrics(
@@ -530,7 +530,10 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         pos_logits = logits.gather(1, y.reshape(-1, 1))
 
         log_baseline = self.baseline(
-            pos_logits=pos_logits, neg_logits=logits, x=x, z_x=z_x
+            pos_logits=pos_logits,
+            neg_logits=logits,
+            z_x=z_x,
+            z_y=self.class_embedding.weight,
         )
 
         return self.loss_and_metrics(

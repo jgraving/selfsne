@@ -20,6 +20,7 @@ from torch.nn import init
 import numpy as np
 
 from selfsne.nn import init_selu
+from selfsne.kernels import pairwise_inner_product
 from selfsne.utils import (
     off_diagonal,
     remove_diagonal,
@@ -282,6 +283,57 @@ class ParametricConditionalBaseline(nn.Module):
 
 
 ConditionalBaseline = ParametricConditionalBaseline
+
+
+class BilinearBaseline(nn.Module):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        param_dim: int = 1024,
+        activation: Optional[nn.Module] = nn.Identity(),
+        bias_init: float = 0.0,  # Default bias initialization value
+    ):
+        """
+        Initializes a bilinear baseline module.
+
+        Args:
+            encoder (nn.Module): Encoder module to encode the input tensors z_x and z_y.
+            activation (nn.Module, optional): Activation function to apply to the output. Defaults to nn.Identity().
+        """
+        super().__init__()
+        self.encoder = encoder
+        self.parametric_baseline = ParametricBaseline(param_dim, bias_init=bias_init)
+        self.activation = activation if activation is not None else nn.Identity()
+
+    def forward(
+        self,
+        z_x: Optional[torch.Tensor] = None,
+        z_y: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Calculates the bilinear baseline for given sets of embedded data z_x and z_y.
+
+        Args:
+            z_x (torch.Tensor, optional): Embedded data input to the encoder.
+            z_y (torch.Tensor, optional): Another set of embedded data input to the encoder.
+
+        Returns:
+            torch.Tensor: Bilinear baseline for the data z_x and z_y.
+        """
+        if z_x is None or z_y is None:
+            raise ValueError("Both z_x and z_y must be provided")
+
+        encoded_x = self.encoder(z_x)
+        encoded_y = self.encoder(z_y)
+
+        dot_product = pairwise_inner_product(encoded_x, encoded_y)
+
+        scalar_baseline = self.parametric_baseline()
+
+        output = dot_product + scalar_baseline
+
+        return self.activation(output)
 
 
 class MixtureBaseline(nn.Module):

@@ -178,7 +178,7 @@ class LikelihoodRatioEstimator(nn.Module):
         symmetric_negatives: bool = False,
         remove_neg_diagonal: bool = True,
         concat_chunk_encode: bool = False,
-        scale_decay_weight: float = 0.0,
+        scale_decay: float = 0.0,
     ) -> None:
 
         super().__init__()
@@ -229,7 +229,7 @@ class LikelihoodRatioEstimator(nn.Module):
         self.symmetric_negatives = symmetric_negatives
         self.remove_neg_diagonal = remove_neg_diagonal
         self.concat_chunk_encode = concat_chunk_encode
-        self.scale_decay_weight = scale_decay_weight
+        self.scale_decay = scale_decay
 
     def encode(
         self,
@@ -302,11 +302,17 @@ class LikelihoodRatioEstimator(nn.Module):
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
 
-        embedding_prior = diagonal(
-            self.kernel(z_x, torch.zeros_like(z_x), kernel_scale)
-        ).unsqueeze(1)
-        embedding_decay = -self.embedding_decay * embedding_prior.mean()
-        scale_decay = -self.scale_decay_weight * kernel_scale.log().pow(2).mean()
+        if self.embedding_decay > 0:
+            embedding_prior = diagonal(
+                self.kernel(z_x, torch.zeros_like(z_y), kernel_scale)
+            ).unsqueeze(1)
+            embedding_decay = -self.embedding_decay * embedding_prior.mean()
+        else:
+            embedding_decay = torch.zeros_like(z_x).mean()
+        if self.scale_decay > 0:
+            scale_decay = -self.scale_decay * kernel_scale.log().pow(2).mean()
+        else:
+            scale_decay = torch.zeros_like(kernel_scale).mean()
 
         with torch.no_grad():
             kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
@@ -455,7 +461,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
         baseline: Union[str, float, callable] = "batch",
         num_negatives: Optional[int] = None,
         embedding_decay: float = 0,
-        scale_decay_weight: float = 0.0,
+        scale_decay: float = 0.0,
         num_classes: int = 10,
         embedding_dim: int = 128,
         **kwargs,
@@ -468,7 +474,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             baseline=baseline,
             num_negatives=num_negatives,
             embedding_decay=embedding_decay,
-            scale_decay_weight=scale_decay_weight,
+            scale_decay=scale_decay,
             symmetric_negatives=False,
             remove_neg_diagonal=False,
             concat_chunk_encode=False,

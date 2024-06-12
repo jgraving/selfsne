@@ -306,7 +306,7 @@ class LikelihoodRatioEstimator(nn.Module):
             self.kernel(z_x, torch.zeros_like(z_x), kernel_scale)
         ).unsqueeze(1)
         embedding_decay = -self.embedding_decay * embedding_prior.mean()
-        scale_decay = -self.scale_decay_weight * (kernel_scale.log() ** 2).mean()
+        scale_decay = -self.scale_decay_weight * kernel_scale.log().pow(2).mean()
 
         with torch.no_grad():
             kld_attraction, kld_repulsion = DIVERGENCES["kld"](pos_logits, neg_logits)
@@ -361,7 +361,7 @@ class LikelihoodRatioEstimator(nn.Module):
             projector_x=projector_x,
         )
 
-        kernel_scale = self.kernel_scale(z_x=z_x)
+        kernel_scale = self.kernel_scale(z_x=z_x, z_y=z_y)
         inverse_temperature = self.temperature(z_x=z_x)
 
         pos_logits, neg_logits = self.logits(
@@ -512,7 +512,7 @@ class LikelihoodRatioClassifier(LikelihoodRatioEstimator):
             projector_x=projector_x,
         )
 
-        kernel_scale = self.kernel_scale(z_x=z_x)
+        kernel_scale = self.kernel_scale(z_x=z_x, z_y=self.class_embedding.weight)
         inverse_temperature = self.temperature(z_x=z_x)
 
         logits = self.logits(

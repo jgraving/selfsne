@@ -244,7 +244,6 @@ class ParametricConditionalBaseline(nn.Module):
         self,
         encoder: nn.Module,
         param_dim: int = 1024,
-        embedding_input: bool = True,
         activation: Optional[nn.Module] = nn.Identity(),
         bias_init: float = 0.0,  # Default bias initialization value
     ):
@@ -252,19 +251,16 @@ class ParametricConditionalBaseline(nn.Module):
         Initializes a parametric conditional baseline module.
 
         Args:
-            encoder (nn.Module): Encoder module to encode the input tensor x or z_x when `embedding_input` is True.
-            embedding_input (bool, optional): Whether to pass embedded data z_x to the encoder instead of data x. Defaults to True.
+            encoder (nn.Module): Encoder module to encode the input tensor z_x.
             activation (nn.Module, optional): Activation function to apply to the output. Defaults to nn.Identity().
         """
         super().__init__()
         self.encoder = encoder
         self.parametric_baseline = ParametricBaseline(param_dim, bias_init=bias_init)
-        self.embedding_input = embedding_input
         self.activation = activation if activation is not None else nn.Identity()
 
     def forward(
         self,
-        x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
@@ -278,12 +274,7 @@ class ParametricConditionalBaseline(nn.Module):
         Returns:
             torch.Tensor: Parametric conditional baseline for the data x or z_x.
         """
-        if self.embedding_input:
-            assert z_x is not None, "z_x must be provided when embedding_input=True"
-            encoded = self.encoder(z_x)
-        else:
-            assert x is not None, "x must be provided when embedding_input=False"
-            encoded = self.encoder(x)
+        encoded = self.encoder(z_x)
 
         scalar_baseline = self.parametric_baseline()
 

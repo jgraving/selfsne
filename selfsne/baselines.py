@@ -362,6 +362,7 @@ class ArithmeticMixtureBaseline(MixtureBaseline):
         neg_logits: Optional[torch.Tensor] = None,
         x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the mixture baseline.
@@ -392,6 +393,7 @@ class HarmonicMixtureBaseline(MixtureBaseline):
         neg_logits: Optional[torch.Tensor] = None,
         x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the mixture baseline.
@@ -423,6 +425,7 @@ class GeometricMixtureBaseline(MixtureBaseline):
         neg_logits: Optional[torch.Tensor] = None,
         x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the mixture baseline.
@@ -598,6 +601,7 @@ class AdditiveBaseline(nn.Module):
         neg_logits: Optional[torch.Tensor] = None,
         x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the additive baseline.
@@ -636,6 +640,7 @@ class LogAdditiveBaseline(AdditiveBaseline):
         neg_logits: Optional[torch.Tensor] = None,
         x: Optional[torch.Tensor] = None,
         z_x: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the logarithmic additive baseline for a given set of logits and optional data x.

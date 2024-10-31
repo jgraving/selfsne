@@ -321,7 +321,7 @@ def von_mises(
     eps = torch.finfo(x1.dtype).eps
     x1_norm = x1.norm(dim=-1)
     x2_norm = x2.norm(dim=-1)
-    return inner_product(x1, x2, scale) / (x1_norm * x2_norm).clamp(min=eps)
+    return (x1 * x2).sum(-1) / (scale * x1_norm * x2_norm).clamp(min=eps)
 
 
 def pairwise_von_mises(

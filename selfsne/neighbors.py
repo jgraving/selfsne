@@ -277,20 +277,25 @@ def knn_sampler(
         torch.Tensor: A tensor of shape (batch_size,) representing the indices of the sampled neighbors for each batch element.
     """
     batch_size = x1.shape[0]
-    batch_idx = torch.arange(batch_size, device=x1.device)
+    num_samples = x2.shape[0]
+    
     similarity = kernel(x1, x2)
-
-    similarity[batch_idx, batch_idx] = NEG_INF
+    
+    # Ensure the dimensions match for proper masking
+    min_size = min(batch_size, num_samples)
+    diagonal_idx = torch.arange(min_size, device=x1.device)
+    similarity[diagonal_idx, diagonal_idx] = NEG_INF
+    
     similarity = torch.where(similarity == max_similarity, NEG_INF, similarity)
 
-    num_neighbors = min(num_neighbors, x2.shape[0])
+    num_neighbors = min(num_neighbors, num_samples)
     _, knn_index = torch.topk(similarity, num_neighbors, dim=-1)
 
     if num_neighbors > 1:
         neighbor_idx = torch.randint(
             0, num_neighbors, (batch_size,), device=knn_index.device
         )
-        sample_idx = knn_index[batch_idx, neighbor_idx]
+        sample_idx = knn_index[torch.arange(batch_size, device=knn_index.device), neighbor_idx]
     else:
         sample_idx = knn_index[:, 0]
 

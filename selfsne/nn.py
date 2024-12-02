@@ -989,12 +989,22 @@ def ResNorm(out_features, module):
 
 class SinusoidalPositionalEmbedding(nn.Module):
     """
-    Dynamically computes and applies Sinusoidal Positional Embeddings
-    to the input tokens. Assumes input tensor shape (batch_size, seq_len, model_dim).
+    Computes and applies Sinusoidal Positional Embeddings to the input tokens.
+    Assumes input tensor shape (batch_size, seq_len, model_dim).
     """
 
-    def __init__(self):
+    def __init__(self, model_dim: int):
         super(SinusoidalPositionalEmbedding, self).__init__()
+        self.model_dim = model_dim
+        # Precompute the scaling factors (div_term) as a buffer
+        self.register_buffer(
+            "div_term",
+            torch.exp(
+                torch.arange(0, model_dim, 2)
+                * -(torch.log(torch.tensor(10000.0)) / model_dim)
+            ),
+            persistent=False,  # Not saved with model state_dict
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1007,42 +1017,51 @@ class SinusoidalPositionalEmbedding(nn.Module):
             torch.Tensor: Tensor with sinusoidal positional embeddings added, same shape as input.
         """
         batch_size, seq_len, model_dim = x.shape
+        assert (
+            model_dim == self.model_dim
+        ), "Input model_dim must match initialized model_dim."
 
-        # Compute positions and div_term dynamically
-        position = torch.arange(seq_len, dtype=torch.float, device=x.device).unsqueeze(
+        # Compute positions dynamically
+        position = torch.arange(seq_len, device=x.device, dtype=x.dtype).unsqueeze(
             1
         )  # (seq_len, 1)
-        div_term = torch.exp(
-            torch.arange(0, model_dim, 2, dtype=torch.float, device=x.device)
-            * -(math.log(10000.0) / model_dim)
-        )  # (model_dim / 2)
 
-        # Compute sinusoidal positional embeddings
-        sin_emb = torch.sin(position * div_term)  # (seq_len, model_dim / 2)
-        cos_emb = torch.cos(position * div_term)  # (seq_len, model_dim / 2)
+        # Use precomputed div_term directly
+        sin_emb = torch.sin(position * self.div_term)  # (seq_len, model_dim / 2)
+        cos_emb = torch.cos(position * self.div_term)  # (seq_len, model_dim / 2)
 
-        # Concatenate sine and cosine embeddings along the model dimension
-        positional_embedding = torch.zeros(
-            (seq_len, model_dim), device=x.device
+        # Rearrange and concatenate sine and cosine embeddings
+        positional_embedding = rearrange(
+            [sin_emb, cos_emb], "d seq half_dim -> seq (d half_dim)"
         )  # (seq_len, model_dim)
-        positional_embedding[:, 0::2] = sin_emb  # Assign sin to even indices
-        positional_embedding[:, 1::2] = cos_emb  # Assign cos to odd indices
 
         # Add positional embeddings to input tensor
-        positional_embedding = positional_embedding.unsqueeze(0).expand(
+        positional_embedding = rearrange(
+            positional_embedding, "seq dim -> 1 seq dim"
+        ).expand(
             batch_size, -1, -1
         )  # (batch_size, seq_len, model_dim)
-        return x + positional_embedding  # (batch_size, seq_len, model_dim)
+        return x + positional_embedding
 
 
 class RotaryPositionalEmbedding(nn.Module):
     """
-    Dynamically computes and applies Rotary Positional Embeddings (RoPE)
-    to the input tokens. Assumes input tensor shape (batch_size, seq_len, model_dim).
+    Computes and applies Rotary Positional Embeddings (RoPE) to the input tokens.
+    Assumes input tensor shape (batch_size, seq_len, model_dim).
     """
 
-    def __init__(self):
+    def __init__(self, model_dim: int):
         super(RotaryPositionalEmbedding, self).__init__()
+        self.model_dim = model_dim
+        # Precompute the scaling factors (div_term) as a buffer
+        self.register_buffer(
+            "div_term",
+            torch.exp(
+                torch.arange(0, model_dim, 2)
+                * -(torch.log(torch.tensor(10000.0)) / model_dim)
+            ),
+            persistent=False,  # Not saved with model state_dict
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1055,33 +1074,35 @@ class RotaryPositionalEmbedding(nn.Module):
             torch.Tensor: Tensor with RoPE applied, same shape as input.
         """
         batch_size, seq_len, model_dim = x.shape
+        assert (
+            model_dim == self.model_dim
+        ), "Input model_dim must match initialized model_dim."
 
-        # Compute positions and div_term dynamically
-        position = torch.arange(seq_len, dtype=torch.float, device=x.device).unsqueeze(
+        # Compute positions dynamically
+        position = torch.arange(seq_len, device=x.device, dtype=x.dtype).unsqueeze(
             1
         )  # (seq_len, 1)
-        div_term = torch.exp(
-            torch.arange(0, model_dim, 2, dtype=torch.float, device=x.device)
-            * -(math.log(10000.0) / model_dim)
-        )  # (model_dim / 2)
 
-        # Compute the sinusoidal positional embeddings
-        sin_emb = torch.sin(position * div_term).unsqueeze(
-            0
+        # Use precomputed div_term directly
+        sin_emb = rearrange(
+            torch.sin(position * self.div_term), "seq half_dim -> 1 seq half_dim"
         )  # (1, seq_len, model_dim / 2)
-        cos_emb = torch.cos(position * div_term).unsqueeze(
-            0
+        cos_emb = rearrange(
+            torch.cos(position * self.div_term), "seq half_dim -> 1 seq half_dim"
         )  # (1, seq_len, model_dim / 2)
+
+        # Split x into even and odd indices for rotary application
+        x_even = rearrange(x[..., 0::2], "b seq half_dim -> b seq half_dim")
+        x_odd = rearrange(x[..., 1::2], "b seq half_dim -> b seq half_dim")
 
         # Apply RoPE
-        x1 = (
-            x[..., 0::2] * cos_emb - x[..., 1::2] * sin_emb
-        )  # (batch_size, seq_len, model_dim / 2)
-        x2 = (
-            x[..., 0::2] * sin_emb + x[..., 1::2] * cos_emb
-        )  # (batch_size, seq_len, model_dim / 2)
+        x1 = x_even * cos_emb - x_odd * sin_emb  # (batch_size, seq_len, model_dim / 2)
+        x2 = x_even * sin_emb + x_odd * cos_emb  # (batch_size, seq_len, model_dim / 2)
 
-        return torch.cat([x1, x2], dim=-1)  # (batch_size, seq_len, model_dim)
+        # Concatenate even and odd back together
+        return rearrange(
+            [x1, x2], "d b seq half_dim -> b seq (d half_dim)"
+        )  # (batch_size, seq_len, model_dim)
 
 
 class GlobalTokens(nn.Module):

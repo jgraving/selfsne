@@ -32,9 +32,6 @@ from selfsne.utils import (
 import warnings
 
 
-RSQRT2 = 2 ** -0.5
-
-
 def lecun_normal_(x, mode="fan_in"):
     return init.kaiming_normal_(x, mode=mode, nonlinearity="linear")
 
@@ -54,7 +51,7 @@ class Residual(nn.Module):
         self.residual = residual
 
     def forward(self, x):
-        return (self.residual(x) + self.module(x)) * RSQRT2
+        return self.residual(x) + self.module(x)
 
 
 def ParametricResidual(in_features, out_features, module):
@@ -80,100 +77,6 @@ def Residual2d(in_channels, out_channels, module):
         if in_channels != out_channels
         else nn.Identity(),
     )
-
-
-class VarPool1d(nn.AvgPool1d):
-    def __init__(
-        self,
-        kernel_size,
-        stride=None,
-        padding=0,
-        ceil_mode=False,
-        count_include_pad=True,
-        divisor_override=None,
-    ):
-        super().__init__(
-            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-        )
-        self.scale = kernel_size ** -0.5
-
-    def forward(self, x):
-        y = super().forward(x) * self.kernel_size
-        return y * self.scale
-
-
-class VarPool2d(nn.AvgPool2d):
-    def __init__(
-        self,
-        kernel_size,
-        stride=None,
-        padding=0,
-        ceil_mode=False,
-        count_include_pad=True,
-        divisor_override=None,
-    ):
-        super().__init__(
-            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-        )
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-        self.kernel_size = kernel_size
-        self.scale = (self.kernel_size[0] * self.kernel_size[1]) ** -0.5
-
-    def forward(self, x):
-        y = super().forward(x) * self.kernel_size[0] * self.kernel_size[1]
-        return y * self.scale
-
-
-class VarPool3d(nn.AvgPool3d):
-    def __init__(
-        self,
-        kernel_size,
-        stride=None,
-        padding=0,
-        ceil_mode=False,
-        count_include_pad=True,
-        divisor_override=None,
-    ):
-        super().__init__(
-            kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-        )
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size, kernel_size)
-        self.kernel_size = kernel_size
-        self.scale = (
-            self.kernel_size[0] * self.kernel_size[1] * self.kernel_size[2]
-        ) ** -0.5
-
-    def forward(self, x):
-        y = (
-            super().forward(x)
-            * self.kernel_size[0]
-            * self.kernel_size[1]
-            * self.kernel_size[2]
-        )
-        return y * self.scale
-
-
-class GlobalVarPool(nn.Module):
-    def __init__(self, dim, keepdim=False):
-        super().__init__()
-        self.dim = dim
-        self.keepdim = keepdim
-
-    def forward(self, x):
-        return x.sum(self.dim) * x.shape[self.dim] ** -0.5
-
-
-class GlobalVarPool1d(nn.Module):
-    def forward(self, x):
-        y = reduce(x, "b c l -> b c", "sum") * x.shape[-1] ** -0.5
-        return y
-
-
-class GlobalVarPool2d(nn.Module):
-    def forward(self, x):
-        return reduce(x, "b c h w -> b c", "sum") * (x.shape[-1] * x.shape[-2]) ** -0.5
 
 
 class Lambda(nn.Module):
@@ -840,7 +743,7 @@ class PositionEmbedding2d(nn.Module):
         # with embeddings for each height and width
         height_embed = self.height_embedding.view(1, self.embedding_dim, self.height, 1)
         width_embed = self.width_embedding.view(1, self.embedding_dim, 1, self.width)
-        pos_embed = (height_embed + width_embed) * RSQRT2
+        pos_embed = height_embed + width_embed
         # Repeat the pos_embed for the entire batch
         pos_embed = pos_embed.repeat(x.shape[0], 1, 1, 1)
         # Add the position embedding 2D to the input tensor
@@ -853,7 +756,7 @@ class PositionEmbedding(nn.Module):
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
 
     def forward(self, x):
-        return (x + self.embedding[: x.shape[1]]) * RSQRT2
+        return x + self.embedding[: x.shape[1]]
 
 
 class TokenSampler(nn.Module):
@@ -1084,326 +987,236 @@ def ResNorm(out_features, module):
     return Residual(nn.Sequential(module, nn.LayerNorm(out_features)))
 
 
-class VarSelfAttention(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        num_heads,
-        attention_dim=None,
-        qk_dim=None,
-        v_dim=None,
-        output_dim=None,
-        dropout=0.0,
-        causal_mask=False,
-    ):
-        super(VarSelfAttention, self).__init__()
-        self.input_dim = input_dim
-        if attention_dim is None:
-            assert (
-                input_dim % num_heads == 0
-            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
-            self.attention_dim = input_dim // num_heads
-        else:
-            self.attention_dim = attention_dim
-        self.qk_dim = qk_dim if qk_dim is not None else self.attention_dim
-        self.head_qk = self.qk_dim
-        self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else self.attention_dim
-        self.head_v = self.v_dim
-        self.v_dim *= num_heads
-        self.num_heads = num_heads
-        self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -0.5
-        self.qk = init_selu(nn.Linear(self.input_dim, 2 * self.qk_dim))
-        self.v = (
-            init_selu(nn.Linear(self.input_dim, self.v_dim))
-            if self.input_dim != self.v_dim
-            else nn.Identity()
-        )
-        self.out = (
-            init_selu(nn.Linear(self.v_dim, self.output_dim))
-            if self.output_dim != self.v_dim
-            else nn.Identity()
-        )
+class SinusoidalPositionalEmbedding(nn.Module):
+    """
+    Dynamically computes and applies Sinusoidal Positional Embeddings
+    to the input tokens. Assumes input tensor shape (batch_size, seq_len, model_dim).
+    """
 
-        self.dropout = nn.AlphaDropout(p=dropout) if dropout > 0 else nn.Identity()
-        self.causal_mask = causal_mask
+    def __init__(self):
+        super(SinusoidalPositionalEmbedding, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Adds sinusoidal positional embeddings to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, model_dim).
+
+        Returns:
+            torch.Tensor: Tensor with sinusoidal positional embeddings added, same shape as input.
+        """
+        batch_size, seq_len, model_dim = x.shape
+
+        # Compute positions and div_term dynamically
+        position = torch.arange(seq_len, dtype=torch.float, device=x.device).unsqueeze(
+            1
+        )  # (seq_len, 1)
+        div_term = torch.exp(
+            torch.arange(0, model_dim, 2, dtype=torch.float, device=x.device)
+            * -(math.log(10000.0) / model_dim)
+        )  # (model_dim / 2)
+
+        # Compute sinusoidal positional embeddings
+        sin_emb = torch.sin(position * div_term)  # (seq_len, model_dim / 2)
+        cos_emb = torch.cos(position * div_term)  # (seq_len, model_dim / 2)
+
+        # Concatenate sine and cosine embeddings along the model dimension
+        positional_embedding = torch.zeros(
+            (seq_len, model_dim), device=x.device
+        )  # (seq_len, model_dim)
+        positional_embedding[:, 0::2] = sin_emb  # Assign sin to even indices
+        positional_embedding[:, 1::2] = cos_emb  # Assign cos to odd indices
+
+        # Add positional embeddings to input tensor
+        positional_embedding = positional_embedding.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )  # (batch_size, seq_len, model_dim)
+        return x + positional_embedding  # (batch_size, seq_len, model_dim)
+
+
+class RotaryPositionalEmbedding(nn.Module):
+    """
+    Dynamically computes and applies Rotary Positional Embeddings (RoPE)
+    to the input tokens. Assumes input tensor shape (batch_size, seq_len, model_dim).
+    """
+
+    def __init__(self):
+        super(RotaryPositionalEmbedding, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies RoPE to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, model_dim).
+
+        Returns:
+            torch.Tensor: Tensor with RoPE applied, same shape as input.
+        """
+        batch_size, seq_len, model_dim = x.shape
+
+        # Compute positions and div_term dynamically
+        position = torch.arange(seq_len, dtype=torch.float, device=x.device).unsqueeze(
+            1
+        )  # (seq_len, 1)
+        div_term = torch.exp(
+            torch.arange(0, model_dim, 2, dtype=torch.float, device=x.device)
+            * -(math.log(10000.0) / model_dim)
+        )  # (model_dim / 2)
+
+        # Compute the sinusoidal positional embeddings
+        sin_emb = torch.sin(position * div_term).unsqueeze(
+            0
+        )  # (1, seq_len, model_dim / 2)
+        cos_emb = torch.cos(position * div_term).unsqueeze(
+            0
+        )  # (1, seq_len, model_dim / 2)
+
+        # Apply RoPE
+        x1 = (
+            x[..., 0::2] * cos_emb - x[..., 1::2] * sin_emb
+        )  # (batch_size, seq_len, model_dim / 2)
+        x2 = (
+            x[..., 0::2] * sin_emb + x[..., 1::2] * cos_emb
+        )  # (batch_size, seq_len, model_dim / 2)
+
+        return torch.cat([x1, x2], dim=-1)  # (batch_size, seq_len, model_dim)
+
+
+class GlobalTokens(nn.Module):
+    def __init__(self, num_global_tokens, model_dim):
+        """
+        Args:
+            num_global_tokens (int): Number of global tokens to add.
+            model_dim (int): Dimension of the model (dimensionality of the tokens).
+        """
+        super(GlobalTokens, self).__init__()
+        self.num_global_tokens = num_global_tokens
+        self.model_dim = model_dim
+        # Define global tokens as trainable parameters
+        self.global_tokens = nn.Parameter(torch.randn(num_global_tokens, model_dim))
 
     def forward(self, x):
-        batch_size, seq_len, input_dim = x.shape
-        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
-        qk = rearrange(
-            qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
-        )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
-        q, k = qk[..., 0], qk[..., 1]
+        """
+        Concatenate global tokens to the input tokens.
 
-        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
-        v = rearrange(
-            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
-        )  # shape (batch_size, num_heads, seq_len, head_v)
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_tokens, model_dim).
 
-        # compute similarity
-        # q shape: (batch_size, num_heads, seq_len_i, head_qk)
-        # k shape: (batch_size, num_heads, seq_len_j, head_qk)
-        # similarity shape: (batch_size, num_heads, seq_len_i, seq_len_j)
-        similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k)
-
-        # scale dot product similarity
-        similarity *= self.scale
-
-        # apply activation and dropout
-        attention = F.selu(similarity - torch.mean(similarity, dim=-1, keepdim=True))
-        attention = self.dropout(attention)
-
-        # apply causal mask if specified
-        if self.causal_mask:
-            mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=attention.device), diagonal=1
-            )
-            mask = mask.view(1, 1, seq_len, seq_len).repeat(
-                batch_size, self.num_heads, 1, 1
-            )
-            gradient = attention.masked_fill(
-                mask == 0,
-                -1.6732632423543772848170429916717,  # set masked elements to selu lower bound for zero grad
-            )
-            estimator = attention * mask
-            attention = straight_through_estimator(
-                gradient, estimator
-            )  # use straight-through estimator to pass zeros in forward and backward
-
-        # compute output
-        # v shape: (batch_size, num_heads, seq_len_j, head_v)
-        # out shape: (batch_size, num_heads, seq_len_i, head_v)
-        out = (
-            torch.einsum("b h i j, b h j d -> b h i d", attention, v)
-            * (seq_len) ** -0.5
-        )
-        out = rearrange(out, "b h s d -> b s (h d)")
-        return self.out(out)
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_tokens + num_global_tokens, model_dim).
+        """
+        batch_size = x.size(0)
+        # Repeat global tokens for the entire batch
+        global_tokens_batch = self.global_tokens.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )  # (batch_size, num_global_tokens, model_dim)
+        # Concatenate global tokens to the input tokens
+        return torch.cat(
+            [x, global_tokens_batch], dim=1
+        )  # (batch_size, num_tokens + num_global_tokens, model_dim)
 
 
-class SelfAttention(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        num_heads,
-        attention_dim=None,
-        qk_dim=None,
-        v_dim=None,
-        output_dim=None,
-        dropout=0.0,
-        causal_mask=False,
-    ):
-        super(SelfAttention, self).__init__()
-        self.input_dim = input_dim
-        if attention_dim is None:
-            assert (
-                input_dim % num_heads == 0
-            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
-            self.attention_dim = input_dim // num_heads
-        else:
-            self.attention_dim = attention_dim
-        self.qk_dim = qk_dim if qk_dim is not None else self.attention_dim
-        self.head_qk = self.qk_dim
-        self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else self.attention_dim
-        self.head_v = self.v_dim
-        self.v_dim *= num_heads
+class Attention(nn.Module):
+    def __init__(self, model_dim, num_heads, dropout=0.0, causal_mask=False):
+        super(Attention, self).__init__()
+        assert (
+            model_dim % num_heads == 0
+        ), f"model_dim ({model_dim}) must be divisible by num_heads ({num_heads})"
         self.num_heads = num_heads
-        self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -0.5
-        self.qk = init_selu(nn.Linear(self.input_dim, 2 * self.qk_dim))
-        self.v = (
-            init_selu(nn.Linear(self.input_dim, self.v_dim))
-            if self.input_dim != self.v_dim
-            else nn.Identity()
-        )
-        self.out = (
-            init_selu(nn.Linear(self.v_dim, self.output_dim))
-            if self.output_dim != self.v_dim
-            else nn.Identity()
-        )
-
+        self.head_dim = model_dim // num_heads
+        self.scale = self.head_dim ** -0.5
         self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         self.causal_mask = causal_mask
 
-    def forward(self, x):
-        batch_size, seq_len, input_dim = x.shape
-        qk = self.qk(x)  # shape (batch_size, seq_len, 2*qk_dim)
-        qk = rearrange(
-            qk, "b s (h d c) -> b h s d c", h=self.num_heads, d=self.head_qk, c=2
-        )  # shape (batch_size, num_heads, seq_len, head_qk, 2)
-        q, k = qk[..., 0], qk[..., 1]
+    def forward(self, q, k, v, mask=None):
+        # Compute scaled dot-product attention
+        similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k) * self.scale
 
-        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
-        v = rearrange(
-            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
-        )  # shape (batch_size, num_heads, seq_len, head_v)
-
-        # compute similarity
-        # q shape: (batch_size, num_heads, seq_len_i, head_qk)
-        # k shape: (batch_size, num_heads, seq_len_j, head_qk)
-        # similarity shape: (batch_size, num_heads, seq_len_i, seq_len_j)
-        similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k)
-
-        # apply causal mask if specified
+        # Apply causal mask if specified
         if self.causal_mask:
-            mask = torch.triu(
+            seq_len = similarity.size(-1)
+            causal_mask = torch.triu(
                 torch.ones(seq_len, seq_len, device=similarity.device), diagonal=1
-            )
-            mask = mask.view(1, 1, seq_len, seq_len).repeat(
-                batch_size, self.num_heads, 1, 1
-            )
-            similarity = similarity.masked_fill(
-                mask == 0, torch.finfo(similarity.dtype).min
-            )  # float('-inf')
+            ).bool()
+            similarity.masked_fill_(causal_mask, float("-inf"))
 
-        # scale dot product similarity
-        similarity *= self.scale
+        # Apply custom mask if provided
+        if mask is not None:
+            similarity.masked_fill_(mask.unsqueeze(1).unsqueeze(2), float("-inf"))
 
-        # apply softmax and dropout
-        attention = similarity.softmax(-1)
+        attention = similarity.softmax(dim=-1)
         attention = self.dropout(attention)
 
-        # compute output
-        # v shape: (batch_size, num_heads, seq_len_j, head_v)
-        # out shape: (batch_size, num_heads, seq_len_i, head_v)
+        # Compute attention output
         out = torch.einsum("b h i j, b h j d -> b h i d", attention, v)
+        return out
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, model_dim, num_heads, dropout=0.0, causal_mask=False):
+        super(SelfAttention, self).__init__()
+        self.model_dim = model_dim
+        self.num_heads = num_heads
+        self.head_dim = model_dim // num_heads
+
+        self.qkv = nn.Linear(model_dim, model_dim * 3)
+        self.out = nn.Linear(model_dim, model_dim)
+        self.attention = Attention(model_dim, num_heads, dropout, causal_mask)
+
+    def forward(self, x):
+
+        # Generate Q, K, V from input
+        qkv = self.qkv(x)
+        qkv = rearrange(
+            qkv, "b s (h d c) -> c b h s d", h=self.num_heads, d=self.head_dim, c=3
+        )
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Apply attention
+        out = self.attention(q, k, v)
+
+        # Rearrange and apply output linear layer
         out = rearrange(out, "b h s d -> b s (h d)")
         return self.out(out)
 
 
 class CrossAttention(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        num_heads,
-        num_latent_tokens,
-        latent_dim=None,
-        attention_dim=None,
-        qk_dim=None,
-        v_dim=None,
-        output_dim=None,
-        dropout=0.0,
-        latent_prenorm=False,
-    ):
+    def __init__(self, model_dim, num_heads, num_latent_tokens, dropout=0.0):
         super(CrossAttention, self).__init__()
-        self.input_dim = input_dim
-        self.latent_dim = self.input_dim if latent_dim is None else latent_dim
-        if attention_dim is None:
-            assert (
-                input_dim % num_heads == 0
-            ), f"input_dim ({input_dim}) is not divisible by num_heads ({num_heads})"
-            self.attention_dim = self.input_dim // num_heads
-        else:
-            self.attention_dim = attention_dim
-        self.qk_dim = self.attention_dim if qk_dim is None else qk_dim
-        self.head_qk = self.qk_dim
-        self.qk_dim *= num_heads
-        self.v_dim = v_dim if v_dim is not None else self.attention_dim
-        self.head_v = self.v_dim
-        self.v_dim *= num_heads
         self.num_heads = num_heads
-        self.output_dim = output_dim if output_dim is not None else input_dim
-        self.scale = self.head_qk ** -0.5
-        self.k = init_selu(nn.Linear(self.input_dim, self.qk_dim))
-        self.v = (
-            init_selu(nn.Linear(self.input_dim, self.v_dim))
-            if self.input_dim != self.v_dim
-            else nn.Identity()
-        )
-        self.out = (
-            init_selu(nn.Linear(self.v_dim, self.output_dim))
-            if self.output_dim != self.v_dim
-            else nn.Identity()
-        )
+        self.head_dim = model_dim // num_heads
 
-        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
-        self.residual = nn.Sequential(
-            nn.Identity()
-            if self.latent_dim == self.output_dim
-            else init_selu(nn.Linear(self.latent_dim, self.output_dim)),
-        )
+        # Learnable latent tokens
+        self.latents = nn.Parameter(torch.randn(1, num_latent_tokens, model_dim))
 
-        self.latents = nn.Parameter(
-            torch.randn((1, num_latent_tokens, self.latent_dim))
-        )
-        self.q = nn.Sequential(
-            nn.LayerNorm(self.latent_dim) if latent_prenorm else nn.Identity(),
-            init_selu(nn.Linear(self.latent_dim, self.qk_dim)),
-        )
+        # Linear layers for Q, K, V
+        self.q = nn.Linear(model_dim, model_dim)
+        self.kv = nn.Linear(model_dim, model_dim * 2)
+        self.out = nn.Linear(model_dim, model_dim)
+
+        # Attention module
+        self.attention = Attention(model_dim, num_heads, dropout)
 
     def forward(self, x):
-        batch_size, seq_len, input_dim = x.shape
+        batch_size, _, _ = x.shape
 
-        q = self.q(self.latents)  # shape (1, num_latent_tokens, qk_dim)
-        q = rearrange(
-            q, "b l (h d) -> b h l d", h=self.num_heads, d=self.head_qk
-        )  # shape (1, num_heads, num_latent_tokens, head_qk)
-        q = q.repeat(
-            batch_size, 1, 1, 1
-        )  # shape (batch_size, num_heads, num_latent_tokens, head_qk)
+        # Generate Q from latent tokens
+        q = self.q(self.latents)
+        q = rearrange(q, "b l (h d) -> b h l d", h=self.num_heads, d=self.head_dim)
+        q = q.expand(batch_size, -1, -1, -1)
 
-        k = self.k(x)  # shape (batch_size, seq_len, qk_dim)
-        k = rearrange(
-            k, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_qk
-        )  # shape (batch_size, num_heads, seq_len, head_qk)
-
-        v = self.v(x)  # shape (batch_size, seq_len, v_dim)
-        v = rearrange(
-            v, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_v
-        )  # shape (batch_size, num_heads, seq_len, head_v)
-
-        # compute dot product similarity
-        similarity = torch.einsum(
-            "b h i d, b h j d -> b h i j", q, k
-        )  # shape (batch_size, num_heads, num_latent_tokens, seq_len)
-
-        # scale dot product similarity
-        similarity *= self.scale
-
-        # apply softmax and dropout
-        attention = similarity.softmax(-1)
-        attention = self.dropout(attention)
-
-        # compute output
-        # v shape: (batch_size, num_heads, seq_len, head_v)
-        # out shape: (batch_size, num_heads, num_latent_tokens, head_v)
-        out = torch.einsum(
-            "b h i j, b h j d -> b h i d", attention, v
-        )  # shape (batch_size, num_heads, num_latent_tokens, head_v)
-        out = rearrange(
-            out, "b h l d -> b l (h d)"
-        )  # shape (batch_size, num_latent_tokens, v_dim)
-        return (self.out(out) + self.residual(self.latents)) * RSQRT2
-
-
-class TransformerEncoder(nn.Module):
-    def __init__(
-        self,
-        embedding_dim,
-        num_out,
-        num_layers=12,
-        num_heads=12,
-        dropout=0.1,
-        feedforward_multiplier=2,
-    ):
-        super().__init__()
-        self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=embedding_dim * num_heads,
-                nhead=num_heads,
-                dim_feedforward=embedding_dim * feedforward_multiplier,
-                dropout=dropout,
-                activation="gelu",
-            ),
-            num_layers=num_layers,
+        # Generate K, V from input
+        kv = self.kv(x)
+        kv = rearrange(
+            kv, "b s (h d c) -> c b h s d", h=self.num_heads, d=self.head_dim, c=2
         )
-        self.fc = nn.Linear(embedding_dim, num_out)
+        k, v = kv[0], kv[1]
 
-    def forward(self, x):
-        x = self.transformer_encoder(x)
-        x = x.mean(dim=1)
-        x = self.fc(x)
-        return x
+        # Apply attention
+        out = self.attention(q, k, v)
+
+        # Rearrange and apply output linear layer
+        out = rearrange(out, "b h l d -> b l (h d)")
+        return self.out(out) + self.latents

@@ -1204,40 +1204,74 @@ class SelfAttention(nn.Module):
 
 
 class CrossAttention(nn.Module):
-    def __init__(self, model_dim, num_heads, num_latent_tokens, dropout=0.0):
+    def __init__(self, model_dim, num_heads, dropout=0.0):
         super(CrossAttention, self).__init__()
+        self.model_dim = model_dim
         self.num_heads = num_heads
         self.head_dim = model_dim // num_heads
-
-        # Learnable latent tokens
-        self.latents = nn.Parameter(torch.randn(1, num_latent_tokens, model_dim))
+        self.scale = self.head_dim ** -0.5
 
         # Linear layers for Q, K, V
         self.q = nn.Linear(model_dim, model_dim)
         self.kv = nn.Linear(model_dim, model_dim * 2)
         self.out = nn.Linear(model_dim, model_dim)
 
+        # Dropout for regularization
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
+
         # Attention module
         self.attention = Attention(model_dim, num_heads, dropout)
 
-    def forward(self, x):
-        batch_size, _, _ = x.shape
+    def forward(self, query, context, mask=None):
+        """
+        Args:
+            query: Tensor of shape [batch_size, query_len, model_dim]
+            context: Tensor of shape [batch_size, context_len, model_dim]
+            mask: Optional mask for attention computation
+        """
+        batch_size, query_len, _ = query.shape
 
-        # Generate Q from latent tokens
-        q = self.q(self.latents)
-        q = rearrange(q, "b l (h d) -> b h l d", h=self.num_heads, d=self.head_dim)
-        q = q.expand(batch_size, -1, -1, -1)
-
-        # Generate K, V from input
-        kv = self.kv(x)
+        # Generate Q from query and K, V from context
+        q = self.q(query)
+        kv = self.kv(context)
         kv = rearrange(
             kv, "b s (h d c) -> c b h s d", h=self.num_heads, d=self.head_dim, c=2
         )
         k, v = kv[0], kv[1]
 
+        # Rearrange Q for multi-head
+        q = rearrange(q, "b s (h d) -> b h s d", h=self.num_heads, d=self.head_dim)
+
         # Apply attention
-        out = self.attention(q, k, v)
+        out = self.attention(q, k, v, mask=mask)
 
         # Rearrange and apply output linear layer
-        out = rearrange(out, "b h l d -> b l (h d)")
-        return self.out(out) + self.latents
+        out = rearrange(out, "b h s d -> b s (h d)")
+        return self.out(out)
+
+
+class LatentCrossAttention(nn.Module):
+    def __init__(self, model_dim, num_heads, num_latent_tokens, dropout=0.0):
+        super(LatentCrossAttention, self).__init__()
+        self.num_heads = num_heads
+        self.model_dim = model_dim
+
+        # Learnable latent tokens
+        self.latents = nn.Parameter(torch.randn(1, num_latent_tokens, model_dim))
+
+        # Generic cross-attention
+        self.cross_attention = CrossAttention(model_dim, num_heads, dropout)
+
+    def forward(self, x, mask=None):
+        """
+        Args:
+            x: Tensor of shape [batch_size, context_len, model_dim]
+            mask: Optional mask for attention computation
+        """
+        batch_size, _, _ = x.shape
+
+        # Expand latent tokens for the current batch
+        latents = self.latents.expand(batch_size, -1, -1)
+
+        # Use generic cross-attention with latent queries
+        return self.cross_attention(latents, x, mask=mask) + latents

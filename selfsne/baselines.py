@@ -4,9 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -70,19 +70,17 @@ class MomentumBaseline(nn.Module):
 
     def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the momentum baseline for a given set of logits.
+        Calculates the momentum baseline.
 
         Args:
             neg_logits (torch.Tensor): Negative logits tensor.
 
         Returns:
-            torch.Tensor: Momentum baseline for the given set of logits.
+            torch.Tensor: Momentum baseline.
         """
         if self.training:
             return LogMeanExp.apply(
-                neg_logits,
-                self.log_moving_average,
-                self.momentum_logit,
+                neg_logits, self.log_moving_average, self.momentum_logit
             )
         else:
             return self.log_moving_average
@@ -91,92 +89,74 @@ class MomentumBaseline(nn.Module):
 class ReverseMomentumBaseline(MomentumBaseline):
     def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the reverse momentum baseline for a given set of logits.
+        Calculates the reverse momentum baseline.
 
         Args:
             pos_logits (torch.Tensor): Positive logits tensor.
 
         Returns:
-            torch.Tensor: Momentum baseline for the given set of logits.
+            torch.Tensor: Reverse momentum baseline.
         """
         if self.training:
             return -LogMeanExp.apply(
-                -pos_logits,
-                self.log_moving_average,
-                self.momentum_logit,
+                -pos_logits, self.log_moving_average, self.momentum_logit
             )
         else:
             return -self.log_moving_average
 
 
 class BatchBaseline(nn.Module):
-    def forward(
-        self,
-        neg_logits: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the batch baseline for a given set of logits.
+        Calculates the batch baseline.
 
         Args:
             neg_logits (torch.Tensor): Negative logits tensor.
 
         Returns:
-            torch.Tensor: Batch baseline for the given set of logits.
+            torch.Tensor: Batch baseline.
         """
         return logmeanexp(neg_logits)
 
 
 class ReverseBatchBaseline(nn.Module):
-    def forward(
-        self,
-        pos_logits: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the reverse batch baseline for a given set of logits.
+        Calculates the reverse batch baseline.
 
         Args:
             pos_logits (torch.Tensor): Positive logits tensor.
 
         Returns:
-            torch.Tensor: Batch baseline for the given set of logits.
+            torch.Tensor: Reverse batch baseline.
         """
         return -logmeanexp(-pos_logits)
 
 
 class BatchConditionalBaseline(nn.Module):
-    def forward(
-        self,
-        neg_logits: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the batch conditional baseline for a given set of logits.
+        Calculates the batch conditional baseline.
 
         Args:
             neg_logits (torch.Tensor): Negative logits tensor.
 
         Returns:
-            torch.Tensor: Batch conditional baseline for the given set of logits.
+            torch.Tensor: Batch conditional baseline.
         """
         return logmeanexp(neg_logits, dim=-1, keepdim=True)
 
 
 class ReverseBatchConditionalBaseline(nn.Module):
-    def forward(
-        self,
-        pos_logits: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Calculates the reverse batch conditional baseline for a given set of logits.
+        Calculates the reverse batch conditional baseline.
 
         Args:
             pos_logits (torch.Tensor): Positive logits tensor.
 
         Returns:
-            torch.Tensor: Batch conditional baseline for the given set of logits.
+            torch.Tensor: Reverse batch conditional baseline.
         """
         return -logmeanexp(-pos_logits, dim=-1, keepdim=True)
 
@@ -186,26 +166,23 @@ class ParametricBaseline(nn.Module):
         self,
         param_dim: int = 1024,
         activation: Optional[nn.Module] = nn.Identity(),
-        bias_init: float = 0.0,  # Default bias initialization value
+        bias_init: float = 0.0,
     ):
         """
         Initializes a parametric baseline module.
 
         Args:
-            activation (nn.Module, optional): Activation function to apply to the output. If None is passed, uses nn.Identity. Defaults to nn.Identity().
+            param_dim (int, optional): Dimensionality of the parameter. Defaults to 1024.
+            activation (nn.Module, optional): Activation function to apply. Defaults to nn.Identity().
+            bias_init (float, optional): Bias initialization value. Defaults to 0.0.
         """
         super().__init__()
         self.param = nn.Parameter(torch.randn(1, param_dim))
         self.projection = init_selu(nn.Linear(param_dim, 1))
-        init.constant_(
-            self.projection.bias, bias_init
-        )  # Initializing bias to bias_init
+        init.constant_(self.projection.bias, bias_init)
         self.activation = activation if activation is not None else nn.Identity()
 
-    def forward(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, **kwargs) -> torch.Tensor:
         """
         Returns the parametric baseline.
 
@@ -226,16 +203,12 @@ class ConstantBaseline(nn.Module):
         super().__init__()
         self.register_buffer("baseline", torch.tensor(baseline))
 
-    def forward(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
+    def forward(self, **kwargs) -> torch.Tensor:
         """
-        Calculates the constant baseline for a given set of logits.
-
+        Returns the constant baseline.
 
         Returns:
-            torch.Tensor: Constant baseline for the given set of logits.
+            torch.Tensor: Constant baseline.
         """
         return self.baseline
 
@@ -246,14 +219,16 @@ class ParametricConditionalBaseline(nn.Module):
         encoder: nn.Module,
         param_dim: int = 1024,
         activation: Optional[nn.Module] = nn.Identity(),
-        bias_init: float = 0.0,  # Default bias initialization value
+        bias_init: float = 0.0,
     ):
         """
         Initializes a parametric conditional baseline module.
 
         Args:
-            encoder (nn.Module): Encoder module to encode the input tensor z_x.
-            activation (nn.Module, optional): Activation function to apply to the output. Defaults to nn.Identity().
+            encoder (nn.Module): Encoder for the embedded context.
+            param_dim (int, optional): Dimensionality of the parameter. Defaults to 1024.
+            activation (nn.Module, optional): Activation function. Defaults to nn.Identity().
+            bias_init (float, optional): Bias initialization value. Defaults to 0.0.
         """
         super().__init__()
         self.encoder = encoder
@@ -261,24 +236,19 @@ class ParametricConditionalBaseline(nn.Module):
         self.activation = activation if activation is not None else nn.Identity()
 
     def forward(
-        self,
-        z_x: Optional[torch.Tensor] = None,
-        **kwargs,
+        self, context_embedding: Optional[torch.Tensor] = None, **kwargs
     ) -> torch.Tensor:
         """
-        Calculates the parametric conditional baseline for a given set of data x or embedded data z_x.
+        Calculates the parametric conditional baseline.
 
         Args:
-            x (torch.Tensor, optional): Data input to the encoder. Ignored if embedding_input=True.
-            z_x (torch.Tensor, optional): Embedded data input to the encoder. Used if embedding_input=True.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Parametric conditional baseline for the data x or z_x.
+            torch.Tensor: Parametric conditional baseline.
         """
-        encoded = self.encoder(z_x)
-
+        encoded = self.encoder(context_embedding)
         scalar_baseline = self.parametric_baseline()
-
         return self.activation(scalar_baseline + encoded)
 
 
@@ -291,14 +261,16 @@ class BilinearBaseline(nn.Module):
         encoder: nn.Module,
         param_dim: int = 1024,
         activation: Optional[nn.Module] = nn.Identity(),
-        bias_init: float = 0.0,  # Default bias initialization value
+        bias_init: float = 0.0,
     ):
         """
         Initializes a bilinear baseline module.
 
         Args:
-            encoder (nn.Module): Encoder module to encode the input tensors z_x and z_y.
-            activation (nn.Module, optional): Activation function to apply to the output. Defaults to nn.Identity().
+            encoder (nn.Module): Encoder for the embedded context and target.
+            param_dim (int, optional): Dimensionality of the parameter. Defaults to 1024.
+            activation (nn.Module, optional): Activation function. Defaults to nn.Identity().
+            bias_init (float, optional): Bias initialization value. Defaults to 0.0.
         """
         super().__init__()
         self.encoder = encoder
@@ -307,32 +279,29 @@ class BilinearBaseline(nn.Module):
 
     def forward(
         self,
-        z_x: Optional[torch.Tensor] = None,
-        z_y: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
+        target_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the bilinear baseline for given sets of embedded data z_x and z_y.
+        Calculates the bilinear baseline.
 
         Args:
-            z_x (torch.Tensor, optional): Embedded data input to the encoder.
-            z_y (torch.Tensor, optional): Another set of embedded data input to the encoder.
+            context_embedding (torch.Tensor, optional): Embedded context.
+            target_embedding (torch.Tensor, optional): Embedded target.
 
         Returns:
-            torch.Tensor: Bilinear baseline for the data z_x and z_y.
+            torch.Tensor: Bilinear baseline.
         """
-        if z_x is None or z_y is None:
-            raise ValueError("Both z_x and z_y must be provided")
-
-        encoded_x = self.encoder(z_x)
-        encoded_y = self.encoder(z_y)
-
-        dot_product = pairwise_inner_product(encoded_x, encoded_y)
-
+        if context_embedding is None or target_embedding is None:
+            raise ValueError(
+                "Both context_embedding and target_embedding must be provided"
+            )
+        encoded_context = self.encoder(context_embedding)
+        encoded_target = self.encoder(target_embedding)
+        dot_product = pairwise_inner_product(encoded_context, encoded_target)
         scalar_baseline = self.parametric_baseline()
-
         output = dot_product + scalar_baseline
-
         return self.activation(output)
 
 
@@ -360,30 +329,37 @@ class ArithmeticMixtureBaseline(MixtureBaseline):
         self,
         pos_logits: Optional[torch.Tensor] = None,
         neg_logits: Optional[torch.Tensor] = None,
-        x: Optional[torch.Tensor] = None,
-        z_x: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the mixture baseline.
+        Calculates the arithmetic mixture baseline.
 
         Args:
-            pos_logits (torch.Tensor, optional): Positive logits tensor.
-            neg_logits (torch.Tensor, optional): Negative logits tensor.
-            x (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
-            z_x (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
+            pos_logits (torch.Tensor, optional): Positive logits.
+            neg_logits (torch.Tensor, optional): Negative logits.
+            context (torch.Tensor, optional): Context input.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Mixture baseline for the given set of logits and optional data x or latents z_x.
+            torch.Tensor: Mixture baseline.
         """
         return log_interpolate(
-            self.baseline_a(pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x),
-            self.baseline_b(pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x),
+            self.baseline_a(
+                pos_logits=pos_logits,
+                neg_logits=neg_logits,
+                context=context,
+                context_embedding=context_embedding,
+            ),
+            self.baseline_b(
+                pos_logits=pos_logits,
+                neg_logits=neg_logits,
+                context=context,
+                context_embedding=context_embedding,
+            ),
             self.alpha_logit,
         )
-
-
-LogInterpolatedBaseline = ArithmeticMixtureBaseline
 
 
 class HarmonicMixtureBaseline(MixtureBaseline):
@@ -391,28 +367,34 @@ class HarmonicMixtureBaseline(MixtureBaseline):
         self,
         pos_logits: Optional[torch.Tensor] = None,
         neg_logits: Optional[torch.Tensor] = None,
-        x: Optional[torch.Tensor] = None,
-        z_x: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the mixture baseline.
+        Calculates the harmonic mixture baseline.
 
         Args:
-            pos_logits (torch.Tensor, optional): Positive logits tensor.
-            neg_logits (torch.Tensor, optional): Negative logits tensor.
-            x (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
-            z_x (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
+            pos_logits (torch.Tensor, optional): Positive logits.
+            neg_logits (torch.Tensor, optional): Negative logits.
+            context (torch.Tensor, optional): Context input.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Mixture baseline for the given set of logits and optional data x or latents z_x.
+            torch.Tensor: Harmonic mixture baseline.
         """
         return -log_interpolate(
             -self.baseline_a(
-                pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+                pos_logits=pos_logits,
+                neg_logits=neg_logits,
+                context=context,
+                context_embedding=context_embedding,
             ),
             -self.baseline_b(
-                pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+                pos_logits=pos_logits,
+                neg_logits=neg_logits,
+                context=context,
+                context_embedding=context_embedding,
             ),
             self.alpha_logit,
         )
@@ -423,161 +405,32 @@ class GeometricMixtureBaseline(MixtureBaseline):
         self,
         pos_logits: Optional[torch.Tensor] = None,
         neg_logits: Optional[torch.Tensor] = None,
-        x: Optional[torch.Tensor] = None,
-        z_x: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the mixture baseline.
+        Calculates the geometric mixture baseline.
 
         Args:
-            pos_logits (torch.Tensor, optional): Positive logits tensor.
-            neg_logits (torch.Tensor, optional): Negative logits tensor.
-            x (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
-            z_x (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
+            pos_logits (torch.Tensor, optional): Positive logits.
+            neg_logits (torch.Tensor, optional): Negative logits.
+            context (torch.Tensor, optional): Context input.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Mixture baseline for the given set of logits and optional data x or latents z_x.
+            torch.Tensor: Geometric mixture baseline.
         """
         return self.alpha * self.baseline_a(
-            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+            pos_logits=pos_logits,
+            neg_logits=neg_logits,
+            context=context,
+            context_embedding=context_embedding,
         ) + (1 - self.alpha) * self.baseline_b(
-            pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
-        )
-
-
-InterpolatedBaseline = GeometricMixtureBaseline
-
-
-class GeometricMomentumBaseline(GeometricMixtureBaseline):
-    def __init__(self, alpha: float = 0.5, momentum: float = 0.9) -> None:
-        """
-        Initializes a geometric mixture of momentum baselines with specified alpha and momentum.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
-        """
-        super().__init__(
-            baseline_a=ReverseMomentumBaseline(momentum=momentum),
-            baseline_b=MomentumBaseline(momentum=momentum),
-            alpha=alpha,
-        )
-
-
-class HarmonicMomentumBaseline(HarmonicMixtureBaseline):
-    def __init__(self, alpha: float = 0.5, momentum: float = 0.9) -> None:
-        """
-        Initializes a harmonic mixture of momentum baselines with specified alpha and momentum.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
-        """
-        super().__init__(
-            baseline_a=ReverseMomentumBaseline(momentum=momentum),
-            baseline_b=MomentumBaseline(momentum=momentum),
-            alpha=alpha,
-        )
-
-
-class ArithmeticMomentumBaseline(ArithmeticMixtureBaseline):
-    def __init__(self, alpha: float = 0.5, momentum: float = 0.9) -> None:
-        """
-        Initializes an arithmetic mixture of momentum baselines with specified alpha and momentum.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-            momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
-        """
-        super().__init__(
-            baseline_a=ReverseMomentumBaseline(momentum=momentum),
-            baseline_b=MomentumBaseline(momentum=momentum),
-            alpha=alpha,
-        )
-
-
-class GeometricBatchBaseline(GeometricMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes a geometric mixture of batch baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchBaseline(), baseline_b=BatchBaseline(), alpha=alpha
-        )
-
-
-class HarmonicBatchBaseline(HarmonicMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes a harmonic mixture of batch baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchBaseline(), baseline_b=BatchBaseline(), alpha=alpha
-        )
-
-
-class ArithmeticBatchBaseline(ArithmeticMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes an arithmetic mixture of batch baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchBaseline(), baseline_b=BatchBaseline(), alpha=alpha
-        )
-
-
-class GeometricBatchConditionalBaseline(GeometricMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes a geometric mixture of batch conditional baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchConditionalBaseline(),
-            baseline_b=BatchConditionalBaseline(),
-            alpha=alpha,
-        )
-
-
-class HarmonicBatchConditionalBaseline(HarmonicMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes a harmonic mixture of batch conditional baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchConditionalBaseline(),
-            baseline_b=BatchConditionalBaseline(),
-            alpha=alpha,
-        )
-
-
-class ArithmeticBatchConditionalBaseline(ArithmeticMixtureBaseline):
-    def __init__(self, alpha: float = 0.5) -> None:
-        """
-        Initializes an arithmetic mixture of batch conditional baselines with specified alpha.
-
-        Args:
-            alpha (float, optional): Weighting parameter for interpolation. Defaults to 0.5.
-        """
-        super().__init__(
-            baseline_a=ReverseBatchConditionalBaseline(),
-            baseline_b=BatchConditionalBaseline(),
-            alpha=alpha,
+            pos_logits=pos_logits,
+            neg_logits=neg_logits,
+            context=context,
+            context_embedding=context_embedding,
         )
 
 
@@ -587,8 +440,8 @@ class AdditiveBaseline(nn.Module):
         Initializes an additive baseline module.
 
         Args:
-            baselines (List[nn.Module]): List of baseline modules to be added together.
-            mean (bool, optional): Whether to take the mean of the baselines instead of summing them. Defaults to False.
+            baselines (List[nn.Module]): List of baseline modules.
+            mean (bool, optional): Whether to average the baselines. Defaults to False.
         """
         super().__init__()
         self.baselines = nn.ModuleList(baselines)
@@ -599,68 +452,64 @@ class AdditiveBaseline(nn.Module):
         self,
         pos_logits: Optional[torch.Tensor] = None,
         neg_logits: Optional[torch.Tensor] = None,
-        x: Optional[torch.Tensor] = None,
-        z_x: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
         Calculates the additive baseline.
 
         Args:
-            pos_logits (torch.Tensor): Positive logits tensor.
-            neg_logits (torch.Tensor): Negative logits tensor.
-            x (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
-            z_x (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
+            pos_logits (torch.Tensor, optional): Positive logits.
+            neg_logits (torch.Tensor, optional): Negative logits.
+            context (torch.Tensor, optional): Context input.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Additive baseline for the given set of logits and optional data x.
+            torch.Tensor: Additive baseline.
         """
         log_baseline = 0
         for baseline in self.baselines:
-            log_baseline = log_baseline + baseline(
-                pos_logits=pos_logits, neg_logits=neg_logits, x=x, z_x=z_x
+            log_baseline += baseline(
+                pos_logits=pos_logits,
+                neg_logits=neg_logits,
+                context=context,
+                context_embedding=context_embedding,
             )
         return log_baseline / self.scale
 
 
 class LogAdditiveBaseline(AdditiveBaseline):
-    def __init__(self, baselines: List[nn.Module], mean: bool = False):
-        """
-        Initializes a logarithmic additive baseline module.
-
-        Args:
-            baselines (List[nn.Module]): List of baseline modules to be added together.
-            mean (bool, optional): Whether to take the mean of the baselines instead of summing them. Defaults to False.
-        """
-        super().__init__(baselines, mean)
-
     def forward(
         self,
         pos_logits: Optional[torch.Tensor] = None,
         neg_logits: Optional[torch.Tensor] = None,
-        x: Optional[torch.Tensor] = None,
-        z_x: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+        context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Calculates the logarithmic additive baseline for a given set of logits and optional data x.
+        Calculates the logarithmic additive baseline.
 
         Args:
-            pos_logits (torch.Tensor): Positive logits tensor.
-            neg_logits (torch.Tensor): Negative logits tensor.
-            x (torch.Tensor, optional): Data for LearnedConditionalBaseline. Defaults to None.
-            z_x (torch.Tensor, optional): Embedded data for LearnedConditionalBaseline. Defaults to None.
+            pos_logits (torch.Tensor, optional): Positive logits.
+            neg_logits (torch.Tensor, optional): Negative logits.
+            context (torch.Tensor, optional): Context input.
+            context_embedding (torch.Tensor, optional): Embedded context.
 
         Returns:
-            torch.Tensor: Logarithmic additive baseline for the given set of logits and optional data x.
+            torch.Tensor: Logarithmic additive baseline.
         """
-        # Set the initial value from the first baseline
-        log_baseline = self.baselines[0](pos_logits=pos_logits, x=x, z_x=z_x)
-
+        log_baseline = self.baselines[0](
+            pos_logits=pos_logits, context=context, context_embedding=context_embedding
+        )
         for baseline in self.baselines[1:]:
-            additional_value = baseline(pos_logits=pos_logits, x=x, z_x=z_x)
+            additional_value = baseline(
+                pos_logits=pos_logits,
+                context=context,
+                context_embedding=context_embedding,
+            )
             log_baseline = torch.logaddexp(log_baseline, additional_value)
-
         return log_baseline - self.log_scale
 
 
@@ -690,19 +539,15 @@ def baseline_factory(baseline_key, divergence_key):
         modified_baseline_key = baseline_key
     else:
         divergence_to_prefix = {
-            "kld": "",  # kld baselines use no prefix
+            "kld": "",
             "rkld": "reverse_",
             "jsd": "geometric_",
         }
-
         prefix = divergence_to_prefix.get(divergence_key)
         if prefix is None:
             raise ValueError(f"Unsupported divergence key: {divergence_key}")
-
         modified_baseline_key = f"{prefix}{baseline_key}"
-
     baseline_class = BASELINES.get(modified_baseline_key)
     if not baseline_class:
         raise ValueError(f"No baseline found for key: {modified_baseline_key}")
-
     return baseline_class

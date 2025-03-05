@@ -4,30 +4,24 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 
 import pytorch_lightning as pl
-
 import numpy as np
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-
-from selfsne.nn import PairSampler
-from selfsne.utils import add_model_params
 
 
 def get_lr_scheduler(
@@ -150,72 +144,47 @@ class SelfSNE(pl.LightningModule):
         dampening=0,
         nesterov=False,
         weight_decay=0.0,
-        encoder_weight_decay=None,
-        projector_weight_decay=None,
-        encoder_x_weight_decay=None,
-        projector_x_weight_decay=None,
         lr_scheduler=False,
         lr_warmup_steps=0,
         lr_target_steps=0,
         lr_cosine_steps=0,
-        concat_chunk_encode=True,
     ):
-        self.kwargs = locals()
         super().__init__()
-        self.encoder = encoder
-        self.projector = projector
-        self.encoder_x = encoder_x
-        self.projector_x = projector_x
-        self.pair_sampler = pair_sampler
+        if target_encoder is None and context_encoder is None:
+            raise ValueError(
+                "At least one of target_encoder or context_encoder must be provided."
+            )
+        # If one encoder is missing, use the other.
+        if target_encoder is None:
+            target_encoder = context_encoder
+        if context_encoder is None:
+            context_encoder = target_encoder
+
+        self.target_encoder = target_encoder
+        self.context_encoder = context_encoder
         self.similarity_loss = similarity_loss
         self.save_hyperparameters(
-            ignore=[
-                "encoder",
-                "projector",
-                "encoder_x",
-                "projector_x",
-                "pair_sampler",
-                "similarity_loss",
-            ],
-        )
-        self.hparams.encoder_weight_decay = (
-            encoder_weight_decay if encoder_weight_decay is not None else weight_decay
-        )
-        self.hparams.projector_weight_decay = (
-            projector_weight_decay
-            if projector_weight_decay is not None
-            else weight_decay
-        )
-        self.hparams.encoder_x_weight_decay = (
-            encoder_x_weight_decay
-            if encoder_x_weight_decay is not None
-            else weight_decay
-        )
-        self.hparams.projector_x_weight_decay = (
-            projector_x_weight_decay
-            if projector_x_weight_decay is not None
-            else weight_decay
+            ignore=["target_encoder", "context_encoder", "similarity_loss"]
         )
 
     def forward(self, batch):
-        return self.projector(self.encoder(batch))
+        # For inference, use the target_encoder.
+        return self.target_encoder(batch)
 
     def loss(self, batch, batch_idx, mode=""):
-        x, y = self.pair_sampler(batch)
-
+        # Assume batch is a tuple (context, target)
+        context, target = batch
         if self.similarity_loss is not None:
             loss_dict = self.similarity_loss(
-                x=x,
-                y=y,
-                encoder=self.encoder,
-                projector=self.projector,
-                encoder_x=self.encoder_x,
-                projector_x=self.projector_x,
+                context=context,
+                target=target,
+                target_encoder=self.target_encoder,
+                context_encoder=self.context_encoder,
             )
-
+        else:
+            loss_dict = {"loss": torch.tensor(0.0)}
         for key, value in loss_dict.items():
             self.log(f"{mode}{key}", value.item(), prog_bar=True)
-
         return loss_dict["loss"]
 
     def training_step(self, batch, batch_idx):
@@ -228,43 +197,38 @@ class SelfSNE(pl.LightningModule):
         self.loss(batch, batch_idx, mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        prediction = {}
-
-        prediction["embedding"] = self(batch)
-
-        return prediction
+        return {"embedding": self(batch)}
 
     def configure_optimizers(self):
         params_list = []
-
-        add_model_params(params_list, self.encoder, self.hparams.encoder_weight_decay)
-        add_model_params(
-            params_list, self.projector, self.hparams.projector_weight_decay
-        )
-
-        if self.encoder_x is not None:
-            add_model_params(
-                params_list, self.encoder_x, self.hparams.encoder_x_weight_decay
+        # Avoid duplicating parameters if both encoders are the same object.
+        if self.target_encoder is self.context_encoder:
+            params_list.append(
+                {
+                    "params": self.target_encoder.parameters(),
+                    "weight_decay": self.hparams.weight_decay,
+                }
             )
-            add_model_params(
-                params_list, self.projector_x, self.hparams.projector_x_weight_decay
-            )
-
-        if self.pair_sampler is not None:
-            params_list.append({"params": self.pair_sampler.parameters()})
-
+        else:
+            for model in [self.target_encoder, self.context_encoder]:
+                params_list.append(
+                    {
+                        "params": model.parameters(),
+                        "weight_decay": self.hparams.weight_decay,
+                    }
+                )
         if self.similarity_loss is not None:
             params_list.append({"params": self.similarity_loss.parameters()})
 
         if self.hparams.optimizer.lower() == "adam":
-            optimizer = optim.AdamW(
+            opt = optim.AdamW(
                 params_list,
                 lr=self.hparams.learning_rate,
                 weight_decay=self.hparams.weight_decay,
                 betas=self.hparams.betas,
             )
         elif self.hparams.optimizer.lower() == "sgd":
-            optimizer = optim.SGD(
+            opt = optim.SGD(
                 params_list,
                 lr=self.hparams.learning_rate,
                 weight_decay=self.hparams.weight_decay,
@@ -272,18 +236,19 @@ class SelfSNE(pl.LightningModule):
                 dampening=self.hparams.dampening,
                 nesterov=self.hparams.nesterov,
             )
+        else:
+            raise ValueError("Unsupported optimizer type. Use 'adam' or 'sgd'.")
 
         if self.hparams.lr_scheduler:
-            scheduler = get_lr_scheduler(
-                optimizer,
+            sched = get_lr_scheduler(
+                opt,
                 warmup_steps=self.hparams.lr_warmup_steps,
                 target_steps=self.hparams.lr_target_steps,
                 cosine_steps=self.hparams.lr_cosine_steps,
             )
-
-            return [optimizer], [
+            return [opt], [
                 {
-                    "scheduler": scheduler,
+                    "scheduler": sched,
                     "interval": "epoch",
                     "frequency": 1,
                     "reduce_on_plateau": False,
@@ -291,4 +256,4 @@ class SelfSNE(pl.LightningModule):
                 }
             ]
         else:
-            return optimizer
+            return opt

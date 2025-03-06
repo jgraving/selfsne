@@ -44,6 +44,9 @@ def init_linear(x):
     return x
 
 
+init_selu = init_linear
+
+
 class Residual(nn.Module):
     def __init__(self, module, residual=nn.Identity()):
         super().__init__()
@@ -586,6 +589,46 @@ def MultiheadEncoder(encoder, num_heads, hidden_dim, embedding_dim, num_layers=1
     )
 
 
+class Multilinear(nn.Module):
+    def __init__(self, embedding_dim, order):
+        super(Multilinear, self).__init__()
+        self.embedding_dim = embedding_dim
+        self.order = max(1, order)  # Ensure order is at least 1
+        self.num_chunks = self.order + 1  # e.g., order=1 implies 2 chunks
+
+        self.linear = init_linear(
+            nn.Linear(embedding_dim, self.num_chunks * embedding_dim, bias=True)
+        )
+
+    def forward(self, x):
+        # x is expected to be of shape (..., embedding_dim)
+        orig_shape = x.shape  # save original shape
+        # Flatten all dimensions except the last (feature) dimension
+        x_flat = x.view(-1, self.embedding_dim)
+
+        # Apply the linear transformation: shape becomes (-1, num_chunks * embedding_dim)
+        transformed = self.linear(x_flat)
+
+        # Reshape to separate chunks: (-1, num_chunks, embedding_dim)
+        transformed = transformed.view(-1, self.num_chunks, self.embedding_dim)
+
+        # Compute interactions: start with elementwise multiplication of first two chunks
+        interaction = transformed[:, 0] * transformed[:, 1]
+        out_flat = interaction.clone()
+
+        # Multiply in additional chunks cumulatively and sum their contribution
+        for idx in range(2, self.num_chunks):
+            interaction = interaction * transformed[:, idx]
+            out_flat = out_flat + interaction
+
+        # Residual connection: add the computed interactions back to the original input
+        output = x_flat + out_flat
+
+        # Restore original shape and return
+        output = output.view(*orig_shape)
+        return output
+
+
 class PositionEmbedding2d(nn.Module):
     def __init__(self, embedding_dim, height, width):
         super(PositionEmbedding2d, self).__init__()
@@ -837,6 +880,32 @@ class GlobalTokens(nn.Module):
         return torch.cat(
             [x, global_tokens_batch], dim=1
         )  # (batch_size, num_tokens + num_global_tokens, model_dim)
+
+
+class GatedMLP(nn.Module):
+    def __init__(self, model_dim, expansion_factor=4, activation=None):
+        super().__init__()
+        # Use SELU as the default activation, but allow a custom activation if provided.
+        self.activation = activation if activation is not None else nn.SELU()
+
+        # Compute the expanded hidden dimension.
+        hidden_dim = model_dim * expansion_factor
+
+        # The projection layer expands the model_dim to 2 * hidden_dim.
+        self.proj = init_linear(nn.Linear(model_dim, hidden_dim * 2))
+
+        # The output layer compresses the gated representation back to model_dim.
+        self.out = init_linear(nn.Linear(hidden_dim, model_dim))
+
+    def forward(self, x):
+        # x shape: (batch_size, ..., model_dim)
+        x_proj = self.proj(x)  # Shape: (batch_size, ..., 2 * hidden_dim)
+        # Split into two equal parts along the last dimension.
+        x_a, x_b = x_proj.chunk(2, dim=-1)
+        # Apply the activation to one half and multiply element-wise with the other.
+        gated = x_a * self.activation(x_b)
+        # Compress back to the original model_dim.
+        return self.out(gated)
 
 
 class Attention(nn.Module):

@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from einops import rearrange, reduce
+from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from selfsne.utils import (
@@ -36,7 +36,7 @@ def lecun_normal_(x, mode="fan_in"):
     return init.kaiming_normal_(x, mode=mode, nonlinearity="linear")
 
 
-def init_selu(x):
+def init_linear(x):
     lecun_normal_(x.weight)
     if hasattr(x, "bias"):
         if x.bias is not None:
@@ -57,14 +57,14 @@ class Residual(nn.Module):
 def ParametricResidual(in_features, out_features, module):
     return Residual(
         module,
-        init_selu(nn.Linear(in_features, out_features)),
+        init_linear(nn.Linear(in_features, out_features)),
     )
 
 
 def Residual1d(in_features, out_features, module):
     return Residual(
         module,
-        init_selu(nn.Linear(in_features, out_features))
+        init_linear(nn.Linear(in_features, out_features))
         if in_features != out_features
         else nn.Identity(),
     )
@@ -73,7 +73,7 @@ def Residual1d(in_features, out_features, module):
 def Residual2d(in_channels, out_channels, module):
     return Residual(
         module,
-        init_selu(nn.Conv2d(in_channels, out_channels, kernel_size=1))
+        init_linear(nn.Conv2d(in_channels, out_channels, kernel_size=1))
         if in_channels != out_channels
         else nn.Identity(),
     )
@@ -86,87 +86,6 @@ class Lambda(nn.Module):
 
     def forward(self, x):
         return self.func(x)
-
-
-class BatchCenter(nn.Module):
-    def __init__(self, num_features, momentum=0.9):
-        super().__init__()
-        self.register_buffer("running_mean", torch.zeros((1, num_features)))
-        self.momentum = momentum
-
-    def forward(self, x):
-        if self.training:
-            batch_mean = x.mean(dim=0, keepdim=True)
-            self.running_mean = torch.lerp(self.running_mean, batch_mean, self.momentum)
-            return x - batch_mean
-        else:
-            return x - self.running_mean
-
-
-class Scale(nn.Module):
-    def __init__(self, param_dim: int = 1024):
-        super().__init__()
-        self.param = nn.Parameter(torch.randn(1, param_dim))
-        self.projection = init_selu(nn.Linear(param_dim, 1))
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        scale = F.softplus(self.projection(self.param))
-        return input * scale
-
-
-class Bias(nn.Module):
-    def __init__(self, param_dim: int = 1024):
-        super().__init__()
-        self.param = nn.Parameter(torch.randn(1, param_dim))
-        self.projection = init_selu(nn.Linear(param_dim, 1))
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        bias = self.projection(self.param)
-        return input + bias
-
-
-class ScaleBias(nn.Module):
-    def __init__(self, param_dim: int = 1024):
-        super().__init__()
-        self.scale_param = nn.Parameter(torch.randn(1, param_dim))
-        self.bias_param = nn.Parameter(torch.randn(1, param_dim))
-        self.scale_projection = init_selu(nn.Linear(param_dim, 1))
-        self.bias_projection = init_selu(nn.Linear(param_dim, 1))
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        scale = F.softplus(self.scale_projection(self.scale_param))
-        bias = self.bias_projection(self.bias_param)
-        return input * scale + bias
-
-
-class PairSampler(nn.Module):
-    def __init__(self, x_sampler=nn.Identity(), y_sampler=nn.Identity()):
-        super().__init__()
-        self.x_sampler = x_sampler
-        self.y_sampler = y_sampler
-
-    def forward(self, batch):
-        if isinstance(batch, (list, tuple)) and len(batch) == 2:
-            x, y = batch
-        else:
-            x = batch
-            y = None
-
-        sampled_x = self.x_sampler(x)
-        if y is None:
-            sampled_y = self.y_sampler(x)
-        else:
-            sampled_y = self.y_sampler(y)
-        return sampled_x, sampled_y
-
-
-class PairAugmenter(nn.Module):
-    def __init__(self, augmenter):
-        super().__init__()
-        self.augmenter = augmenter
-
-    def forward(self, x):
-        return torch.chunk(self.augmenter(torch.cat([x, x], dim=0)), 2, dim=0)
 
 
 class ImageNetNorm(nn.Module):
@@ -237,30 +156,6 @@ class InputNorm3d(nn.BatchNorm3d):
         return x_norm
 
 
-class EmbeddingEncoder(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int, encoder: nn.Module):
-        """
-        Initialize the EmbeddingEncoder module.
-
-        Args:
-            num_embeddings (int): The size of the embedding dictionary.
-            embedding_dim (int): The dimension of each embedding vector.
-            encoder (nn.Module): The encoder module to encode the embedding parameters.
-        """
-        super(EmbeddingEncoder, self).__init__()
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-        self.encoder = encoder
-
-    def forward(self, dummy, **kwargs) -> torch.Tensor:
-        """
-        Forward pass through the embedding layer and then the encoder.
-
-        Returns:
-            torch.Tensor: The output after passing the embedding parameters through the encoder.
-        """
-        return self.encoder(self.embedding.weight)
-
-
 class PadShift(nn.Module):
     def forward(self, x):
         return F.pad(x, pad=(1, 0))[..., :-1]
@@ -323,7 +218,7 @@ def TCN(
     conv1d = CausalConv1d if causal else Conv1d
     return nn.Sequential(
         PadShift() if causal and causal_shift else nn.Identity(),
-        init_selu(nn.Conv1d(in_channels, hidden_channels, 1)),
+        init_linear(nn.Conv1d(in_channels, hidden_channels, 1)),
         nn.SELU(),
         Residual(
             nn.Sequential(
@@ -335,7 +230,7 @@ def TCN(
                                     nn.BatchNorm1d(hidden_channels)
                                     if batch_norm
                                     else nn.Identity(),
-                                    init_selu(
+                                    init_linear(
                                         conv1d(
                                             hidden_channels,
                                             hidden_channels,
@@ -354,7 +249,7 @@ def TCN(
             )
         ),
         nn.BatchNorm1d(hidden_channels) if batch_norm else nn.Identity(),
-        init_selu(nn.Conv1d(hidden_channels, out_channels, 1)),
+        init_linear(nn.Conv1d(hidden_channels, out_channels, 1)),
     )
 
 
@@ -372,7 +267,7 @@ def TCN2d(
     """Temporal Convolution Network (TCN)"""
     conv = nn.Conv2d
     return nn.Sequential(
-        init_selu(nn.Conv2d(in_channels, hidden_channels, (1, 1))),
+        init_linear(nn.Conv2d(in_channels, hidden_channels, (1, 1))),
         nn.SELU(),
         Residual(
             nn.Sequential(
@@ -384,7 +279,7 @@ def TCN2d(
                                     nn.BatchNorm2d(hidden_channels)
                                     if batch_norm
                                     else nn.Identity(),
-                                    init_selu(
+                                    init_linear(
                                         conv(
                                             hidden_channels,
                                             hidden_channels,
@@ -407,7 +302,7 @@ def TCN2d(
             )
         ),
         nn.BatchNorm2d(hidden_channels) if batch_norm else nn.Identity(),
-        init_selu(nn.Conv2d(hidden_channels, out_channels, (1, 1))),
+        init_linear(nn.Conv2d(hidden_channels, out_channels, (1, 1))),
     )
 
 
@@ -426,7 +321,7 @@ def TCN3d(
     """Temporal Convolution Network (TCN)"""
     conv = nn.Conv3d
     return nn.Sequential(
-        init_selu(nn.Conv3d(in_channels, hidden_channels, (1, 1, 1))),
+        init_linear(nn.Conv3d(in_channels, hidden_channels, (1, 1, 1))),
         nn.SELU(),
         Residual(
             nn.Sequential(
@@ -438,7 +333,7 @@ def TCN3d(
                                     nn.BatchNorm3d(hidden_channels)
                                     if batch_norm
                                     else nn.Identity(),
-                                    init_selu(
+                                    init_linear(
                                         conv(
                                             hidden_channels,
                                             hidden_channels,
@@ -462,7 +357,7 @@ def TCN3d(
             )
         ),
         nn.BatchNorm3d(hidden_channels) if batch_norm else nn.Identity(),
-        init_selu(nn.Conv3d(hidden_channels, out_channels, (1, 1, 1))),
+        init_linear(nn.Conv3d(hidden_channels, out_channels, (1, 1, 1))),
     )
 
 
@@ -478,7 +373,7 @@ def ResNet2d(
     input_kernel=7,
 ):
     return nn.Sequential(
-        init_selu(
+        init_linear(
             nn.Conv2d(
                 in_channels,
                 hidden_channels,
@@ -503,7 +398,7 @@ def ResNet2d(
                                 )
                                 if batch_norm
                                 else nn.Identity(),
-                                init_selu(
+                                init_linear(
                                     nn.Conv2d(
                                         hidden_channels
                                         * (2 ** np.maximum(0, block_idx - 1)),
@@ -516,7 +411,7 @@ def ResNet2d(
                                 nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
                                 if batch_norm
                                 else nn.Identity(),
-                                init_selu(
+                                init_linear(
                                     nn.Conv2d(
                                         hidden_channels * (2 ** block_idx),
                                         hidden_channels * (2 ** block_idx),
@@ -535,7 +430,7 @@ def ResNet2d(
                                     nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
                                     if batch_norm
                                     else nn.Identity(),
-                                    init_selu(
+                                    init_linear(
                                         nn.Conv2d(
                                             hidden_channels * (2 ** block_idx),
                                             hidden_channels * (2 ** block_idx),
@@ -547,7 +442,7 @@ def ResNet2d(
                                     nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
                                     if batch_norm
                                     else nn.Identity(),
-                                    init_selu(
+                                    init_linear(
                                         nn.Conv2d(
                                             hidden_channels * (2 ** block_idx),
                                             hidden_channels * (2 ** block_idx),
@@ -561,7 +456,7 @@ def ResNet2d(
                             for _ in range(num_layers - 1)
                         ],
                     ),
-                    init_selu(
+                    init_linear(
                         nn.Conv2d(
                             hidden_channels * (2 ** block_idx),
                             hidden_channels * (2 ** block_idx),
@@ -578,7 +473,7 @@ def ResNet2d(
         nn.BatchNorm2d(hidden_channels * (2 ** (num_blocks - 1)))
         if batch_norm
         else nn.Identity(),
-        init_selu(
+        init_linear(
             nn.Conv2d(hidden_channels * (2 ** (num_blocks - 1)), out_channels, 1)
         ),
         GlobalVarPool2d() if global_pooling else nn.Identity(),
@@ -593,20 +488,20 @@ def MLP(
     batch_norm=False,
 ):
     return nn.Sequential(
-        init_selu(nn.Linear(in_features, hidden_features)),
+        init_linear(nn.Linear(in_features, hidden_features)),
         nn.SELU(),
         nn.Sequential(
             *[
                 nn.Sequential(
                     nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
-                    init_selu(nn.Linear(hidden_features, hidden_features)),
+                    init_linear(nn.Linear(hidden_features, hidden_features)),
                     nn.SELU(),
                 )
                 for _ in range(num_layers)
             ]
         ),
         nn.BatchNorm1d(hidden_features) if batch_norm else nn.Identity(),
-        init_selu(nn.Linear(hidden_features, out_features)),
+        init_linear(nn.Linear(hidden_features, out_features)),
     )
 
 
@@ -691,42 +586,6 @@ def MultiheadEncoder(encoder, num_heads, hidden_dim, embedding_dim, num_layers=1
     )
 
 
-class MultistageEncoder(nn.Module):
-    def __init__(
-        self,
-        encoder,
-        num_stages,
-        hidden_dim,
-        embedding_dim,
-        stage_hidden_layers=1,
-        projector_hidden_layers=1,
-    ):
-        super().__init__()
-        self.encoder = encoder
-        self.stages = nn.ModuleList(
-            [
-                MLP(hidden_dim, hidden_dim, hidden_dim, num_layers=stage_hidden_layers)
-                for _ in range(num_stages)
-            ]
-        )
-        self.projector = MultiheadMLP(
-            hidden_dim,
-            embedding_dim,
-            hidden_dim,
-            num_layers=projector_hidden_layers,
-            num_heads=num_stages,
-        )
-
-    def forward(self, x):
-        h = self.encoder(x)
-        stages = []
-        for stage in self.stages:
-            h = stage(h)
-            stages.append(h)
-        stages = torch.stack(stages, dim=1)
-        return self.projector(stages)
-
-
 class PositionEmbedding2d(nn.Module):
     def __init__(self, embedding_dim, height, width):
         super(PositionEmbedding2d, self).__init__()
@@ -750,7 +609,7 @@ class PositionEmbedding2d(nn.Module):
         return torch.cat([x, pos_embed], dim=1)
 
 
-class PositionEmbedding(nn.Module):
+class PositionEmbedding1d(nn.Module):
     def __init__(self, embedding_dim, num_positions):
         super().__init__()
         self.embedding = nn.Parameter(torch.randn(num_positions, embedding_dim))
@@ -794,167 +653,12 @@ class TokenSampler(nn.Module):
             return x
 
 
-class PairedTokenSampler(nn.Module):
-    def __init__(self, p=0.5, p_a=None, p_b=None):
-        super(PairedTokenSampler, self).__init__()
-
-        if p_a is None:
-            p_a = p
-
-        if p_b is None:
-            p_b = 1 - p_a
-
-        self.p_a = p_a
-        self.p_b = p_b
-
-        if p_a is not None and (p_a <= 0 or p_a > 1):
-            raise ValueError("The 'p_a' parameter must be between 0 and 1.")
-        if p_b is not None and (p_b <= 0 or p_b > 1):
-            raise ValueError("The 'p_b' parameter must be between 0 and 1.")
-        if p_a + p_b > 1:
-            warnings.warn(
-                "The sum of p_a and p_b is greater than 1, which may result in overlapping tokens."
-            )
-
-    def _calculate_samples(self, num_tokens):
-        sample_a_tokens = int(num_tokens * self.p_a)
-        sample_b_tokens = int(num_tokens * self.p_b)
-        return sample_a_tokens, sample_b_tokens
-
-    def forward(self, x):
-        batch_size, num_tokens, num_features = x.shape
-
-        # Calculate the number of tokens for each sample
-        sample_a_tokens, sample_b_tokens = self._calculate_samples(num_tokens)
-
-        # Generate random numbers for each token in the batch, ensuring they are on the same device
-        rand_values = torch.randn_like(x[:, :, 0])
-
-        # Use topk to get the indices of the highest k random values, where k is the number of tokens for each sample
-        _, top_indices = torch.topk(rand_values, k=sample_a_tokens, dim=1)
-        _, bottom_indices = torch.topk(
-            rand_values, k=sample_b_tokens, dim=1, largest=False
-        )
-
-        # Use gather to sample the tokens into 'a' and 'b' using the indices
-        a = x.gather(1, top_indices.unsqueeze(-1).expand(-1, -1, num_features))
-        b = x.gather(1, bottom_indices.unsqueeze(-1).expand(-1, -1, num_features))
-
-        return a, b
-
-
-class PairedImagePatchSampler(nn.Module):
-    def __init__(self, patch_size, p=0.5, p_a=None, p_b=None):
-        super(PairedImagePatchSampler, self).__init__()
-        self.patch_size = patch_size
-        self.token_sampler = PairedTokenSampler(p=p, p_a=p_a, p_b=p_b)
-
-    def forward(self, x):
-        batch_size, channels, height, width = x.shape
-        patch_size = self.patch_size
-
-        # Ensure height and width are divisible by patch_size
-        assert (
-            height % patch_size == 0 and width % patch_size == 0
-        ), "Height and width must be divisible by patch_size."
-
-        # Rearrange the input image into patches
-        patches = rearrange(
-            x, "b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_size, p2=patch_size
-        )
-
-        # Sample the patches using PairedTokenSampler
-        sampled_patches_a, sampled_patches_b = self.token_sampler(patches)
-
-        # Rearrange the sampled patches back into images
-        a = rearrange(
-            sampled_patches_a,
-            "b (s) (p1 p2 c) -> b c (s p1) (p2)",
-            p1=patch_size,
-            p2=patch_size,
-        )
-        b = rearrange(
-            sampled_patches_b,
-            "b (s) (p1 p2 c) -> b c (s p1) (p2)",
-            p1=patch_size,
-            p2=patch_size,
-        )
-
-        return a, b
-
-
-class PairedSequencePatchSampler(nn.Module):
-    def __init__(self, patch_size, p=0.5, p_a=None, p_b=None):
-        super(PairedSequencePatchSampler, self).__init__()
-        self.patch_size = patch_size
-        self.token_sampler = PairedTokenSampler(p=p, p_a=p_a, p_b=p_b)
-
-    def forward(self, x):
-        batch_size, channels, seq_length = x.shape
-        patch_size = self.patch_size
-
-        # Ensure seq_length is divisible by patch_size
-        assert (
-            seq_length % patch_size == 0
-        ), "Seq_length must be divisible by patch_size."
-
-        # Rearrange the input sequence into patches
-        patches = rearrange(x, "b c (s p) -> b (s) (p c)", p=patch_size)
-
-        # Sample the patches using PairedTokenSampler
-        sampled_patches_a, sampled_patches_b = self.token_sampler(patches)
-
-        # Rearrange the sampled patches back into sequences
-        a = rearrange(sampled_patches_a, "b (s) (p c) -> b c (s p)", p=patch_size)
-        b = rearrange(sampled_patches_b, "b (s) (p c) -> b c (s p)", p=patch_size)
-
-        return a, b
-
-
-class PairedCausalSequencePatchSampler(nn.Module):
-    def __init__(self, patch_size, p=None, split_index=None):
-        super(PairedCausalSequencePatchSampler, self).__init__()
-        self.patch_size = patch_size
-        self.p = p
-        self.split_index = split_index
-
-    def forward(self, x):
-        batch_size, channels, seq_length = x.shape
-        patch_size = self.patch_size
-
-        # Ensure seq_length is divisible by patch_size
-        assert (
-            seq_length % patch_size == 0
-        ), "Seq_length must be divisible by patch_size."
-
-        # Rearrange the input sequence into patches
-        patches = rearrange(x, "b c (s p) -> b (s) (p c)", p=patch_size)
-
-        # Determine the split index
-        if self.split_index is None and self.p is None:
-            split_index = patches.size(1) - 1
-        elif self.split_index is not None:
-            split_index = min(patches.size(1) - 1, self.split_index)
-        else:
-            split_index = int(patches.size(1) * self.p)
-
-        # Split the patches into a and b
-        a = patches[:, :split_index, :]
-        b = patches[:, split_index:, :]
-
-        # Rearrange a and b back into sequences
-        a = rearrange(a, "b (s) (p c) -> b c (s p)", p=patch_size)
-        b = rearrange(b, "b (s) (p c) -> b c (s p)", p=patch_size)
-
-        return a, b
-
-
 def PatchEmbedding1d(seq_length, patch_size, embedding_dim, in_channels):
     assert (
         seq_length % patch_size
     ) == 0, "Sequence length must be divisible by patch size."
     return nn.Sequential(
-        init_selu(
+        init_linear(
             nn.Conv1d(
                 in_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
             )
@@ -966,7 +670,7 @@ def PatchEmbedding1d(seq_length, patch_size, embedding_dim, in_channels):
 def PatchEmbedding2d(image_size, patch_size, embedding_dim, in_channels=3):
     assert (image_size % patch_size) == 0, "Image size must be divisible by patch size."
     return nn.Sequential(
-        init_selu(
+        init_linear(
             nn.Conv2d(
                 in_channels, embedding_dim, kernel_size=patch_size, stride=patch_size
             )
@@ -975,16 +679,12 @@ def PatchEmbedding2d(image_size, patch_size, embedding_dim, in_channels=3):
     )
 
 
-def PreNorm(in_features, module):
+def PreLayerNorm(in_features, module):
     return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
 
 
-def PostNorm(out_features, module):
-    return nn.Sequential(Residual(module), nn.LayerNorm(out_features))
-
-
-def ResNorm(out_features, module):
-    return Residual(nn.Sequential(module, nn.LayerNorm(out_features)))
+def PreRMSNorm(in_features, module):
+    return Residual(nn.Sequential(nn.RMSNorm(in_features), module))
 
 
 class SinusoidalPositionalEmbedding(nn.Module):
@@ -1182,8 +882,8 @@ class SelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = model_dim // num_heads
 
-        self.qkv = nn.Linear(model_dim, model_dim * 3)
-        self.out = nn.Linear(model_dim, model_dim)
+        self.qkv = init_linear(nn.Linear(model_dim, model_dim * 3))
+        self.out = init_linear(nn.Linear(model_dim, model_dim))
         self.attention = Attention(model_dim, num_heads, dropout, causal_mask)
 
     def forward(self, x):
@@ -1212,9 +912,9 @@ class CrossAttention(nn.Module):
         self.scale = self.head_dim ** -0.5
 
         # Linear layers for Q, K, V
-        self.q = nn.Linear(model_dim, model_dim)
-        self.kv = nn.Linear(model_dim, model_dim * 2)
-        self.out = nn.Linear(model_dim, model_dim)
+        self.q = init_linear(nn.Linear(model_dim, model_dim))
+        self.kv = init_linear(nn.Linear(model_dim, model_dim * 2))
+        self.out = init_linear(nn.Linear(model_dim, model_dim))
 
         # Dropout for regularization
         self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
@@ -1257,7 +957,9 @@ class LatentCrossAttention(nn.Module):
         self.model_dim = model_dim
 
         # Learnable latent tokens
-        self.latents = nn.Parameter(torch.randn(1, num_latent_tokens, model_dim))
+        self.latents = nn.Parameter(
+            torch.randn(1, num_latent_tokens, model_dim) / np.sqrt(model_dim)
+        )
 
         # Generic cross-attention
         self.cross_attention = CrossAttention(model_dim, num_heads, dropout)

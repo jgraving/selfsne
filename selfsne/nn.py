@@ -722,14 +722,6 @@ def PatchEmbedding2d(image_size, patch_size, embedding_dim, in_channels=3):
     )
 
 
-def PreLayerNorm(in_features, module):
-    return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
-
-
-def PreRMSNorm(in_features, module):
-    return Residual(nn.Sequential(nn.RMSNorm(in_features), module))
-
-
 class SinusoidalPositionalEmbedding(nn.Module):
     """
     Computes and applies Sinusoidal Positional Embeddings to the input tokens.
@@ -906,6 +898,14 @@ class GatedMLP(nn.Module):
         gated = x_a * self.activation(x_b)
         # Compress back to the original model_dim.
         return self.out(gated)
+
+
+def PreLayerNorm(in_features, module):
+    return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
+
+
+def PreRMSNorm(in_features, module):
+    return Residual(nn.Sequential(nn.RMSNorm(in_features), module))
 
 
 class Attention(nn.Module):

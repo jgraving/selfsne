@@ -126,16 +126,13 @@ def visualize_lr_schedule(
 
 
 class SelfSNE(pl.LightningModule):
-    """Self-Supervised Noise Embedding"""
-
     def __init__(
         self,
-        encoder,
-        encoder_x=None,
-        projector_x=nn.Identity(),
-        pair_sampler=PairSampler(),
-        projector=nn.Identity(),
-        similarity_loss=None,
+        loss,
+        target_encoder=None,
+        context_encoder=None,
+        target_tokenizer=None,
+        context_tokenizer=None,
         learning_rate=3e-4,
         optimizer="adam",
         momentum=0,

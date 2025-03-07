@@ -133,6 +133,8 @@ class SelfSNE(pl.LightningModule):
         context_encoder=None,
         target_tokenizer=None,
         context_tokenizer=None,
+        embedding_head: Optional[torch.nn.Module] = None,
+        baseline_head: Optional[torch.nn.Module] = None,
         learning_rate=3e-4,
         optimizer="adam",
         momentum=0,
@@ -140,7 +142,7 @@ class SelfSNE(pl.LightningModule):
         dampening=0,
         nesterov=False,
         weight_decay=0.0,
-        lr_scheduler=False,
+        lr_scheduler: bool = False,
         lr_warmup_steps=0,
         lr_target_steps=0,
         lr_cosine_steps=0,
@@ -172,6 +174,9 @@ class SelfSNE(pl.LightningModule):
         self.target_tokenizer = target_tokenizer
         self.context_tokenizer = context_tokenizer
 
+        self.embedding_head = embedding_head
+        self.baseline_head = baseline_head
+
         self.save_hyperparameters(
             ignore=[
                 "loss_module",
@@ -179,114 +184,137 @@ class SelfSNE(pl.LightningModule):
                 "context_encoder",
                 "target_tokenizer",
                 "context_tokenizer",
-                "loss_module",
+                "embedding_head",
+                "baseline_head",
             ]
         )
+        self.learning_rate = learning_rate
+        self.optimizer_type = optimizer.lower()
+        self.momentum = momentum
+        self.betas = betas
+        self.dampening = dampening
+        self.nesterov = nesterov
+        self.weight_decay = weight_decay
+        self.lr_sched_flag = lr_scheduler
+        self.lr_warmup_steps = lr_warmup_steps
+        self.lr_target_steps = lr_target_steps
+        self.lr_cosine_steps = lr_cosine_steps
 
-    def process_batch(self, batch):
-        """
-        Processes the input batch and returns (raw_context, raw_target, raw_reference),
-        where raw_reference may be None. Accepts input as a dict with keys "context", "target",
-        and optionally "reference", or as a tuple/list.
-        """
+    def process_batch(self, batch) -> Tuple:
         if isinstance(batch, dict):
-            raw_context = batch.get("context")
-            raw_target = batch.get("target")
-            raw_reference = batch.get("reference", None)
-            if raw_context is None or raw_target is None:
+            context = batch.get("context")
+            target = batch.get("target")
+            reference = batch.get("reference", None)
+            if context is None or target is None:
                 raise ValueError(
                     "Dictionary batch must have at least 'context' and 'target' keys."
                 )
         elif isinstance(batch, (list, tuple)):
             if len(batch) == 2:
-                raw_context, raw_target = batch
-                raw_reference = None
+                context, target = batch
+                reference = None
             elif len(batch) == 3:
-                raw_context, raw_target, raw_reference = batch
+                context, target, reference = batch
             else:
                 raise ValueError("Batch must contain 2 or 3 items.")
         else:
-            raw_context = raw_target = batch
-            raw_reference = None
-        return raw_context, raw_target, raw_reference
+            context = target = batch
+            reference = None
+        return context, target, reference
 
-    def get_embeddings(self, raw_context, raw_target, raw_reference=None):
-        """
-        Applies tokenizers and encoders to produce embeddings.
-        If raw_reference is provided, it is processed using the target tokenizer/encoder.
-        For raw_reference of shape (batch, num_samples, ...), the data is collapsed,
-        processed, then reshaped back.
-        """
-        context_input = self.context_tokenizer(raw_context)
-        target_input = self.target_tokenizer(raw_target)
-        context_embedding = self.context_encoder(context_input)
-        target_embedding = self.target_encoder(target_input)
-
-        if raw_reference is not None:
-            reference_input = self.target_tokenizer(
-                rearrange(raw_reference, "b s ... -> (b s) ...")
+    def get_embeddings(self, context, target, reference=None) -> Tuple:
+        context_tokens = self.context_tokenizer(context)
+        target_tokens = self.target_tokenizer(target)
+        context_encoding = self.context_encoder(context_tokens)
+        target_encoding = self.target_encoder(target_tokens)
+        baseline_embedding = None
+        if self.baseline_head is not None:
+            baseline_embedding = self.baseline_head(context_encoding)
+        if self.embedding_head is not None:
+            context_embedding = self.embedding_head(context_encoding)
+            target_embedding = self.embedding_head(target_encoding)
+        else:
+            context_embedding = context_encoding
+            target_embedding = target_encoding
+        if reference is not None:
+            reference_tokens = self.target_tokenizer(
+                rearrange(reference, "b s ... -> (b s) ...")
             )
-            reference_embedding = self.target_encoder(reference_input)
-            num_samples = raw_reference.shape[1]
+            reference_encoding = self.target_encoder(reference_tokens)
+            if self.embedding_head is not None:
+                reference_embedding = self.embedding_head(reference_encoding)
+            else:
+                reference_embedding = reference_encoding
+            num_samples = reference.shape[1]
             reference_embedding = rearrange(
                 reference_embedding, "(b s) ... -> b s ...", s=num_samples
             )
         else:
             reference_embedding = None
-
-        return context_embedding, target_embedding, reference_embedding
-
-    def forward(self, batch):
-        """
-        For inference, processes the batch (dict or tuple/list) and returns a dict
-        with the resulting embeddings.
-        """
-        raw_context, raw_target, raw_reference = self.process_batch(batch)
-        context_embedding, target_embedding, reference_embedding = self.get_embeddings(
-            raw_context, raw_target, raw_reference
+        return (
+            context_embedding,
+            target_embedding,
+            reference_embedding,
+            baseline_embedding,
         )
+
+    def forward(self, batch) -> Dict[str, torch.Tensor]:
+        context, target, reference = self.process_batch(batch)
+        (
+            context_embedding,
+            target_embedding,
+            reference_embedding,
+            baseline_embedding,
+        ) = self.get_embeddings(context, target, reference)
         output = {
             "context_embedding": context_embedding,
             "target_embedding": target_embedding,
         }
+        if baseline_embedding is not None:
+            output["baseline_embedding"] = baseline_embedding
         if reference_embedding is not None:
             output["reference_embedding"] = reference_embedding
         return output
 
     def compute_loss(self, batch, batch_idx, mode=""):
-        raw_context, raw_target, raw_reference = self.process_batch(batch)
-        context_embedding, target_embedding, reference_embedding = self.get_embeddings(
-            raw_context, raw_target, raw_reference
-        )
+        context, target, reference = self.process_batch(batch)
+        (
+            context_embedding,
+            target_embedding,
+            reference_embedding,
+            baseline_embedding,
+        ) = self.get_embeddings(context, target, reference)
         loss_dict = self.loss_module(
             context_embedding=context_embedding,
             target_embedding=target_embedding,
+            baseline_embedding=baseline_embedding,
             reference_embedding=reference_embedding,
         )
         for key, value in loss_dict.items():
             self.log(f"{mode}{key}", value.item(), prog_bar=True)
         return loss_dict["loss"]
 
-    def predict_sample_logits(self, batch):
-        """
-        Processes the batch and returns the sample-wise positive logits (without averaging).
-        This can be used during prediction to examine the raw logits.
-        """
-        raw_context, raw_target, raw_reference = self.process_batch(batch)
-        context_embedding, target_embedding, _ = self.get_embeddings(
-            raw_context, raw_target, raw_reference
-        )
-        # Compute logits via the loss module's logits and baseline functions.
-        pos_logits, _ = self.loss_module.logits(
+    def predict_sample_logits(self, batch) -> torch.Tensor:
+        context, target, reference = self.process_batch(batch)
+        (
+            context_embedding,
+            target_embedding,
+            reference_embedding,
+            baseline_embedding,
+        ) = self.get_embeddings(context, target, reference)
+        pos_logits, neg_logits = self.loss_module.logits(
             context_embedding=context_embedding,
             target_embedding=target_embedding,
             kernel_scale=self.loss_module.kernel_scale,
+            reference_embedding=reference_embedding,
         )
         log_baseline = self.loss_module.baseline(
             pos_logits=pos_logits,
-            neg_logits=None,  # Not used for computing positive logits
+            neg_logits=neg_logits,
             context_embedding=context_embedding,
             target_embedding=target_embedding,
+            baseline_embedding=baseline_embedding,
+            reference_embedding=reference_embedding,
         )
         samplewise_pos_logits = pos_logits - log_baseline
         return samplewise_pos_logits
@@ -300,10 +328,12 @@ class SelfSNE(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         self.compute_loss(batch, batch_idx, mode="test_")
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        raw_context, raw_target, _ = self.process_batch(batch)
-        target_input = self.target_tokenizer(raw_target)
-        return {"embedding": self.target_encoder(target_input)}
+    def predict_step(
+        self, batch, batch_idx, dataloader_idx=0
+    ) -> Dict[str, torch.Tensor]:
+        context, target, _ = self.process_batch(batch)
+        target_tokens = self.target_tokenizer(target)
+        return {"embedding": self.target_encoder(target_tokens)}
 
     def configure_optimizers(self):
         modules = []
@@ -317,6 +347,10 @@ class SelfSNE(pl.LightningModule):
                 modules.append(module)
         params_list = [{"params": m.parameters()} for m in modules]
         params_list.append({"params": self.loss_module.parameters()})
+        if self.baseline_head is not None:
+            params_list.append({"params": self.baseline_head.parameters()})
+        if self.embedding_head is not None:
+            params_list.append({"params": self.embedding_head.parameters()})
         if self.hparams.optimizer.lower() == "adam":
             opt = optim.AdamW(
                 params_list,

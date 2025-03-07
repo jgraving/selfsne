@@ -513,6 +513,45 @@ class LogAdditiveBaseline(AdditiveBaseline):
         return log_baseline - self.log_scale
 
 
+class EmbeddingBaseline(nn.Module):
+    """
+    Computes a log baseline from a context embedding and a baseline embedding
+    using a provided rowwise similarity kernel and kernel scale. This baseline
+    is used to adjust logits in a contrastive loss by serving as a similarity threshold.
+
+    The kernel and kernel_scale are passed as arguments during the forward pass.
+    Additional keyword arguments are accepted for compatibility.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self,
+        context_embedding: torch.Tensor,
+        baseline_embedding: torch.Tensor,
+        kernel: callable,
+        kernel_scale: float,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Computes the log baseline as the similarity between the context embedding and
+        the baseline embedding using the provided kernel and kernel scale.
+
+        Args:
+            context_embedding (torch.Tensor): The context embedding.
+            baseline_embedding (torch.Tensor): The baseline embedding.
+            kernel (callable): A rowwise similarity kernel function.
+            kernel_scale (float): The scale factor for the kernel.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            torch.Tensor: The computed log baseline.
+        """
+        log_baseline = kernel(context_embedding, baseline_embedding, kernel_scale)
+        return log_baseline
+
+
 BASELINES = {
     "batch": BatchBaseline,
     "batch_conditional": BatchConditionalBaseline,
@@ -531,6 +570,7 @@ BASELINES = {
     "arithmetic_batch_conditional": ArithmeticBatchConditionalBaseline,
     "parametric": ParametricBaseline,
     "constant": ConstantBaseline,
+    "embedding": EmbeddingBaseline,
 }
 
 

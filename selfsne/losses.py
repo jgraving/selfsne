@@ -15,14 +15,11 @@
 
 import numpy as np
 import torch
-from torch import nn
-from torch import diagonal
-
+from torch import nn, diagonal
 from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
 from selfsne.utils import remove_diagonal
-
 from typing import Optional, Union, Tuple, Dict
 
 
@@ -69,19 +66,16 @@ class LikelihoodRatioEstimator(nn.Module):
             self.kernel = ROWWISE_KERNELS[kernel]
         else:
             self.kernel = kernel
-
         if isinstance(divergence, str):
             self.divergence = DIVERGENCES[divergence]
         else:
             self.divergence = divergence
-
         if isinstance(baseline, str):
             self.baseline = BASELINES[baseline]()
         elif isinstance(baseline, (int, float)):
             self.baseline = BASELINES["constant"](baseline)
         else:
             self.baseline = baseline
-
         self.kernel_scale = float(kernel_scale)
 
     def logits(
@@ -102,7 +96,6 @@ class LikelihoodRatioEstimator(nn.Module):
             )
             pos_logits = diagonal(logits).unsqueeze(1)
             neg_logits = remove_diagonal(logits)
-
         return pos_logits, neg_logits
 
     def loss_and_metrics(
@@ -134,6 +127,7 @@ class LikelihoodRatioEstimator(nn.Module):
         context_embedding: torch.Tensor,
         target_embedding: torch.Tensor,
         reference_embedding: Optional[torch.Tensor] = None,
+        baseline_embedding: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         pos_logits, neg_logits = self.logits(
             context_embedding=context_embedding,
@@ -146,6 +140,7 @@ class LikelihoodRatioEstimator(nn.Module):
             neg_logits=neg_logits,
             context_embedding=context_embedding,
             target_embedding=target_embedding,
+            baseline_embedding=baseline_embedding,
         )
         return self.loss_and_metrics(
             pos_logits=pos_logits,

@@ -18,7 +18,6 @@ import torch
 from torch import nn, diagonal
 from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
-
 from selfsne.baselines import BASELINES
 from selfsne.utils import remove_diagonal
 from typing import Optional, Union, Tuple, Dict
@@ -87,7 +86,9 @@ class LikelihoodRatioEstimator(nn.Module):
         reference_embedding: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if reference_embedding is not None:
-            pos_logits = self.kernel(context_embedding, target_embedding, kernel_scale)
+            pos_logits = self.kernel(
+                context_embedding, target_embedding, kernel_scale
+            ).unsqueeze(1)
             neg_logits = self.kernel(
                 context_embedding.unsqueeze(1), reference_embedding, kernel_scale
             )

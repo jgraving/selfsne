@@ -26,6 +26,9 @@ from einops import rearrange, repeat
 
 from typing import Optional, Tuple, List, Dict, Union
 
+from pytorch_lightning.callbacks import TQDMProgressBar
+from tqdm.auto import tqdm
+
 
 def inverse_softplus(x):
     """
@@ -571,3 +574,25 @@ class Trainer(pl.Trainer):
             ckpt_path=ckpt_path,
         )
         return concat_dicts(result)
+
+
+class EpochOnlyProgressBar(TQDMProgressBar):
+    def on_train_start(self, trainer, pl_module):
+        # Initialize a progress bar tracking epochs only.
+        self.main_progress_bar = tqdm(
+            total=trainer.max_epochs, desc="Training", position=0, leave=True
+        )
+
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None
+    ):
+        # Suppress per-batch updates.
+        pass
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self.main_progress_bar is not None:
+            # Fetch metrics logged with prog_bar=True
+            metrics = trainer.progress_bar_metrics
+            # Update the progress bar with the logged metrics and increment the epoch count.
+            self.main_progress_bar.set_postfix(metrics)
+            self.main_progress_bar.update(1)

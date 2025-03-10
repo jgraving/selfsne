@@ -18,6 +18,7 @@ import torch
 from torch import nn, diagonal
 from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
+
 from selfsne.baselines import BASELINES
 from selfsne.utils import remove_diagonal
 from typing import Optional, Union, Tuple, Dict
@@ -141,6 +142,8 @@ class LikelihoodRatioEstimator(nn.Module):
             context_embedding=context_embedding,
             target_embedding=target_embedding,
             baseline_embedding=baseline_embedding,
+            kernel=self.kernel,
+            kernel_scale=self.kernel_scale,
         )
         return self.loss_and_metrics(
             pos_logits=pos_logits,

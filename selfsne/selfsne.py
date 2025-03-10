@@ -21,6 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from einops import rearrange
+from typing import Optional, Union, Tuple, Dict
 
 
 def get_lr_scheduler(
@@ -150,7 +151,7 @@ class SelfSNE(pl.LightningModule):
         super().__init__()
         if loss is None:
             raise ValueError("A loss module must be provided.")
-        self.loss_module = loss
+        self.loss = loss
 
         if target_encoder is None and context_encoder is None:
             raise ValueError(
@@ -179,7 +180,7 @@ class SelfSNE(pl.LightningModule):
 
         self.save_hyperparameters(
             ignore=[
-                "loss_module",
+                "loss",
                 "target_encoder",
                 "context_encoder",
                 "target_tokenizer",
@@ -284,7 +285,7 @@ class SelfSNE(pl.LightningModule):
             reference_embedding,
             baseline_embedding,
         ) = self.get_embeddings(context, target, reference)
-        loss_dict = self.loss_module(
+        loss_dict = self.loss(
             context_embedding=context_embedding,
             target_embedding=target_embedding,
             baseline_embedding=baseline_embedding,
@@ -302,13 +303,13 @@ class SelfSNE(pl.LightningModule):
             reference_embedding,
             baseline_embedding,
         ) = self.get_embeddings(context, target, reference)
-        pos_logits, neg_logits = self.loss_module.logits(
+        pos_logits, neg_logits = self.loss.logits(
             context_embedding=context_embedding,
             target_embedding=target_embedding,
-            kernel_scale=self.loss_module.kernel_scale,
+            kernel_scale=self.loss.kernel_scale,
             reference_embedding=reference_embedding,
         )
-        log_baseline = self.loss_module.baseline(
+        log_baseline = self.loss.baseline(
             pos_logits=pos_logits,
             neg_logits=neg_logits,
             context_embedding=context_embedding,
@@ -346,7 +347,7 @@ class SelfSNE(pl.LightningModule):
             if module is not None and module not in modules:
                 modules.append(module)
         params_list = [{"params": m.parameters()} for m in modules]
-        params_list.append({"params": self.loss_module.parameters()})
+        params_list.append({"params": self.loss.parameters()})
         if self.baseline_head is not None:
             params_list.append({"params": self.baseline_head.parameters()})
         if self.embedding_head is not None:

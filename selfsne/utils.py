@@ -578,21 +578,38 @@ class Trainer(pl.Trainer):
 
 class EpochOnlyProgressBar(TQDMProgressBar):
     def on_train_start(self, trainer, pl_module):
-        # Initialize a progress bar tracking epochs only.
+        # Create an epoch-only progress bar.
         self.main_progress_bar = tqdm(
             total=trainer.max_epochs, desc="Training", position=0, leave=True
         )
 
+    def on_train_epoch_start(self, trainer, pl_module):
+        # Initialize a dictionary to accumulate metrics for the current epoch.
+        self.epoch_metrics = {}
+
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None
     ):
-        # Suppress per-batch updates.
-        pass
+        # Capture the metrics logged with prog_bar=True for each batch.
+        batch_metrics = trainer.progress_bar_metrics
+        for key, value in batch_metrics.items():
+            try:
+                # Convert metric to a float (if possible)
+                val = float(value)
+            except Exception:
+                continue  # Skip non-numeric values
+            # Append the metric value to our accumulator
+            if key not in self.epoch_metrics:
+                self.epoch_metrics[key] = []
+            self.epoch_metrics[key].append(val)
 
     def on_train_epoch_end(self, trainer, pl_module):
+        # Compute the mean for each metric over the epoch.
+        mean_metrics = {}
+        for key, values in self.epoch_metrics.items():
+            if values:
+                mean_metrics[key] = np.mean(values)
         if self.main_progress_bar is not None:
-            # Fetch metrics logged with prog_bar=True
-            metrics = trainer.progress_bar_metrics
-            # Update the progress bar with the logged metrics and increment the epoch count.
-            self.main_progress_bar.set_postfix(metrics)
+            # Display the mean metrics in the postfix.
+            self.main_progress_bar.set_postfix(mean_metrics)
             self.main_progress_bar.update(1)

@@ -136,17 +136,18 @@ class SelfSNE(pl.LightningModule):
         context_tokenizer=None,
         embedding_head: Optional[torch.nn.Module] = None,
         baseline_head: Optional[torch.nn.Module] = None,
-        learning_rate=3e-4,
-        optimizer="adam",
-        momentum=0,
-        betas=(0.9, 0.95),
-        dampening=0,
-        nesterov=False,
-        weight_decay=0.0,
+        learning_rate: float = 3e-4,
+        optimizer: str = "adam",
+        betas: Tuple[float, float] = (0.9, 0.95),
+        momentum: float = 0.0,
+        dampening: float = 0.0,
+        nesterov: bool = False,
+        weight_decay: float = 0.0,
         lr_scheduler: bool = False,
-        lr_warmup_steps=0,
-        lr_target_steps=0,
-        lr_cosine_steps=0,
+        lr_scheduler_interval: str = "step",
+        lr_warmup_steps: int = 0,
+        lr_target_steps: int = 0,
+        lr_cosine_steps: int = 0,
     ):
         super().__init__()
         if loss is None:
@@ -189,17 +190,8 @@ class SelfSNE(pl.LightningModule):
                 "baseline_head",
             ]
         )
-        self.learning_rate = learning_rate
-        self.optimizer_type = optimizer.lower()
-        self.momentum = momentum
-        self.betas = betas
-        self.dampening = dampening
-        self.nesterov = nesterov
-        self.weight_decay = weight_decay
-        self.lr_sched_flag = lr_scheduler
-        self.lr_warmup_steps = lr_warmup_steps
-        self.lr_target_steps = lr_target_steps
-        self.lr_cosine_steps = lr_cosine_steps
+        if self.hparams.lr_scheduler_interval not in ("step", "epoch"):
+            raise ValueError("lr_scheduler_interval must be either 'step' or 'epoch'")
 
     def process_batch(self, batch) -> Tuple:
         if isinstance(batch, dict):
@@ -371,7 +363,7 @@ class SelfSNE(pl.LightningModule):
         else:
             raise ValueError("Unsupported optimizer type. Use 'adam' or 'sgd'.")
         if self.hparams.lr_scheduler:
-            sched = get_lr_scheduler(
+            scheduler = get_lr_scheduler(
                 opt,
                 warmup_steps=self.hparams.lr_warmup_steps,
                 target_steps=self.hparams.lr_target_steps,
@@ -379,8 +371,8 @@ class SelfSNE(pl.LightningModule):
             )
             return [opt], [
                 {
-                    "scheduler": sched,
-                    "interval": "epoch",
+                    "scheduler": scheduler,
+                    "interval": self.hparams.lr_scheduler_interval,
                     "frequency": 1,
                     "reduce_on_plateau": False,
                     "monitor": "loss",

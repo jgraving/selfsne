@@ -26,7 +26,7 @@ from einops import rearrange, repeat
 
 from typing import Optional, Tuple, List, Dict, Union
 
-from pytorch_lightning.callbacks import TQDMProgressBar
+from pytorch_lightning.callbacks import Callback
 from tqdm.auto import tqdm
 
 

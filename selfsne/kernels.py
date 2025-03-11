@@ -71,22 +71,20 @@ def studentt(
     scale: Union[float, torch.Tensor] = 1.0,
 ) -> torch.Tensor:
     """
-    Computes the log Student's t kernel between two sets of points x1 and x2, with a given scale.
+    Computes the log Student's t kernel between two sets of points x1 and x2.
 
     The log Student's t kernel is defined as:
-    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / (scale^2 * dim)) * (df + 1) / 2
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / dim) * (dim + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
         x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
 
     Returns:
         torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
-
     """
-    dim_scale = scale * x1.shape[-1]
-    return (x1 - x2).pow(2).sum(-1).div(dim_scale).log1p().neg() * (scale + 1) / 2
+    dim = x1.shape[-1]  # df = dim
+    return (x1 - x2).pow(2).sum(-1).div(dim).log1p().neg() * (dim + 1) / 2
 
 
 def pairwise_studentt(
@@ -95,24 +93,20 @@ def pairwise_studentt(
     scale: Union[float, torch.Tensor] = 1.0,
 ) -> torch.Tensor:
     """
-    Computes the pairwise log Student's t kernel between two sets of points x1 and x2, with a given scale.
+    Computes the pairwise log Student's t kernel between two sets of points x1 and x2.
 
     The pairwise log Student's t kernel is defined as:
-    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / (scale^2 * dim)) * (df + 1) / 2
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / dim) * (dim + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
         x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
 
     Returns:
         torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
-
     """
-    dim_scale = scale * x1.shape[-1]
-    return (
-        torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).log1p().neg() * (scale + 1) / 2
-    )
+    dim = x1.shape[-1]  # df = dim
+    return torch.cdist(x1, x2, p=2).pow(2).div(dim).log1p().neg() * (dim + 1) / 2
 
 
 def cauchy(
@@ -397,305 +391,6 @@ def pairwise_wrapped_cauchy(
     return (np.cosh(scale) - pairwise_von_mises(x1, x2, 1)).log().neg()
 
 
-def joint_product(
-    x1: torch.Tensor,
-    x2: torch.Tensor,
-    scale: Union[float, torch.Tensor] = 1.0,
-    apply_softmax: bool = True,
-) -> torch.Tensor:
-    """
-    Computes the log joint product kernel between two sets of points x1 and x2, with a given scale.
-
-    The log joint product kernel is defined as:
-    K(x1, x2) = log(Σ (softmax(x1) * softmax(x2))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The row-wise joint product kernel matrix, of shape (batch_size,).
-
-    """
-    if apply_softmax:
-        x1 = x1.log_softmax(-1)
-        x2 = x2.log_softmax(-1)
-
-    return (x1 + x2).logsumexp(-1).div(scale)
-
-
-def pairwise_joint_product(
-    x1: torch.Tensor,
-    x2: torch.Tensor,
-    scale: Union[float, torch.Tensor] = 1.0,
-    apply_softmax: bool = True,
-) -> torch.Tensor:
-    """
-    Computes the pairwise log joint product kernel between two sets of points x1 and x2, with a given scale.
-
-    The log joint product kernel is defined as:
-    K(x1_i, x2_j) = log(Σ (softmax(x1_i) * softmax(x2_j))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The pairwise joint product kernel matrix, of shape (batch_size_1, batch_size_2).
-
-    """
-    eps = torch.finfo(x1.dtype).eps
-
-    if apply_softmax:
-        x1 = x1.log_softmax(-1)
-        x2 = x2.log_softmax(-1)
-
-    pairwise = torch.matmul(x1.exp(), x2.exp().T)
-    log_pairwise = pairwise.clamp(min=eps).log()
-
-    return log_pairwise / scale
-
-
-def cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the cross entropy between two sets of points x1 and x2.
-
-    The cross entropy is defined as:
-    H(x1_i, x2_i) = - Σ(softmax(x1_i) * log_softmax(x2_i)) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The row-wise cross entropy matrix, of shape (batch_size,).
-    """
-    return (x1.softmax(-1) * x2.log_softmax(-1)).sum(-1) / scale
-
-
-def pairwise_cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the pairwise cross entropy between two sets of points x1 and x2.
-
-    The pairwise cross entropy is defined as:
-    H(x1_i, x2_j) = - Σ(softmax(x1_i) * log_softmax(x2_j)) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The pairwise cross entropy matrix, of shape (batch_size_1, batch_size_2).
-    """
-    return (x1.softmax(-1) @ x2.log_softmax(-1).T) / scale
-
-
-def symmetric_cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the symmetric cross entropy between two sets of points x1 and x2.
-
-    The symmetric cross entropy is defined as the average of two cross entropies:
-    H_sym(x1, x2) = (H(x1, x2) + H(x2, x1)) / 2
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The symmetric cross entropy vector, of shape (batch_size,).
-    """
-    log_softmax_x1 = F.log_softmax(x1, dim=-1)
-    softmax_x2 = F.softmax(x2, dim=-1)
-    ce1 = (softmax_x2 * log_softmax_x1).sum(-1) / scale
-    log_softmax_x2 = F.log_softmax(x2, dim=-1)
-    softmax_x1 = F.softmax(x1, dim=-1)
-    ce2 = (softmax_x1 * log_softmax_x2).sum(-1) / scale
-    return (ce1 + ce2) / 2
-
-
-def pairwise_symmetric_cross_entropy(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the symmetric pairwise cross entropy between two sets of points x1 and x2.
-
-    The symmetric pairwise cross entropy is defined as the average of two pairwise cross entropies:
-    H_sym(x1, x2) = (H(x1, x2) + H(x2, x1)) / 2
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The symmetric pairwise cross entropy matrix, of shape (batch_size_1, batch_size_2).
-    """
-    log_softmax_x1 = F.log_softmax(x1, dim=-1)
-    softmax_x2 = F.softmax(x2, dim=-1)
-    ce1 = softmax_x2 @ log_softmax_x1.T / scale
-    log_softmax_x2 = F.log_softmax(x2, dim=-1)
-    softmax_x1 = F.softmax(x1, dim=-1)
-    ce2 = softmax_x1 @ log_softmax_x2.T / scale
-    return (ce1 + ce2) / 2
-
-
-def kl_divergence(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the Kullback-Leibler divergence between two sets of points x1 and x2.
-
-    The Kullback-Leibler divergence is defined as:
-    KL(x1_i || x2_i) = Σ(softmax(x1_i) * (log_softmax(x1_i) - log_softmax(x2_i))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The row-wise divergence matrix, of shape (batch_size,).
-    """
-    log_p1 = x1.log_softmax(-1)
-    log_p2 = x2.log_softmax(-1)
-    p1 = log_p1.exp()
-    return (p1 * (log_p1 - log_p2)).sum(-1).neg() / scale
-
-
-def pairwise_kl_divergence(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the pairwise Kullback-Leibler divergence between two sets of points x1 and x2.
-
-    The pairwise Kullback-Leibler divergence is defined as:
-    KL(x1_i || x2_j) = -Σ(softmax(x1_i) * (log_softmax(x1_i) - log_softmax(x2_j))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The pairwise divergence matrix, of shape (batch_size_1, batch_size_2).
-    """
-    log_p1 = x1.log_softmax(-1)
-    log_p2 = x2.log_softmax(-1)
-    p1 = log_p1.exp()
-    neg_entropy = (p1 * log_p1).sum(1).unsqueeze(1)
-    neg_cross_entropy = p1 @ log_p2.T
-    return (neg_cross_entropy - neg_entropy) / scale
-
-
-def bhattacharyya(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
-
-    The Bhattacharyya kernel is defined as:
-    K(x1, x2) = log(Σ (sqrt(softmax(x1)) * sqrt(softmax(x2))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The row-wise Bhattacharyya kernel matrix, of shape (batch_size,).
-
-    """
-    return joint_product(
-        x1.log_softmax(-1).mul(0.5),
-        x2.log_softmax(-1).mul(0.5),
-        scale,
-        apply_softmax=False,
-    )
-
-
-def pairwise_bhattacharyya(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the pairwise Bhattacharyya kernel between two sets of points x1 and x2, with a given scale.
-
-    The Bhattacharyya kernel is defined as:
-    K(x1_i, x2_j) = log(Σ (sqrt(softmax(x1_i)) * sqrt(softmax(x2_j))) / scale
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The pairwise Bhattacharyya kernel matrix, of shape (batch_size_1, batch_size_2).
-
-    """
-    return pairwise_joint_product(
-        x1.log_softmax(-1).mul(0.5),
-        x2.log_softmax(-1).mul(0.5),
-        scale,
-        apply_softmax=False,
-    )
-
-
-def hellinger(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the squared Hellinger kernel between two sets of points x1 and x2, with a given scale.
-
-    The Hellinger kernel is defined as:
-    K(x1, x2) = 1/2 * Σ (sqrt(softmax(x1)) - sqrt(softmax(x2)))^2 / scale^2
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The row-wise Hellinger kernel matrix, of shape (batch_size,).
-
-    """
-    return normal(
-        x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
-    )
-
-
-def pairwise_hellinger(
-    x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
-) -> torch.Tensor:
-    """
-    Computes the pairwise squared Hellinger kernel between two sets of points x1 and x2, with a given scale.
-
-    The Hellinger kernel is defined as:
-    K(x1_i, x2_j) = 1/2 * Σ (sqrt(softmax(x1_i)) - sqrt(softmax(x2_j))^2 / scale^2
-
-    Args:
-        x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
-        x2 (torch.Tensor): The second set of points, of shape (batch_size_2, dim).
-        scale (Union[float, torch.Tensor]): The scaling parameter.
-
-    Returns:
-        torch.Tensor: The pairwise Hellinger kernel matrix, of shape (batch_size_1, batch_size_2).
-
-    """
-    return pairwise_normal(
-        x1.log_softmax(-1).mul(0.5).exp(), x2.log_softmax(-1).mul(0.5).exp(), scale
-    )
-
-
 def pairwise_kernel(func):
     """
     Decorator that converts a rowwise kernel function into a pairwise kernel function by unsqueezing x1.
@@ -739,16 +434,6 @@ ROWWISE_KERNELS = {
     "cosine": von_mises,
     "wrapped_cauchy": wrapped_cauchy,
     "inner_product": inner_product,
-    "bilinear": inner_product,
-    "joint_product": joint_product,
-    "cross_entropy": cross_entropy,
-    "softmax": cross_entropy,
-    "kl_divergence": kl_divergence,
-    "kld": kl_divergence,
-    "kl_div": kl_divergence,
-    "bhattacharyya": bhattacharyya,
-    "hellinger": hellinger,
-    "symmetric_cross_entropy": symmetric_cross_entropy,
 }
 
 PAIRWISE_KERNELS = {
@@ -763,15 +448,6 @@ PAIRWISE_KERNELS = {
     "wrapped_cauchy": pairwise_wrapped_cauchy,
     "inner_product": pairwise_inner_product,
     "bilinear": pairwise_inner_product,
-    "joint_product": pairwise_joint_product,
-    "cross_entropy": pairwise_cross_entropy,
-    "softmax": pairwise_cross_entropy,
-    "kl_divergence": pairwise_kl_divergence,
-    "kld": pairwise_kl_divergence,
-    "kl_div": pairwise_kl_divergence,
-    "bhattacharyya": pairwise_bhattacharyya,
-    "hellinger": pairwise_hellinger,
-    "symmetric_cross_entropy": pairwise_symmetric_cross_entropy,
 }
 
 # Define and add the "precise" versions of the pairwise kernels using the decorator

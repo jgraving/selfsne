@@ -576,40 +576,42 @@ class Trainer(pl.Trainer):
         return concat_dicts(result)
 
 
-class EpochOnlyProgressBar(TQDMProgressBar):
+class EpochOnlyProgressBar(Callback):
     def on_train_start(self, trainer, pl_module):
-        # Create an epoch-only progress bar.
+        # Create a progress bar that tracks epochs.
         self.main_progress_bar = tqdm(
             total=trainer.max_epochs, desc="Training", position=0, leave=True
         )
 
     def on_train_epoch_start(self, trainer, pl_module):
-        # Initialize a dictionary to accumulate metrics for the current epoch.
-        self.epoch_metrics = {}
+        # Initialize a dictionary to collect metric values for the epoch.
+        self.epoch_metric_values = {}
 
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None
     ):
-        # Capture the metrics logged with prog_bar=True for each batch.
+        # Get the metrics logged with prog_bar=True.
         batch_metrics = trainer.progress_bar_metrics
         for key, value in batch_metrics.items():
             try:
-                # Convert metric to a float (if possible)
+                # Convert the metric to a float.
                 val = float(value)
             except Exception:
-                continue  # Skip non-numeric values
-            # Append the metric value to our accumulator
-            if key not in self.epoch_metrics:
-                self.epoch_metrics[key] = []
-            self.epoch_metrics[key].append(val)
+                continue  # Skip non-numeric values.
+            # Append this batch's value.
+            if key not in self.epoch_metric_values:
+                self.epoch_metric_values[key] = []
+            self.epoch_metric_values[key].append(val)
 
     def on_train_epoch_end(self, trainer, pl_module):
-        # Compute the mean for each metric over the epoch.
+        # Compute the mean for each metric.
         mean_metrics = {}
-        for key, values in self.epoch_metrics.items():
+        for key, values in self.epoch_metric_values.items():
             if values:
-                mean_metrics[key] = np.mean(values)
-        if self.main_progress_bar is not None:
-            # Display the mean metrics in the postfix.
-            self.main_progress_bar.set_postfix(mean_metrics)
-            self.main_progress_bar.update(1)
+                mean_metrics[key] = sum(values) / len(values)
+        # Update the progress bar with the mean metrics.
+        self.main_progress_bar.set_postfix(mean_metrics)
+        self.main_progress_bar.update(1)
+
+    def on_train_end(self, trainer, pl_module):
+        self.main_progress_bar.close()

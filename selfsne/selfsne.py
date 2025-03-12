@@ -134,7 +134,8 @@ class SelfSNE(pl.LightningModule):
         context_encoder=None,
         target_tokenizer=None,
         context_tokenizer=None,
-        embedding_head: Optional[torch.nn.Module] = None,
+        target_head: Optional[torch.nn.Module] = None,
+        context_head: Optional[torch.nn.Module] = None,
         baseline_head: Optional[torch.nn.Module] = None,
         learning_rate: float = 3e-4,
         optimizer: str = "adam",
@@ -153,7 +154,6 @@ class SelfSNE(pl.LightningModule):
         if loss is None:
             raise ValueError("A loss module must be provided.")
         self.loss = loss
-
         if target_encoder is None and context_encoder is None:
             raise ValueError(
                 "At least one of target_encoder or context_encoder must be provided."
@@ -170,15 +170,23 @@ class SelfSNE(pl.LightningModule):
             target_tokenizer = context_tokenizer
         if context_tokenizer is None:
             context_tokenizer = target_tokenizer
-
         self.target_encoder = target_encoder
         self.context_encoder = context_encoder
         self.target_tokenizer = target_tokenizer
         self.context_tokenizer = context_tokenizer
-
-        self.embedding_head = embedding_head
+        if target_head is None and context_head is None:
+            self.target_head = None
+            self.context_head = None
+        elif target_head is None:
+            self.target_head = context_head
+            self.context_head = context_head
+        elif context_head is None:
+            self.target_head = target_head
+            self.context_head = target_head
+        else:
+            self.target_head = target_head
+            self.context_head = context_head
         self.baseline_head = baseline_head
-
         self.save_hyperparameters(
             ignore=[
                 "loss",
@@ -186,7 +194,8 @@ class SelfSNE(pl.LightningModule):
                 "context_encoder",
                 "target_tokenizer",
                 "context_tokenizer",
-                "embedding_head",
+                "target_head",
+                "context_head",
                 "baseline_head",
             ]
         )
@@ -223,19 +232,21 @@ class SelfSNE(pl.LightningModule):
         baseline_embedding = None
         if self.baseline_head is not None:
             baseline_embedding = self.baseline_head(context_encoding)
-        if self.embedding_head is not None:
-            context_embedding = self.embedding_head(context_encoding)
-            target_embedding = self.embedding_head(target_encoding)
+        if self.context_head is not None:
+            context_embedding = self.context_head(context_encoding)
         else:
             context_embedding = context_encoding
+        if self.target_head is not None:
+            target_embedding = self.target_head(target_encoding)
+        else:
             target_embedding = target_encoding
         if reference is not None:
             reference_tokens = self.target_tokenizer(
                 rearrange(reference, "b s ... -> (b s) ...")
             )
             reference_encoding = self.target_encoder(reference_tokens)
-            if self.embedding_head is not None:
-                reference_embedding = self.embedding_head(reference_encoding)
+            if self.target_head is not None:
+                reference_embedding = self.target_head(reference_encoding)
             else:
                 reference_embedding = reference_encoding
             num_samples = reference.shape[1]
@@ -342,8 +353,10 @@ class SelfSNE(pl.LightningModule):
         params_list.append({"params": self.loss.parameters()})
         if self.baseline_head is not None:
             params_list.append({"params": self.baseline_head.parameters()})
-        if self.embedding_head is not None:
-            params_list.append({"params": self.embedding_head.parameters()})
+        if self.target_head is not None:
+            params_list.append({"params": self.target_head.parameters()})
+        if self.context_head is not None and self.context_head is not self.target_head:
+            params_list.append({"params": self.context_head.parameters()})
         if self.hparams.optimizer.lower() == "adam":
             opt = optim.AdamW(
                 params_list,

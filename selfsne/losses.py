@@ -60,8 +60,10 @@ class LikelihoodRatioEstimator(nn.Module):
         kernel_scale: Union[float, int] = 1.0,
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = "batch",
+        classifier_metrics: bool = False,
     ) -> None:
         super().__init__()
+        self.classifier_metrics = classifier_metrics
         if isinstance(kernel, str):
             self.kernel = ROWWISE_KERNELS[kernel]
         else:
@@ -110,9 +112,13 @@ class LikelihoodRatioEstimator(nn.Module):
         pos_logits = pos_logits - log_baseline
         neg_logits = neg_logits - log_baseline
         attraction, repulsion = self.divergence(pos_logits, neg_logits)
-        metrics = classifier_metrics(pos_logits.flatten(), neg_logits.flatten())
-        loss = attraction.mean() + repulsion.mean()
+        if self.classifier_metrics:
+            metrics = classifier_metrics(pos_logits.flatten(), neg_logits.flatten())
+        else:
+            metrics = {}
+        loss = attraction + repulsion
         return {
+            "loss": loss,
             "pos_logits": pos_logits.mean(),
             "neg_logits": neg_logits.mean(),
             "pos_prob": pos_logits.sigmoid().mean(),
@@ -120,7 +126,6 @@ class LikelihoodRatioEstimator(nn.Module):
             "attraction": attraction,
             "repulsion": repulsion,
             "log_baseline": log_baseline.mean(),
-            "loss": loss,
             **metrics,
         }
 

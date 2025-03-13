@@ -324,7 +324,29 @@ class SelfSNE(pl.LightningModule):
         return samplewise_pos_logits
 
     def training_step(self, batch, batch_idx):
-        return self.compute_loss(batch, batch_idx, mode="")
+        loss = self.compute_loss(batch, batch_idx, mode="")
+
+        if self.hparams.lr_scheduler:
+            # Get the underlying optimizer.
+            optim_obj = self.optimizers()
+            if isinstance(optim_obj, (list, tuple)):
+                optimizer = optim_obj[0]
+            elif hasattr(optim_obj, "optimizer"):
+                optimizer = optim_obj.optimizer
+            else:
+                optimizer = optim_obj
+
+            # Extract the current learning rate and compute the scale.
+            current_lr = optimizer.param_groups[0]["lr"]
+            base_lr = self.hparams.learning_rate
+            lr_scale = current_lr / base_lr if base_lr else 0.0
+
+            # Log the lr_scale as a metric.
+            self.log(
+                "lr_scale", lr_scale, prog_bar=True, on_step=True, on_epoch=False
+            )
+
+        return loss
 
     def validation_step(self, batch, batch_idx):
         self.compute_loss(batch, batch_idx, mode="val_")

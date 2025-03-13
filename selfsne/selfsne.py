@@ -332,12 +332,29 @@ class SelfSNE(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         self.compute_loss(batch, batch_idx, mode="test_")
 
-    def predict_step(
-        self, batch, batch_idx, dataloader_idx=0
-    ) -> Dict[str, torch.Tensor]:
-        context, target, _ = self.process_batch(batch)
-        target_tokens = self.target_tokenizer(target)
-        return {"embedding": self.target_encoder(target_tokens)}
+    def predict_step(self, batch, batch_idx, dataloader_idx=0) -> Dict[str, np.ndarray]:
+        # Process the batch to extract context, target, and (optionally) reference
+        context, target, reference = self.process_batch(batch)
+
+        # Get embeddings using the same procedure as in training
+        (
+            context_embedding,
+            target_embedding,
+            reference_embedding,
+            baseline_embedding,
+        ) = self.get_embeddings(context, target, reference)
+
+        # Convert embeddings to numpy arrays on CPU
+        output = {
+            "context_embedding": context_embedding.detach().cpu().numpy(),
+            "target_embedding": target_embedding.detach().cpu().numpy(),
+        }
+        if baseline_embedding is not None:
+            output["baseline_embedding"] = baseline_embedding.detach().cpu().numpy()
+        if reference_embedding is not None:
+            output["reference_embedding"] = reference_embedding.detach().cpu().numpy()
+
+        return output
 
     def configure_optimizers(self):
         modules = []

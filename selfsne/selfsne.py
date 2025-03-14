@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from einops import rearrange
 from typing import Optional, Union, Tuple, Dict
+import warnings
 
 
 def get_lr_scheduler(
@@ -342,9 +343,7 @@ class SelfSNE(pl.LightningModule):
             lr_scale = current_lr / base_lr if base_lr else 0.0
 
             # Log the lr_scale as a metric.
-            self.log(
-                "lr_scale", lr_scale, prog_bar=True, on_step=True, on_epoch=False
-            )
+            self.log("lr_scale", lr_scale, prog_bar=True, on_step=True, on_epoch=False)
 
         return loss
 

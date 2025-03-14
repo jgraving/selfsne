@@ -19,7 +19,7 @@ from torch.nn import init
 
 import numpy as np
 
-from selfsne.nn import init_selu
+from selfsne.nn import init_linear
 from selfsne.kernels import pairwise_inner_product
 from selfsne.utils import (
     off_diagonal,
@@ -178,7 +178,7 @@ class ParametricBaseline(nn.Module):
         """
         super().__init__()
         self.param = nn.Parameter(torch.randn(1, param_dim))
-        self.projection = init_selu(nn.Linear(param_dim, 1))
+        self.projection = init_linear(nn.Linear(param_dim, 1))
         init.constant_(self.projection.bias, bias_init)
         self.activation = activation if activation is not None else nn.Identity()
 

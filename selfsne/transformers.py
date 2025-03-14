@@ -4,9 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ from selfsne.nn import (
     GatedMLP,
     PreLayerNorm,
     PreRMSNorm,
+    PreDyT,
     SelfAttention,
     LatentCrossAttention,
 )
@@ -43,7 +44,7 @@ class TransformerEncoder(nn.Module):
             num_heads: Number of attention heads.
             num_latent_tokens: Number of output tokens (latent tokens).
             dropout: Dropout probability.
-            norm_type: Normalization type ("layernorm" or "rmsnorm").
+            norm_type: Normalization type ("layernorm", "rmsnorm", or "dyt").
             expansion_factor: Factor for expanding dimensions in GatedMLP.
             activation: Optional activation function for the GatedMLP.
         """
@@ -55,8 +56,10 @@ class TransformerEncoder(nn.Module):
             Norm = PreLayerNorm
         elif norm_type == "rmsnorm":
             Norm = PreRMSNorm
+        elif norm_type == "dyt":
+            Norm = PreDyT
         else:
-            raise ValueError("norm_type must be either 'layernorm' or 'rmsnorm'")
+            raise ValueError("norm_type must be 'layernorm', 'rmsnorm', or 'dyt'")
 
         # Create a stack of encoder layers.
         self.layers = nn.ModuleList()
@@ -110,7 +113,7 @@ if __name__ == "__main__":
         num_heads=8,
         num_latent_tokens=8,
         dropout=0.1,
-        norm_type="layernorm",  # or "rmsnorm"
+        norm_type="dyt",  # can be "layernorm", "rmsnorm", or "dyt"
         expansion_factor=4,
         activation=None,  # or specify a custom activation like nn.ReLU()
     )

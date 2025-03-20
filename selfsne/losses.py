@@ -61,6 +61,7 @@ class LikelihoodRatioEstimator(nn.Module):
         divergence: Union[str, callable] = "kld",
         baseline: Union[str, float, callable] = "batch",
         classifier_metrics: bool = False,
+        pos_as_neg: bool = False,
     ) -> None:
         super().__init__()
         self.classifier_metrics = classifier_metrics
@@ -79,6 +80,7 @@ class LikelihoodRatioEstimator(nn.Module):
         else:
             self.baseline = baseline
         self.kernel_scale = float(kernel_scale)
+        self.pos_as_neg = pos_as_neg
 
     def logits(
         self,
@@ -100,6 +102,8 @@ class LikelihoodRatioEstimator(nn.Module):
             )
             pos_logits = diagonal(logits).unsqueeze(1)
             neg_logits = remove_diagonal(logits)
+        if self.pos_as_neg:
+            neg_logits = torch.cat([neg_logits, pos_logits], dim=1)
         return pos_logits, neg_logits
 
     def loss_and_metrics(

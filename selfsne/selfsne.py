@@ -150,6 +150,8 @@ class SelfSNE(pl.LightningModule):
         lr_warmup_steps: int = 0,
         lr_target_steps: int = 0,
         lr_cosine_steps: int = 0,
+        return_embeddings: bool = True,
+        return_logits: bool = False,
     ):
         super().__init__()
         if loss is None:
@@ -353,26 +355,35 @@ class SelfSNE(pl.LightningModule):
         self.compute_loss(batch, batch_idx, mode="test_")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0) -> Dict[str, np.ndarray]:
-        # Process the batch to extract context, target, and (optionally) reference
         context, target, reference = self.process_batch(batch)
+        output = {}
 
-        # Get embeddings using the same procedure as in training
-        (
-            context_embedding,
-            target_embedding,
-            reference_embedding,
-            baseline_embedding,
-        ) = self.get_embeddings(context, target, reference)
+        if self.hparams.return_embeddings:
+            (
+                context_embedding,
+                target_embedding,
+                reference_embedding,
+                baseline_embedding,
+            ) = self.get_embeddings(context, target, reference)
 
-        # Convert embeddings to numpy arrays on CPU
-        output = {
-            "context_embedding": context_embedding.detach().cpu().numpy(),
-            "target_embedding": target_embedding.detach().cpu().numpy(),
-        }
-        if baseline_embedding is not None:
-            output["baseline_embedding"] = baseline_embedding.detach().cpu().numpy()
-        if reference_embedding is not None:
-            output["reference_embedding"] = reference_embedding.detach().cpu().numpy()
+            output.update(
+                {
+                    "context_embedding": context_embedding.detach().cpu().numpy(),
+                    "target_embedding": target_embedding.detach().cpu().numpy(),
+                }
+            )
+
+            if baseline_embedding is not None:
+                output["baseline_embedding"] = baseline_embedding.detach().cpu().numpy()
+            if reference_embedding is not None:
+                output["reference_embedding"] = (
+                    reference_embedding.detach().cpu().numpy()
+                )
+
+        if self.hparams.return_logits:
+            pos_logits, neg_logits = self.predict_sample_logits(batch)
+            output["pos_logits"] = pos_logits.detach().cpu().numpy()
+            output["neg_logits"] = neg_logits.detach().cpu().numpy()
 
         return output
 

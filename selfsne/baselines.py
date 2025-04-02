@@ -59,7 +59,7 @@ class MomentumBaseline(nn.Module):
         momentum: float = 0.9,
     ) -> None:
         """
-        Calculates the momentum baseline for a given set of logits.
+        Calculates the momentum baseline for a given set of similarities.
 
         Args:
             momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
@@ -68,97 +68,97 @@ class MomentumBaseline(nn.Module):
         self.register_buffer("log_moving_average", torch.zeros(1))
         self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
 
-    def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, neg_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the momentum baseline.
 
         Args:
-            neg_logits (torch.Tensor): Negative logits tensor.
+            neg_similarity (torch.Tensor): Negative similarity tensor.
 
         Returns:
             torch.Tensor: Momentum baseline.
         """
         if self.training:
             return LogMeanExp.apply(
-                neg_logits, self.log_moving_average, self.momentum_logit
+                neg_similarity, self.log_moving_average, self.momentum_logit
             )
         else:
             return self.log_moving_average
 
 
 class ReverseMomentumBaseline(MomentumBaseline):
-    def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, pos_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the reverse momentum baseline.
 
         Args:
-            pos_logits (torch.Tensor): Positive logits tensor.
+            pos_similarity (torch.Tensor): Positive similarity tensor.
 
         Returns:
             torch.Tensor: Reverse momentum baseline.
         """
         if self.training:
             return -LogMeanExp.apply(
-                -pos_logits, self.log_moving_average, self.momentum_logit
+                -pos_similarity, self.log_moving_average, self.momentum_logit
             )
         else:
             return -self.log_moving_average
 
 
 class BatchBaseline(nn.Module):
-    def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, neg_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the batch baseline.
 
         Args:
-            neg_logits (torch.Tensor): Negative logits tensor.
+            neg_similarity (torch.Tensor): Negative similarity tensor.
 
         Returns:
             torch.Tensor: Batch baseline.
         """
-        return logmeanexp(neg_logits)
+        return logmeanexp(neg_similarity)
 
 
 class ReverseBatchBaseline(nn.Module):
-    def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, pos_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the reverse batch baseline.
 
         Args:
-            pos_logits (torch.Tensor): Positive logits tensor.
+            pos_similarity (torch.Tensor): Positive similarity tensor.
 
         Returns:
             torch.Tensor: Reverse batch baseline.
         """
-        return -logmeanexp(-pos_logits)
+        return -logmeanexp(-pos_similarity)
 
 
 class BatchConditionalBaseline(nn.Module):
-    def forward(self, neg_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, neg_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the batch conditional baseline.
 
         Args:
-            neg_logits (torch.Tensor): Negative logits tensor.
+            neg_similarity (torch.Tensor): Negative similarity tensor.
 
         Returns:
             torch.Tensor: Batch conditional baseline.
         """
-        return logmeanexp(neg_logits, dim=-1, keepdim=True)
+        return logmeanexp(neg_similarity, dim=-1, keepdim=True)
 
 
 class ReverseBatchConditionalBaseline(nn.Module):
-    def forward(self, pos_logits: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, pos_similarity: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Calculates the reverse batch conditional baseline.
 
         Args:
-            pos_logits (torch.Tensor): Positive logits tensor.
+            pos_similarity (torch.Tensor): Positive similarity tensor.
 
         Returns:
             torch.Tensor: Reverse batch conditional baseline.
         """
-        return -logmeanexp(-pos_logits, dim=-1, keepdim=True)
+        return -logmeanexp(-pos_similarity, dim=-1, keepdim=True)
 
 
 class ParametricBaseline(nn.Module):
@@ -271,8 +271,8 @@ class AdditiveBaseline(nn.Module):
 
     def forward(
         self,
-        pos_logits: Optional[torch.Tensor] = None,
-        neg_logits: Optional[torch.Tensor] = None,
+        pos_similarity: Optional[torch.Tensor] = None,
+        neg_similarity: Optional[torch.Tensor] = None,
         context: Optional[torch.Tensor] = None,
         context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
@@ -281,8 +281,8 @@ class AdditiveBaseline(nn.Module):
         Calculates the additive baseline.
 
         Args:
-            pos_logits (torch.Tensor, optional): Positive logits.
-            neg_logits (torch.Tensor, optional): Negative logits.
+            pos_similarity (torch.Tensor, optional): Positive similarity.
+            neg_similarity (torch.Tensor, optional): Negative similarity.
             context (torch.Tensor, optional): Context input.
             context_embedding (torch.Tensor, optional): Embedded context.
 
@@ -292,8 +292,8 @@ class AdditiveBaseline(nn.Module):
         log_baseline = 0
         for baseline in self.baselines:
             log_baseline += baseline(
-                pos_logits=pos_logits,
-                neg_logits=neg_logits,
+                pos_similarity=pos_similarity,
+                neg_similarity=neg_similarity,
                 context=context,
                 context_embedding=context_embedding,
             )
@@ -303,8 +303,8 @@ class AdditiveBaseline(nn.Module):
 class LogAdditiveBaseline(AdditiveBaseline):
     def forward(
         self,
-        pos_logits: Optional[torch.Tensor] = None,
-        neg_logits: Optional[torch.Tensor] = None,
+        pos_similarity: Optional[torch.Tensor] = None,
+        neg_similarity: Optional[torch.Tensor] = None,
         context: Optional[torch.Tensor] = None,
         context_embedding: Optional[torch.Tensor] = None,
         **kwargs,
@@ -313,8 +313,8 @@ class LogAdditiveBaseline(AdditiveBaseline):
         Calculates the logarithmic additive baseline.
 
         Args:
-            pos_logits (torch.Tensor, optional): Positive logits.
-            neg_logits (torch.Tensor, optional): Negative logits.
+            pos_similarity (torch.Tensor, optional): Positive similarity.
+            neg_similarity (torch.Tensor, optional): Negative similarity.
             context (torch.Tensor, optional): Context input.
             context_embedding (torch.Tensor, optional): Embedded context.
 
@@ -322,11 +322,13 @@ class LogAdditiveBaseline(AdditiveBaseline):
             torch.Tensor: Logarithmic additive baseline.
         """
         log_baseline = self.baselines[0](
-            pos_logits=pos_logits, context=context, context_embedding=context_embedding
+            pos_similarity=pos_similarity,
+            context=context,
+            context_embedding=context_embedding,
         )
         for baseline in self.baselines[1:]:
             additional_value = baseline(
-                pos_logits=pos_logits,
+                pos_similarity=pos_similarity,
                 context=context,
                 context_embedding=context_embedding,
             )

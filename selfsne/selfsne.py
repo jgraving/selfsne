@@ -321,8 +321,7 @@ class SelfSNE(pl.LightningModule):
             baseline_embedding=baseline_embedding,
             reference_embedding=reference_embedding,
         )
-        samplewise_pos_logits = pos_logits - log_baseline
-        return samplewise_pos_logits
+        return pos_logits - log_baseline, neg_logits - log_baseline
 
     def training_step(self, batch, batch_idx):
         loss = self.compute_loss(batch, batch_idx, mode="")

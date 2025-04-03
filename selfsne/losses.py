@@ -189,7 +189,7 @@ class LikelihoodRatioEstimator(nn.Module):
         reference_embedding: Optional[torch.Tensor] = None,
         baseline_embedding: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
-        output = self.predict_logits(
+        output = self.logits(
             context_embedding=context_embedding,
             target_embedding=target_embedding,
             reference_embedding=reference_embedding,
@@ -210,7 +210,7 @@ class LikelihoodRatioEstimator(nn.Module):
             repulsion=repulsion,
         )
 
-    def predict_logits(
+    def logits(
         self,
         context_embedding: torch.Tensor,
         target_embedding: torch.Tensor,
@@ -232,12 +232,10 @@ class LikelihoodRatioEstimator(nn.Module):
             kernel=self.kernel,
             kernel_scale=self.kernel_scale,
         )
-        pos_logits = pos_similarity - log_baseline
-        neg_logits = neg_similarity - log_baseline
         return {
             "pos_similarity": pos_similarity,
             "neg_similarity": neg_similarity,
             "log_baseline": log_baseline,
-            "pos_logits": pos_logits,
-            "neg_logits": neg_logits,
+            "pos_logits": pos_similarity - log_baseline,
+            "neg_logits": neg_similarity - log_baseline,
         }

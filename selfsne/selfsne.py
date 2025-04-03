@@ -301,30 +301,6 @@ class SelfSNE(pl.LightningModule):
             self.log(f"{mode}{key}", value.item(), prog_bar=True)
         return loss_dict["loss"]
 
-    def predict_sample_logits(self, batch) -> torch.Tensor:
-        context, target, reference = self.process_batch(batch)
-        (
-            context_embedding,
-            target_embedding,
-            reference_embedding,
-            baseline_embedding,
-        ) = self.get_embeddings(context, target, reference)
-        pos_logits, neg_logits = self.loss.logits(
-            context_embedding=context_embedding,
-            target_embedding=target_embedding,
-            kernel_scale=self.loss.kernel_scale,
-            reference_embedding=reference_embedding,
-        )
-        log_baseline = self.loss.baseline(
-            pos_logits=pos_logits,
-            neg_logits=neg_logits,
-            context_embedding=context_embedding,
-            target_embedding=target_embedding,
-            baseline_embedding=baseline_embedding,
-            reference_embedding=reference_embedding,
-        )
-        return pos_logits - log_baseline, neg_logits - log_baseline
-
     def training_step(self, batch, batch_idx):
         loss = self.compute_loss(batch, batch_idx, mode="")
 
@@ -381,9 +357,14 @@ class SelfSNE(pl.LightningModule):
                 )
 
         if self.hparams.return_logits:
-            pos_logits, neg_logits = self.predict_sample_logits(batch)
-            output["pos_logits"] = pos_logits.detach().cpu().numpy()
-            output["neg_logits"] = neg_logits.detach().cpu().numpy()
+            logits = self.loss.logits(
+                context_embedding=context_embedding,
+                target_embedding=target_embedding,
+                reference_embedding=reference_embedding,
+                baseline_embedding=baseline_embedding,
+            )
+            for key, value in logits.items():
+                output[key] = value.detach().cpu().numpy()
 
         return output
 

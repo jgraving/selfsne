@@ -20,7 +20,7 @@ from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.divergences import DIVERGENCES
 from selfsne.baselines import BASELINES
 from selfsne.utils import remove_diagonal
-from typing import Optional, Union, Tuple, Dict
+from typing import Optional, Union, Tuple, Dict, List
 
 
 def classifier_metrics(pos_logits, neg_logits, threshold=True):

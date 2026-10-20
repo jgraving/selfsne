@@ -63,7 +63,7 @@ class MultiheadLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.normal_(self.weight, std=self.in_features ** -0.5)
+        nn.init.normal_(self.weight, std=self.in_features**-0.5)
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 
@@ -85,6 +85,14 @@ class MultiheadLinear(nn.Module):
         return out
 
 
+def _multihead_batch_norm(num_features, num_heads):
+    return nn.Sequential(
+        nn.Flatten(start_dim=1),
+        nn.BatchNorm1d(num_features * num_heads),
+        nn.Unflatten(1, (num_heads, num_features)),
+    )
+
+
 def MultiheadMLP(
     in_features,
     out_features,
@@ -99,7 +107,7 @@ def MultiheadMLP(
         nn.Sequential(
             *[
                 nn.Sequential(
-                    nn.BatchNorm1d(hidden_features * num_heads)
+                    _multihead_batch_norm(hidden_features, num_heads)
                     if batch_norm
                     else nn.Identity(),
                     MultiheadLinear(hidden_features, hidden_features, num_heads),
@@ -108,7 +116,9 @@ def MultiheadMLP(
                 for _ in range(num_layers)
             ]
         ),
-        nn.BatchNorm1d(hidden_features * num_heads) if batch_norm else nn.Identity(),
+        _multihead_batch_norm(hidden_features, num_heads)
+        if batch_norm
+        else nn.Identity(),
         MultiheadLinear(hidden_features, out_features, num_heads),
     )
 
@@ -138,7 +148,7 @@ class Multilinear(nn.Module):
 
     def forward(self, x):
         orig_shape = x.shape  # Save original shape
-        x_flat = x.view(-1, self.embedding_dim)
+        x_flat = x.reshape(-1, self.embedding_dim)
         transformed = self.linear(x_flat)
         transformed = transformed.view(-1, self.num_chunks, self.embedding_dim)
         # Compute elementwise interactions

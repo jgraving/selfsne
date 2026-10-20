@@ -1,5 +1,8 @@
 name: Tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   cpu:
     runs-on: ubuntu-latest
@@ -46,3 +49,17 @@ jobs:
       - run: uv sync --frozen --python 3.12
       - run: uv run --frozen python examples/quickstart.py
       - run: uv run --frozen python -c "import selfsne.data, selfsne.losses, selfsne.transformers"
+
+  portability:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen --python 3.12 --extra dev --extra data --extra plot --extra rich
+      - run: uv run --frozen --extra dev --extra data --extra plot --extra rich python -m pytest -q
+      - run: uv run --frozen --extra dev --extra data --extra plot --extra rich ruff check selfsne tests examples
+      - run: uv run --frozen --extra dev --extra data --extra plot --extra rich python examples/quickstart.py

@@ -16,8 +16,8 @@
 # Lorenz attractor code modified from:
 # https://matplotlib.org/stable/gallery/mplot3d/lorenz_attractor.html
 
-import math
 import operator
+import os
 
 import numpy as np
 import torch
@@ -128,6 +128,11 @@ class CorrelatedGaussianDataLoader(DataLoader):
         self.dim = dim
         self.seed = seed
         self._epoch = 0
+        self._started = False
+        if kwargs.get("persistent_workers", False):
+            raise ValueError(
+                "CorrelatedGaussianDataLoader regenerates its data each epoch; persistent_workers must be False."
+            )
         self.batch_size = batch_size
         self.device = device
         self.dataset = self.generate_samples()
@@ -141,20 +146,19 @@ class CorrelatedGaussianDataLoader(DataLoader):
         self._epoch += 1
         return samples
 
-    def __len__(self):
-        if self.drop_last:
-            return len(self.dataset) // self.batch_size
-        return math.ceil(len(self.dataset) / self.batch_size)
-
     def __iter__(self):
-        for idx in range(len(self)):
-            batch = self.dataset[idx * self.batch_size : (idx + 1) * self.batch_size]
-            yield batch.clone()
-        # Keep DataLoader's dataset object stable while refreshing its contents.
-        self.dataset.copy_(self.generate_samples())
+        if self._started:
+            self.dataset.copy_(self.generate_samples())
+        self._started = True
+        yield from super().__iter__()
 
 
 class TensorDataLoader(DataLoader):
+    """A standard DataLoader over an owned float32 tensor.
+
+    Supports the usual sampler, generator, worker, and collation options.
+    """
+
     def __init__(
         self,
         dataset,
@@ -164,69 +168,93 @@ class TensorDataLoader(DataLoader):
         device=None,
         **kwargs,
     ):
+        self.tensor_dataset = (
+            torch.as_tensor(dataset)
+            .detach()
+            .to(device=device, dtype=torch.float32)
+            .clone()
+        )
+        self.shuffle = shuffle
         super().__init__(
-            dataset,
+            self.tensor_dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             drop_last=drop_last,
             **kwargs,
         )
-        self.tensor_dataset = torch.as_tensor(dataset).detach().clone()
-        if device is not None:
-            self.tensor_dataset = self.tensor_dataset.to(device)
-        self.shuffle = shuffle
+
+
+class _NumpyDataset(Dataset):
+    """Convert requested rows only, preserving out-of-core array access."""
+
+    def __init__(self, array):
+        self.array = array
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_mapping", None)
+        array = self.array
+        if (
+            isinstance(array, np.memmap)
+            and array.filename is not None
+            and (array.flags.c_contiguous or array.flags.f_contiguous)
+        ):
+            root = array
+            while isinstance(root.base, np.ndarray):
+                root = root.base
+            offset = root.offset + array.ctypes.data - root.ctypes.data
+            state["_mapping"] = dict(
+                filename=str(array.filename),
+                dtype=array.dtype,
+                mode="r",
+                offset=offset,
+                shape=array.shape,
+                order="F"
+                if array.flags.f_contiguous and not array.flags.c_contiguous
+                else "C",
+            )
+            state["array"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if state.get("_mapping") is not None:
+            self.array = np.memmap(**state["_mapping"])
 
     def __len__(self):
-        if self.drop_last:
-            return len(self.tensor_dataset) // self.batch_size
-        else:
-            return int(
-                torch.ceil(torch.tensor(len(self.tensor_dataset) / self.batch_size))
-            )
+        return len(self.array)
 
-    def __iter__(self):
-        if self.shuffle:
-            indices = torch.randperm(
-                len(self.tensor_dataset), device=self.tensor_dataset.device
-            )
-        else:
-            indices = torch.arange(
-                len(self.tensor_dataset), device=self.tensor_dataset.device
-            )
-        for idx in range(len(self)):
-            batch_indices = indices[idx * self.batch_size : (idx + 1) * self.batch_size]
-            batch = self.tensor_dataset[batch_indices]
-            yield batch.float()
+    def __getitem__(self, index):
+        return torch.tensor(self.array[index], dtype=torch.float32)
+
+    def __getitems__(self, indices):
+        # DataLoader's batched fetch path avoids one NumPy read per row.
+        batch = torch.as_tensor(self.array[np.asarray(indices)]).float()
+        return list(batch.unbind(0))
 
 
 class NumpyDataLoader(DataLoader):
+    """Batch NumPy arrays or memory maps without copying the entire dataset.
+
+    Supports the usual sampler, generator, worker, and collation options.
+    """
+
     def __init__(
         self, dataset, batch_size=1024, shuffle=True, drop_last=False, **kwargs
     ):
-        super().__init__(
-            dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
-        )
+        if not isinstance(dataset, np.ndarray):
+            raise TypeError("dataset must be a NumPy array or memory map.")
+        if dataset.ndim == 0:
+            raise ValueError("dataset must have a sample dimension.")
         self.numpy_dataset = dataset
-        # self.batch_size = batch_size
         self.shuffle = shuffle
-        # self.drop_last = drop_last
-        self.indices = np.arange(len(dataset))
-
-    def __len__(self):
-        if self.drop_last:
-            return len(self.numpy_dataset) // self.batch_size
-        else:
-            return int(np.ceil(len(self.numpy_dataset) / self.batch_size))
-
-    def __iter__(self):
-        if self.shuffle:
-            np.random.shuffle(self.indices)
-        for idx in range(len(self)):
-            batch_indices = self.indices[
-                idx * self.batch_size : (idx + 1) * self.batch_size
-            ]
-            batch = torch.from_numpy(self.numpy_dataset[batch_indices]).float()
-            yield batch
+        super().__init__(
+            _NumpyDataset(dataset),
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+            **kwargs,
+        )
 
 
 class MNIST(Dataset):
@@ -366,13 +394,21 @@ class HDF5(Dataset):
         self.file = file
         self.key = key
         self.h5file = None
+        self._owner_pid = None
         with _h5py().File(self.file, "r") as h5file:
             self.len = len(h5file[self.key])
 
-    def __getitem__(self, index):
+    def _file(self):
+        pid = os.getpid()
+        if self.h5file is not None and self._owner_pid != pid:
+            self.close()
         if self.h5file is None:
             self.h5file = _h5py().File(self.file, "r")
-        return self.h5file[self.key][index]
+            self._owner_pid = pid
+        return self.h5file
+
+    def __getitem__(self, index):
+        return self._file()[self.key][index]
 
     def __len__(self):
         return self.len
@@ -381,12 +417,14 @@ class HDF5(Dataset):
         if self.h5file is not None:
             self.h5file.close()
             self.h5file = None
+        self._owner_pid = None
 
     def __getstate__(self):
         # A spawned DataLoader worker opens its own handle, rather than trying
         # to pickle an open HDF5 file inherited from the parent.
         state = self.__dict__.copy()
         state["h5file"] = None
+        state["_owner_pid"] = None
         return state
 
     def __del__(self):
@@ -405,6 +443,4 @@ class HDF5Sequence(HDF5):
 
     def __getitem__(self, idx):
         idx = _window_index(idx, len(self))
-        if self.h5file is None:
-            self.h5file = _h5py().File(self.file, "r")
-        return self.h5file[self.key][idx : idx + self.window_size]
+        return self._file()[self.key][idx : idx + self.window_size]

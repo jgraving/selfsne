@@ -3,6 +3,7 @@
 import math
 import multiprocessing
 import os
+import pickle
 import sys
 from pathlib import Path
 
@@ -217,3 +218,20 @@ def test_array_loaders_support_spawned_workers(loader_class):
         timeout=60,
     )
     torch.testing.assert_close(torch.cat(list(loader)), torch.tensor(data).float())
+
+
+@pytest.mark.parametrize("layout", ["C", "F", "slice"])
+def test_numpy_memory_maps_stay_file_backed_when_sent_to_workers(tmp_path, layout):
+    path = tmp_path / "array.npy"
+    data = np.arange(16000, dtype=np.float32).reshape(1000, 16)
+    np.save(path, np.asfortranarray(data) if layout == "F" else data)
+    array = np.load(path, mmap_mode="r")
+    if layout == "slice":
+        array = array[10:900]
+    loader = NumpyDataLoader(array, batch_size=4, shuffle=False)
+    payload = pickle.dumps(loader.dataset)
+    assert len(payload) < 1024  # Serialize the mapping descriptor, not its contents.
+    restored = pickle.loads(payload)
+    assert restored.array.filename is not None
+    torch.testing.assert_close(restored[0], torch.tensor(array[0]).float())
+    torch.testing.assert_close(restored[-1], torch.tensor(array[-1]).float())

@@ -190,6 +190,37 @@ class _NumpyDataset(Dataset):
     def __init__(self, array):
         self.array = array
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_mapping", None)
+        array = self.array
+        if (
+            isinstance(array, np.memmap)
+            and array.filename is not None
+            and (array.flags.c_contiguous or array.flags.f_contiguous)
+        ):
+            root = array
+            while isinstance(root.base, np.ndarray):
+                root = root.base
+            offset = root.offset + array.ctypes.data - root.ctypes.data
+            state["_mapping"] = dict(
+                filename=str(array.filename),
+                dtype=array.dtype,
+                mode="r",
+                offset=offset,
+                shape=array.shape,
+                order="F"
+                if array.flags.f_contiguous and not array.flags.c_contiguous
+                else "C",
+            )
+            state["array"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if state.get("_mapping") is not None:
+            self.array = np.memmap(**state["_mapping"])
+
     def __len__(self):
         return len(self.array)
 

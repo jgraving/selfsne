@@ -1,4 +1,4 @@
-"""CPU training and embedding example; no dataset download required."""
+"""Train a model and embed a synthetic time series on CPU."""
 
 import numpy as np
 import pytorch_lightning as pl

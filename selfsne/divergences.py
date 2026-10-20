@@ -55,7 +55,20 @@ class BaseNCE(nn.Module):
     def __init__(self, alpha=0.5, k=None, log_k=None):
         super(BaseNCE, self).__init__()
 
-        assert (k is None) or (log_k is None), "Cannot define both k and log_k"
+        if k is not None and log_k is not None:
+            raise ValueError("Cannot define both k and log_k.")
+        if k is not None and (not np.isfinite(k) or k <= 0):
+            raise ValueError("k must be finite and greater than zero.")
+        if log_k is not None and (
+            not np.isfinite(log_k) or log_k > np.log(np.finfo(float).max)
+        ):
+            raise ValueError("log_k must be finite and represent a finite k.")
+        if (
+            k is None
+            and log_k is None
+            and (not np.isfinite(alpha) or not 0 <= alpha <= 1)
+        ):
+            raise ValueError("alpha must be finite and between zero and one.")
 
         if log_k is not None:
             self.log_k = log_k
@@ -215,7 +228,7 @@ def softened_reverse_kullback_leibler_divergence(pos_logits, neg_logits):
     attraction = (
         logmeanexp(-pos_logits).add(np.log(2)).exp()
         + 2 * F.logsigmoid(pos_logits).mean()
-        + 2
+        - 2
         + np.log(4)
     )
     repulsion = 2 * F.logsigmoid(neg_logits).mean() + np.log(4)
@@ -247,28 +260,43 @@ def binary_cross_entropy_f(logits):
     return logits * ratio - (ratio + 1) * torch.log1p(ratio)
 
 
+def _validate_noise_ratio(K):
+    if not np.isfinite(K) or K <= 0:
+        raise ValueError("K must be finite and greater than zero.")
+
+
 def noise_contrastive_estimation_f(logits, K=1):
-    logK = np.log(K)
-    return logits * torch.exp(logits) - (torch.exp(logits) + 1) * torch.log1p(
-        torch.exp(logits) / K
-    )
+    """Uncentered generator of ForwardNCE for a log density ratio.
+
+    f(r) = r log(r/K) - (r+K) log(1+r/K). Like BCE, this
+    generator includes the classification offset; f(1) need not be zero.
+    """
+    _validate_noise_ratio(K)
+    ratio = logits.exp()
+    shifted = logits - np.log(K)
+    return ratio * shifted - (ratio + K) * F.softplus(shifted)
 
 
 def reverse_noise_contrastive_estimation_f(logits, K=1):
-    logK = np.log(K)
-    return (logits + logK).exp().log1p() - (logits + logK).exp().log1p()
+    """Uncentered generator of ReverseNCE: Kr log(Kr) - (Kr+1) log(1+Kr)."""
+    _validate_noise_ratio(K)
+    scaled_ratio = K * logits.exp()
+    shifted = logits + np.log(K)
+    return scaled_ratio * shifted - (scaled_ratio + 1) * F.softplus(shifted)
 
 
 def generalized_jensen_shannon_f(logits, alpha=0.5):
-    log_alpha = np.log(alpha)
-    log_1_alpha = np.log(1 - alpha)
-    ratio = torch.exp(logits)
-    return (
-        torch.exp(log_alpha + logits) * logits
-        - (1 - alpha + torch.exp(log_alpha + logits)).log1p()
-        - log_alpha
-        - log_1_alpha
+    """Generator for alpha KL(p||m) + (1-alpha) KL(q||m), m=alpha p+(1-alpha)q."""
+    if not np.isfinite(alpha) or not 0 <= alpha <= 1:
+        raise ValueError("alpha must be finite and between zero and one.")
+    if alpha == 0 or alpha == 1:
+        return logits * 0
+    ratio = logits.exp()
+    log_mixture = torch.logaddexp(
+        logits + np.log(alpha), torch.full_like(logits, np.log1p(-alpha))
     )
+    mixture = alpha * ratio + 1 - alpha
+    return alpha * ratio * logits - mixture * log_mixture
 
 
 def jeffreys_divergence_f(logits):
@@ -298,7 +326,9 @@ def squared_le_cam_divergence_f(logits):
 
 def softened_reverse_kullback_leibler_divergence_f(logits):
     ratio = torch.exp(logits)
-    return 2 * (ratio + 1) * torch.log(ratio / (ratio + 1)) - 4 * LOG2
+    # Normalize so f(1)=f'(1)=0. The linear term does not affect the
+    # divergence, but makes the pointwise generator non-negative.
+    return -2 * (ratio + 1) * (F.logsigmoid(logits) + LOG2) + 2 * (ratio - 1)
 
 
 # Factory dictionary for f(r) generator functions

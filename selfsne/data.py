@@ -21,8 +21,12 @@ import torch
 
 from torch.utils.data import Dataset, DataLoader
 
-import h5py
-from sklearn.datasets import fetch_openml
+def _h5py():
+    try:
+        import h5py
+    except ImportError as exc:
+        raise ImportError("HDF5 datasets require the 'data' extra: pip install 'selfsne[data]'.") from exc
+    return h5py
 
 
 class PairedDataset(Dataset):
@@ -191,6 +195,10 @@ class NumpyDataLoader(DataLoader):
 class MNIST(Dataset):
     def __init__(self, return_images=False):
         super().__init__()
+        try:
+            from sklearn.datasets import fetch_openml
+        except ImportError as exc:
+            raise ImportError("MNIST requires the 'data' extra: pip install 'selfsne[data]'.") from exc
         # Load data from https://www.openml.org/d/554
         self.x_train, self.y_train = fetch_openml(
             "mnist_784", version=1, return_X_y=True, as_frame=False
@@ -314,12 +322,12 @@ class HDF5(Dataset):
         self.file = file
         self.key = key
         self.h5file = None
-        with h5py.File(self.file, "r") as h5file:
+        with _h5py().File(self.file, "r") as h5file:
             self.len = len(h5file[self.key])
 
     def __getitem__(self, index):
         if self.h5file is None:
-            self.h5file = h5py.File(self.file, "r")
+            self.h5file = _h5py().File(self.file, "r")
         return self.h5file[self.key][index]
 
     def __len__(self):
@@ -340,5 +348,5 @@ class HDF5Sequence(HDF5):
 
     def __getitem__(self, idx):
         if self.h5file is None:
-            self.h5file = h5py.File(self.file, "r")
+            self.h5file = _h5py().File(self.file, "r")
         return self.h5file[self.key][idx : idx + self.window_size]

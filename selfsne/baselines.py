@@ -39,7 +39,7 @@ class LogMeanExp(torch.autograd.Function):
         updated_log_moving_average = stop_gradient(
             log_interpolate(log_moving_average, log_batch_average, momentum_logit)
         )
-        log_moving_average.data = updated_log_moving_average
+        log_moving_average.copy_(updated_log_moving_average)
         ctx.save_for_backward(input, updated_log_moving_average)
         return updated_log_moving_average
 
@@ -65,6 +65,8 @@ class MomentumBaseline(nn.Module):
             momentum (float, optional): Momentum value for moving average calculation. Defaults to 0.9.
         """
         super().__init__()
+        if not 0 <= momentum <= 1:
+            raise ValueError("momentum must be between zero and one.")
         self.register_buffer("log_moving_average", torch.zeros(1))
         self.register_buffer("momentum_logit", torch.zeros(1).add(momentum).logit())
 
@@ -165,7 +167,7 @@ class ParametricBaseline(nn.Module):
     def __init__(
         self,
         param_dim: int = 1024,
-        activation: Optional[nn.Module] = nn.Identity(),
+        activation: Optional[nn.Module] = None,
         bias_init: float = 0.0,
     ):
         """
@@ -218,7 +220,7 @@ class ParametricConditionalBaseline(nn.Module):
         self,
         encoder: nn.Module,
         param_dim: int = 1024,
-        activation: Optional[nn.Module] = nn.Identity(),
+        activation: Optional[nn.Module] = None,
         bias_init: float = 0.0,
     ):
         """
@@ -265,6 +267,8 @@ class AdditiveBaseline(nn.Module):
             mean (bool, optional): Whether to average the baselines. Defaults to False.
         """
         super().__init__()
+        if not baselines:
+            raise ValueError("At least one baseline must be supplied.")
         self.baselines = nn.ModuleList(baselines)
         self.scale = len(baselines) if mean else 1
         self.log_scale = np.log(self.scale)
@@ -291,11 +295,12 @@ class AdditiveBaseline(nn.Module):
         """
         log_baseline = 0
         for baseline in self.baselines:
-            log_baseline += baseline(
+            log_baseline = log_baseline + baseline(
                 pos_similarity=pos_similarity,
                 neg_similarity=neg_similarity,
                 context=context,
                 context_embedding=context_embedding,
+                **kwargs,
             )
         return log_baseline / self.scale
 
@@ -323,14 +328,18 @@ class LogAdditiveBaseline(AdditiveBaseline):
         """
         log_baseline = self.baselines[0](
             pos_similarity=pos_similarity,
+            neg_similarity=neg_similarity,
             context=context,
             context_embedding=context_embedding,
+            **kwargs,
         )
         for baseline in self.baselines[1:]:
             additional_value = baseline(
                 pos_similarity=pos_similarity,
+                neg_similarity=neg_similarity,
                 context=context,
                 context_embedding=context_embedding,
+                **kwargs,
             )
             log_baseline = torch.logaddexp(log_baseline, additional_value)
         return log_baseline - self.log_scale
@@ -348,6 +357,14 @@ class EmbeddingBaseline(nn.Module):
         kernel_scale: float,
         **kwargs,
     ) -> torch.Tensor:
+        if baseline_embedding is None:
+            raise ValueError(
+                "The embedding baseline requires baseline_embedding; provide a baseline_head on the model."
+            )
+        if baseline_embedding.shape != context_embedding.shape:
+            raise ValueError(
+                "baseline_embedding must match the context embedding shape."
+            )
         log_baseline = kernel(context_embedding, baseline_embedding, kernel_scale)
         return log_baseline.unsqueeze(1)
 

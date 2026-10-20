@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
+
 import numpy as np
 import torch
 from torch import nn, diagonal
@@ -38,8 +40,10 @@ def classifier_metrics(pos_logits, neg_logits, threshold=True):
         TN = 1 - neg_probs
         FN = 1 - pos_probs
     accuracy = (TP + TN) / 2
-    precision = TP / (TP + FP)
-    npv = TN / (TN + FN)
+    # A classifier making no positive (or negative) predictions has undefined
+    # precision (or NPV); report zero instead of poisoning all logged metrics.
+    precision = TP / (TP + FP).clamp_min(torch.finfo(dtype).tiny)
+    npv = TN / (TN + FN).clamp_min(torch.finfo(dtype).tiny)
     apv = (precision + npv) / 2
     recall = TP
     specificity = TN
@@ -79,6 +83,17 @@ class LikelihoodRatioEstimator(nn.Module):
     ) -> None:
         super().__init__()
 
+        for name, value, choices in (
+            ("kernel", kernel, ROWWISE_KERNELS),
+            ("divergence", divergence, DIVERGENCES),
+            ("baseline", baseline, BASELINES),
+        ):
+            if isinstance(value, str) and value not in choices:
+                raise ValueError(
+                    f"Unknown {name} {value!r}. Choose from: {', '.join(sorted(choices))}."
+                )
+        if not math.isfinite(float(kernel_scale)) or float(kernel_scale) <= 0:
+            raise ValueError("kernel_scale must be finite and greater than zero.")
         self.kernel = ROWWISE_KERNELS[kernel] if isinstance(kernel, str) else kernel
         self.divergence = (
             DIVERGENCES[divergence] if isinstance(divergence, str) else divergence
@@ -99,7 +114,16 @@ class LikelihoodRatioEstimator(nn.Module):
     def _expand_metrics(self, metrics: Optional[List[str]]) -> List[str]:
         if metrics is None:
             return ["loss"]
-
+        if isinstance(metrics, str):
+            metrics = [metrics]
+        classifier_names = {
+            "accuracy",
+            "recall",
+            "precision",
+            "specificity",
+            "npv",
+            "apv",
+        }
         expanded = set()
         for m in metrics:
             m = m.lower()
@@ -111,10 +135,16 @@ class LikelihoodRatioEstimator(nn.Module):
                 expanded.update(["pos_similarity", "neg_similarity"])
             elif m == "all":
                 expanded.update(self.ALL_METRICS)
-            else:
+                if self.classifier_metrics:
+                    expanded.update(classifier_names)
+            elif m in self.ALL_METRICS or (
+                self.classifier_metrics and m in classifier_names
+            ):
                 expanded.add(m)
+            else:
+                raise ValueError(f"Unknown or disabled metric {m!r}.")
 
-        return list(expanded)
+        return sorted(expanded)
 
     def similarities(
         self,
@@ -123,7 +153,33 @@ class LikelihoodRatioEstimator(nn.Module):
         kernel_scale: float,
         reference_embedding: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if context_embedding.ndim != 2 or target_embedding.ndim != 2:
+            raise ValueError(
+                "context and target embeddings must have shape (batch, features)."
+            )
+        if (
+            context_embedding.shape != target_embedding.shape
+            or context_embedding.numel() == 0
+        ):
+            raise ValueError(
+                "context and target embeddings must have matching, non-empty shapes."
+            )
+        if (
+            not context_embedding.is_floating_point()
+            or not target_embedding.is_floating_point()
+        ):
+            raise TypeError("Embeddings must be floating-point tensors.")
         if reference_embedding is not None:
+            expected = (context_embedding.shape[0], context_embedding.shape[1])
+            if (
+                reference_embedding.ndim != 3
+                or (reference_embedding.shape[0], reference_embedding.shape[-1])
+                != expected
+                or reference_embedding.shape[1] == 0
+            ):
+                raise ValueError(
+                    "reference embeddings must have shape (batch, samples, features) with at least one sample."
+                )
             pos_similarity = self.kernel(
                 context_embedding, target_embedding, kernel_scale
             ).unsqueeze(1)
@@ -131,6 +187,10 @@ class LikelihoodRatioEstimator(nn.Module):
                 context_embedding.unsqueeze(1), reference_embedding, kernel_scale
             )
         else:
+            if context_embedding.shape[0] < 2 and not self.pos_as_neg:
+                raise ValueError(
+                    "In-batch references require at least two pairs; provide explicit references or use drop_last=True."
+                )
             similarity = self.kernel(
                 context_embedding.unsqueeze(1), target_embedding, kernel_scale
             )

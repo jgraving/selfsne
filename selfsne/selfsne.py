@@ -13,16 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
+
 import torch
 import torch.optim as optim
 from torch.optim import lr_scheduler
 import pytorch_lightning as pl
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 from einops import rearrange
-from typing import Optional, Union, Tuple, Dict
-import warnings
+from typing import Optional, Tuple, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 def get_lr_scheduler(
@@ -50,35 +52,25 @@ def get_lr_scheduler(
         >>> cosine_steps = 5000
         >>> scheduler = get_lr_scheduler(optimizer, warmup_steps, target_steps, cosine_steps)
     """
-    if warmup_steps + target_steps + cosine_steps == 0:
-        scheduler = lr_scheduler.ConstantLR(optimizer, factor=1.0)
-    else:
-        milestones = np.cumsum([warmup_steps, target_steps])
+    durations = (warmup_steps, target_steps, cosine_steps)
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in durations):
+        raise ValueError("Schedule durations must be non-negative integers.")
 
-        linear_warmup = (
-            lr_scheduler.LinearLR(
-                optimizer, start_factor=1 / warmup_steps, total_iters=warmup_steps
-            )
-            if warmup_steps > 0
-            else lr_scheduler.ConstantLR(optimizer, factor=1.0)
-        )
-        target_lr = lr_scheduler.ConstantLR(optimizer, factor=1.0)
-        cosine_annealing = (
-            lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=0)
-            if cosine_steps > 0
-            else lr_scheduler.ConstantLR(optimizer, factor=1.0)
-        )
+    def scale(step):
+        if step < warmup_steps:
+            return (step + 1) / warmup_steps
+        cosine_step = step - warmup_steps - target_steps
+        if cosine_steps and cosine_step >= 0:
+            progress = min(cosine_step / cosine_steps, 1.0)
+            return 0.5 * (1 + math.cos(math.pi * progress))
+        return 1.0
 
-        scheduler = lr_scheduler.SequentialLR(
-            optimizer, [linear_warmup, target_lr, cosine_annealing], milestones
-        )
-
-    return scheduler
+    return lr_scheduler.LambdaLR(optimizer, lr_lambda=scale)
 
 
 def visualize_lr_schedule(
     warmup_steps: int, target_steps: int, cosine_steps: int, lr: float = 1.0
-) -> Figure:
+) -> "Figure":
     """
     Visualizes learning rate schedule and returns a matplotlib figure.
 
@@ -98,6 +90,13 @@ def visualize_lr_schedule(
         >>> fig = visualize_lr_schedule(warmup_steps, target_steps, cosine_steps, lr=1.0)
         >>> plt.show()
     """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError(
+            "Learning-rate plots require the 'plot' extra: pip install 'selfsne[plot]'."
+        ) from exc
+
     # Initialize parameters
     params = [torch.randn(1, requires_grad=True)]
 
@@ -115,6 +114,7 @@ def visualize_lr_schedule(
     for step in range(total_steps):
         lr = optimizer.param_groups[0]["lr"]
         lr_values.append(lr)
+        optimizer.step()
         scheduler.step()
 
     # Create the plot
@@ -162,9 +162,7 @@ class SelfSNE(pl.LightningModule):
                 "At least one of target_encoder or context_encoder must be provided."
             )
         if target_tokenizer is None and context_tokenizer is None:
-            raise ValueError(
-                "At least one of target_tokenizer or context_tokenizer must be provided."
-            )
+            target_tokenizer = torch.nn.Identity()
         if target_encoder is None:
             target_encoder = context_encoder
         if context_encoder is None:
@@ -225,6 +223,21 @@ class SelfSNE(pl.LightningModule):
         else:
             context = target = batch
             reference = None
+        if not isinstance(context, torch.Tensor) or not isinstance(
+            target, torch.Tensor
+        ):
+            raise TypeError("context and target must be torch tensors.")
+        if (
+            context.ndim < 2
+            or target.ndim < 2
+            or context.shape[0] != target.shape[0]
+            or context.shape[0] == 0
+        ):
+            raise ValueError(
+                "context and target must have matching, non-empty batch dimensions."
+            )
+        if reference is not None and not isinstance(reference, torch.Tensor):
+            raise TypeError("reference must be a torch tensor.")
         return context, target, reference
 
     def get_embeddings(self, context, target, reference=None) -> Tuple:
@@ -244,6 +257,14 @@ class SelfSNE(pl.LightningModule):
         else:
             target_embedding = target_encoding
         if reference is not None:
+            if (
+                reference.ndim < 3
+                or reference.shape[0] != context.shape[0]
+                or reference.shape[1] == 0
+            ):
+                raise ValueError(
+                    "reference must have shape (batch, samples, ...) with at least one sample."
+                )
             reference_tokens = self.target_tokenizer(
                 rearrange(reference, "b s ... -> (b s) ...")
             )
@@ -298,7 +319,12 @@ class SelfSNE(pl.LightningModule):
             reference_embedding=reference_embedding,
         )
         for key, value in loss_dict.items():
-            self.log(f"{mode}{key}", value.item(), prog_bar=True)
+            self.log(
+                f"{mode}{key}",
+                value.detach(),
+                prog_bar=True,
+                batch_size=context.shape[0],
+            )
         return loss_dict["loss"]
 
     def training_step(self, batch, batch_idx):
@@ -334,7 +360,7 @@ class SelfSNE(pl.LightningModule):
         context, target, reference = self.process_batch(batch)
         output = {}
 
-        if self.hparams.return_embeddings:
+        if self.hparams.return_embeddings or self.hparams.return_logits:
             (
                 context_embedding,
                 target_embedding,
@@ -342,6 +368,7 @@ class SelfSNE(pl.LightningModule):
                 baseline_embedding,
             ) = self.get_embeddings(context, target, reference)
 
+        if self.hparams.return_embeddings:
             output.update(
                 {
                     "context_embedding": context_embedding.detach().cpu().numpy(),
@@ -369,23 +396,11 @@ class SelfSNE(pl.LightningModule):
         return output
 
     def configure_optimizers(self):
-        modules = []
-        for module in [
-            self.target_encoder,
-            self.context_encoder,
-            self.target_tokenizer,
-            self.context_tokenizer,
-        ]:
-            if module is not None and module not in modules:
-                modules.append(module)
-        params_list = [{"params": m.parameters()} for m in modules]
-        params_list.append({"params": self.loss.parameters()})
-        if self.baseline_head is not None:
-            params_list.append({"params": self.baseline_head.parameters()})
-        if self.target_head is not None:
-            params_list.append({"params": self.target_head.parameters()})
-        if self.context_head is not None and self.context_head is not self.target_head:
-            params_list.append({"params": self.context_head.parameters()})
+        # Module.parameters() deduplicates shared parameters, including cases
+        # where an encoder and a head share only part of their architecture.
+        params_list = [p for p in self.parameters() if p.requires_grad]
+        if not params_list:
+            raise ValueError("The model has no trainable parameters.")
         if self.hparams.optimizer.lower() == "adam":
             opt = optim.AdamW(
                 params_list,

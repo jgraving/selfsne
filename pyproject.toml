@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "selfsne"
+version = "0.0.2.dev0"
+description = "Self-Supervised Noise Embeddings (Self-SNE)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{name = "Jacob Graving", email = "jgraving@gmail.com"}]
+dependencies = [
+    "numpy>=1.24", "scipy>=1.10", "torch>=2.4", "pytorch-lightning>=2.0,<3",
+    "einops>=0.6", "tqdm>=4.64",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "build", "wheel", "ruff>=0.9"]
+data = ["h5py>=3.8", "scikit-learn>=1.2"]
+plot = ["matplotlib>=3.6", "scikit-image>=0.20", "shapely>=2", "scikit-learn>=1.2"]
+rich = ["rich>=13", "typing-extensions>=4.4"]
+
+[project.urls]
+Repository = "https://github.com/jgraving/selfsne"
+
+[tool.setuptools.packages.find]
+include = ["selfsne*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+# CPU wheels keep the default uv install small and usable without CUDA.
+# Use `uv sync --no-sources` for PyTorch's default index (including GPU builds).
+[tool.uv.sources]
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

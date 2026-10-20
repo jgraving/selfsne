@@ -127,7 +127,7 @@ def cauchy(
         torch.Tensor: The row-wise Cauchy kernel matrix, of shape (batch_size,).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     return (x1 - x2).pow(2).sum(-1).div(dim_scale).log1p().neg()
 
 
@@ -149,7 +149,7 @@ def pairwise_cauchy(
         torch.Tensor: The pairwise Cauchy kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).log1p().neg()
 
 
@@ -173,7 +173,7 @@ def inverse(
         torch.Tensor: The row-wise inverse kernel matrix, of shape (batch_size,).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     eps = torch.finfo(x1.dtype).eps
     return -(x1 - x2).pow(2).sum(-1).div(dim_scale).clamp(min=eps).log()
 
@@ -198,7 +198,7 @@ def pairwise_inverse(
         torch.Tensor: The pairwise inverse kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     eps = torch.finfo(x1.dtype).eps
     return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).clamp(min=eps).log().neg()
 
@@ -221,7 +221,7 @@ def normal(
         torch.Tensor: The row-wise normal kernel matrix, of shape (batch_size,).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     return (x1 - x2).pow(2).sum(-1).div(dim_scale).div(2).neg()
 
 
@@ -243,7 +243,7 @@ def pairwise_normal(
         torch.Tensor: The pairwise normal kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    dim_scale = (scale ** 2) * x1.shape[-1]
+    dim_scale = (scale**2) * x1.shape[-1]
     return torch.cdist(x1, x2, p=2).pow(2).div(dim_scale).div(2).neg()
 
 
@@ -312,10 +312,9 @@ def von_mises(
     Returns:
         torch.Tensor: The row-wise von Mises-Fisher kernel matrix, of shape (batch_size,).
     """
-    eps = torch.finfo(x1.dtype).eps
-    x1_norm = x1.norm(dim=-1)
-    x2_norm = x2.norm(dim=-1)
-    return (x1 * x2).sum(-1) / (scale * x1_norm * x2_norm).clamp(min=eps)
+    x1_norm = F.normalize(x1, p=2, dim=-1, eps=1e-8)
+    x2_norm = F.normalize(x2, p=2, dim=-1, eps=1e-8)
+    return (x1_norm * x2_norm).sum(-1).div(scale)
 
 
 def pairwise_von_mises(
@@ -345,6 +344,16 @@ def pairwise_von_mises(
     return (x1_norm @ x2_norm.T).div(scale)
 
 
+def _wrapped_cauchy_from_cosine(cosine, scale):
+    # Divide numerator and denominator by exp(scale)/2 to avoid overflow.
+    scale = torch.as_tensor(scale, device=cosine.device, dtype=cosine.dtype)
+    numerator = -torch.expm1(-2 * scale)
+    denominator = torch.expm1(-scale).square() + 2 * torch.exp(-scale) * (
+        1 - cosine.clamp(-1, 1)
+    )
+    return numerator.log() - denominator.log()
+
+
 def wrapped_cauchy(
     x1: torch.Tensor, x2: torch.Tensor, scale: Union[float, torch.Tensor] = 1.0
 ) -> torch.Tensor:
@@ -365,7 +374,7 @@ def wrapped_cauchy(
         torch.Tensor: The row-wise wrapped Cauchy kernel matrix, of shape (batch_size,).
 
     """
-    return (torch.sinh(scale)).log() - (torch.cosh(scale) - von_mises(x1, x2, 1)).log()
+    return _wrapped_cauchy_from_cosine(von_mises(x1, x2, 1), scale)
 
 
 def pairwise_wrapped_cauchy(
@@ -388,7 +397,7 @@ def pairwise_wrapped_cauchy(
         torch.Tensor: The pairwise wrapped Cauchy kernel matrix, of shape (batch_size_1, batch_size_2).
 
     """
-    return (np.cosh(scale) - pairwise_von_mises(x1, x2, 1)).log().neg()
+    return _wrapped_cauchy_from_cosine(pairwise_von_mises(x1, x2, 1), scale)
 
 
 def pairwise_kernel(func):

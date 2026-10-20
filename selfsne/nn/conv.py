@@ -55,9 +55,10 @@ class CausalConv1d(nn.Conv1d):
     def forward(self, x):
         # Forward pass produces extra timesteps at the end due to padding.
         out = super().forward(x)
-        if self.padding[0] > 0:
-            out = out[..., : -self.padding[0]]
-        return out
+        # Output index i corresponds to input time i * stride. Keep only
+        # positions belonging to the input, including the final partial stride.
+        length = (x.shape[-1] + self.stride[0] - 1) // self.stride[0]
+        return out[..., :length]
 
 
 class Conv1d(nn.Conv1d):

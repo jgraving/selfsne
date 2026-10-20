@@ -44,7 +44,7 @@ def inverse_softplus(x):
         The softplus function is defined as `log(1 + exp(x))`, and the inverse softplus
         function is defined as `log(exp(x) - 1)`.
     """
-    return x.expm1().log()
+    return x + torch.log(-torch.expm1(-x))
 
 
 def stop_gradient(x: torch.Tensor) -> torch.Tensor:
@@ -103,9 +103,9 @@ def random_sample_columns(x: torch.Tensor, num_samples: int) -> torch.Tensor:
         >>> random_sample_columns(x, 5).shape
         torch.Size([10, 5])
     """
-    assert (
-        num_samples <= x.shape[1]
-    ), "num_samples must be less than or equal to the number of columns"
+    assert num_samples <= x.shape[1], (
+        "num_samples must be less than or equal to the number of columns"
+    )
     weights = torch.ones((x.shape[0], x.shape[1]), device=x.device)
     jdx = torch.multinomial(weights, num_samples, replacement=False)
     idx = torch.arange(x.shape[0], device=x.device).unsqueeze(1).expand(-1, num_samples)
@@ -244,7 +244,7 @@ def log_interpolate(
         tensor([1.3863, 2.3863, 3.3863])
     """
     log_alpha = F.logsigmoid(alpha_logit)
-    log1m_alpha = F.logsigmoid(alpha_logit) - alpha_logit
+    log1m_alpha = F.logsigmoid(-alpha_logit)
     return torch.logaddexp(log_a + log_alpha, log_b + log1m_alpha)
 
 

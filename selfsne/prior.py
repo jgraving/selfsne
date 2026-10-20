@@ -59,13 +59,17 @@ class MixturePrior(pl.LightningModule):
         kernel_scale=1.0,
         baseline=0,
         lr=1.0,
-        scheduler_kwargs={},
+        scheduler_kwargs=None,
     ):
         super().__init__()
+        if scheduler_kwargs is None:
+            scheduler_kwargs = {}
         self.save_hyperparameters()
+        if logits not in {"learn", "maxent"}:
+            raise ValueError("logits must be 'learn' or 'maxent'.")
 
         if isinstance(kernel, str):
-            self.kernel = KERNELS[kernel]
+            self.kernel = ROWWISE_KERNELS[kernel]
         else:
             self.kernel = kernel
 
@@ -89,7 +93,7 @@ class MixturePrior(pl.LightningModule):
             self.baseline = BASELINES["constant"](baseline)
 
         self.watershed_locs = nn.Parameter(stop_gradient(self.locs))
-        self.watershed_assignments = self.watershed_labels()
+        self.register_buffer("watershed_assignments", self.watershed_labels())
 
     @property
     def multinomial(self):
@@ -113,7 +117,9 @@ class MixturePrior(pl.LightningModule):
     def log_prob(self, x):
         log_prob = self._log_prob(x)
         return log_prob.unsqueeze(1) - self.baseline(
-            x, torch.repeat_interleave(log_prob.unsqueeze(0), log_prob.shape[0], dim=0)
+            pos_similarity=log_prob.unsqueeze(1),
+            neg_similarity=log_prob.unsqueeze(0).expand(log_prob.shape[0], -1),
+            context_embedding=x,
         )
 
     def rate(self, x):
@@ -154,7 +160,8 @@ class MixturePrior(pl.LightningModule):
         return self.watershed_assignments[self.assign_modes(p)]
 
     def on_train_start(self):
-        self.watershed_locs.data = stop_gradient(self.locs.data)
+        with torch.no_grad():
+            self.watershed_locs.copy_(self.locs)
 
     def on_train_end(self):
         self.watershed_assignments = self.watershed_labels()
@@ -174,7 +181,7 @@ class MixturePrior(pl.LightningModule):
             }
         ]
 
-    def training_epoch_end(self, training_step_outputs):
+    def on_train_epoch_end(self):
         self.log(
             "num_labels_epoch",
             self.watershed_labels().max() + 1,
@@ -202,20 +209,22 @@ class MixturePrior(pl.LightningModule):
         verbose=True,
         gpus=None,
         lr=1,
-        scheduler_kwargs={},
+        scheduler_kwargs=None,
     ):
         self.hparams.lr = lr
-        self.hparams.scheduler_kwargs = scheduler_kwargs
+        self.hparams.scheduler_kwargs = scheduler_kwargs or {}
 
         if verbose:
             print("optimizing entropy...")
         dummy_loader = DataLoader(np.zeros(steps_per_epoch), batch_size=1)
-        early_stopping = pl.callbacks.EarlyStopping("entropy", patience=patience)
+        early_stopping = pl.callbacks.EarlyStopping("entropy_epoch", patience=patience)
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             enable_progress_bar=verbose,
             enable_model_summary=False,
             callbacks=[early_stopping],
-            gpus=gpus,
+            accelerator="cpu" if gpus is None or gpus == 0 else "gpu",
+            devices=1 if gpus is None or gpus == 0 else gpus,
+            logger=False,
         )
         trainer.fit(self, dummy_loader)

@@ -1,12 +1,6 @@
+"""Self-Supervised Noise Embeddings."""
+
 from selfsne.selfsne import SelfSNE
 
-__version__ = "0.0.2.dev"
-
-import warnings
-
-warnings.filterwarnings(
-    "ignore",
-    category=UserWarning,
-    message=r".*epoch parameter.*deprecated.*",
-    module=r"torch\.optim\.lr_scheduler",
-)
+__version__ = "0.0.2.dev0"
+__all__ = ["SelfSNE", "__version__"]

@@ -126,3 +126,9 @@ dmypy.json
 cne/.DS_Store
 
 .DS_Store
+
+# Local build and pytest temporary directories
+pytest-of-root/
+build-env-*/
+build-via-sdist-*/
+build-requirements-*.txt

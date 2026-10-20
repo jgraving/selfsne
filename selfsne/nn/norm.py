@@ -121,18 +121,27 @@ class DyT(nn.Module):
         return self.gamma * torch.tanh(self.alpha * x) + self.beta
 
 
+class _PreNormSequential(nn.Sequential):
+    """Sequential normalization with keyword arguments forwarded to its last layer."""
+
+    def forward(self, x, **kwargs):
+        for layer in list(self.children())[:-1]:
+            x = layer(x)
+        return self[-1](x, **kwargs)
+
+
 def PreDyT(in_features, module, init_alpha=0.5):
     """
     Wraps a module with a prenormalization step using DyT.
     """
-    return Residual(nn.Sequential(DyT(in_features, init_alpha), module))
+    return Residual(_PreNormSequential(DyT(in_features, init_alpha), module))
 
 
 def PreLayerNorm(in_features, module):
     """
     Wraps a module with a prenormalization step using Layer Normalization.
     """
-    return Residual(nn.Sequential(nn.LayerNorm(in_features), module))
+    return Residual(_PreNormSequential(nn.LayerNorm(in_features), module))
 
 
 def PreRMSNorm(in_features, module):
@@ -140,4 +149,4 @@ def PreRMSNorm(in_features, module):
     Wraps a module with a prenormalization step using RMS Normalization.
     Note: Ensure that nn.RMSNorm is defined or replace with a custom RMSNorm implementation.
     """
-    return Residual(nn.Sequential(nn.RMSNorm(in_features), module))
+    return Residual(_PreNormSequential(nn.RMSNorm(in_features), module))

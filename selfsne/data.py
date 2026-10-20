@@ -16,17 +16,41 @@
 # Lorenz attractor code modified from:
 # https://matplotlib.org/stable/gallery/mplot3d/lorenz_attractor.html
 
+import math
+import operator
+
 import numpy as np
 import torch
 
 from torch.utils.data import Dataset, DataLoader
 
+
 def _h5py():
     try:
         import h5py
     except ImportError as exc:
-        raise ImportError("HDF5 datasets require the 'data' extra: pip install 'selfsne[data]'.") from exc
+        raise ImportError(
+            "HDF5 datasets require the 'data' extra: pip install 'selfsne[data]'."
+        ) from exc
     return h5py
+
+
+def _validate_window(window_size):
+    if (
+        isinstance(window_size, bool)
+        or not isinstance(window_size, int)
+        or window_size < 1
+    ):
+        raise ValueError("window_size must be a positive integer.")
+
+
+def _window_index(idx, length):
+    idx = operator.index(idx)
+    if idx < 0:
+        idx += length
+    if not 0 <= idx < length:
+        raise IndexError("Window index out of range.")
+    return idx
 
 
 class PairedDataset(Dataset):
@@ -43,6 +67,8 @@ class PairedDataset(Dataset):
     """
 
     def __init__(self, dataset_a, dataset_b, shuffle=False):
+        if len(dataset_a) != len(dataset_b):
+            raise ValueError("Paired datasets must have the same length.")
         self.dataset_a = dataset_a
         self.dataset_b = dataset_b
         self.shuffle = shuffle
@@ -67,14 +93,20 @@ def correlated_gaussian_sampler(
     def mi_to_rho(dim, mi):
         return torch.sqrt(1 - torch.exp(-2.0 / dim * mi))
 
-    correlation = mi_to_rho(dim, mutual_information)
-
+    if n_samples < 1 or dim < 1:
+        raise ValueError("n_samples and dim must be positive.")
+    mi = torch.as_tensor(
+        mutual_information, dtype=torch.get_default_dtype(), device=device
+    )
+    if mi.ndim != 0 or not torch.isfinite(mi) or mi < 0:
+        raise ValueError("mutual_information must be a finite, non-negative scalar.")
+    correlation = mi_to_rho(dim, mi)
+    generator = None
     if seed is not None:
-        torch.manual_seed(seed)
-
-    z = torch.randn(n_samples, 2 * dim, device=device)
+        generator = torch.Generator(device=device or "cpu").manual_seed(seed)
+    z = torch.randn(n_samples, 2 * dim, device=device, generator=generator)
     x, eps = torch.split(z, dim, dim=1)
-    y = correlation * x + torch.sqrt(1.0 - correlation ** 2) * eps
+    y = correlation * x + torch.sqrt(1.0 - correlation**2) * eps
 
     samples = torch.cat((x, y), dim=1)
     return samples
@@ -89,32 +121,37 @@ class CorrelatedGaussianDataLoader(DataLoader):
         seed=None,
         batch_size=1024,
         device=None,
-        **kwargs
+        **kwargs,
     ):
         self.n_samples = n_samples
         self.mutual_information = mutual_information
         self.dim = dim
         self.seed = seed
+        self._epoch = 0
         self.batch_size = batch_size
         self.device = device
         self.dataset = self.generate_samples()
         super().__init__(self.dataset, batch_size=batch_size, **kwargs)
 
     def generate_samples(self):
+        seed = None if self.seed is None else self.seed + self._epoch
         samples = correlated_gaussian_sampler(
-            self.n_samples, self.mutual_information, self.dim, self.seed, self.device
+            self.n_samples, self.mutual_information, self.dim, seed, self.device
         )
+        self._epoch += 1
         return samples
 
     def __len__(self):
-        return len(self.dataset) // self.batch_size
+        if self.drop_last:
+            return len(self.dataset) // self.batch_size
+        return math.ceil(len(self.dataset) / self.batch_size)
 
     def __iter__(self):
         for idx in range(len(self)):
             batch = self.dataset[idx * self.batch_size : (idx + 1) * self.batch_size]
-            yield batch
-        # regenerate the samples after each epoch
-        self.dataset = self.generate_samples()
+            yield batch.clone()
+        # Keep DataLoader's dataset object stable while refreshing its contents.
+        self.dataset.copy_(self.generate_samples())
 
 
 class TensorDataLoader(DataLoader):
@@ -125,16 +162,16 @@ class TensorDataLoader(DataLoader):
         shuffle=True,
         drop_last=False,
         device=None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             drop_last=drop_last,
-            **kwargs
+            **kwargs,
         )
-        self.tensor_dataset = torch.tensor(dataset)
+        self.tensor_dataset = torch.as_tensor(dataset).detach().clone()
         if device is not None:
             self.tensor_dataset = self.tensor_dataset.to(device)
         self.shuffle = shuffle
@@ -198,7 +235,9 @@ class MNIST(Dataset):
         try:
             from sklearn.datasets import fetch_openml
         except ImportError as exc:
-            raise ImportError("MNIST requires the 'data' extra: pip install 'selfsne[data]'.") from exc
+            raise ImportError(
+                "MNIST requires the 'data' extra: pip install 'selfsne[data]'."
+            ) from exc
         # Load data from https://www.openml.org/d/554
         self.x_train, self.y_train = fetch_openml(
             "mnist_784", version=1, return_X_y=True, as_frame=False
@@ -249,6 +288,7 @@ class Lorenz(Dataset):
             zs[i + 1] = zs[i] + (z_dot * dt)
 
         self.data = np.stack((xs, ys, zs))
+        _validate_window(window_size)
         self.window_size = window_size
 
         # Attractors
@@ -267,9 +307,10 @@ class Lorenz(Dataset):
                 self.targets[i] = 1  # closer to attractor 2
 
     def __len__(self):
-        return self.data.shape[-1] - self.window_size
+        return max(0, self.data.shape[-1] - self.window_size + 1)
 
     def __getitem__(self, idx):
+        idx = _window_index(idx, len(self))
         return self.data[:, idx : idx + self.window_size].astype(np.float32)
 
 
@@ -286,6 +327,7 @@ class LorenzRandomProjection(Lorenz):
         self.projection = np.random.normal(loc=W.T @ z, scale=1 / np.sqrt(x_dim))
 
     def __getitem__(self, idx):
+        idx = _window_index(idx, len(self))
         return self.projection[:, idx : idx + self.window_size]
 
 
@@ -293,12 +335,14 @@ class MemMapSequence(Dataset):
     def __init__(self, file, window_size=100):
         super().__init__()
         self.data = np.load(file, mmap_mode="r")
+        _validate_window(window_size)
         self.window_size = window_size
 
     def __len__(self):
-        return len(self.data) - self.window_size
+        return max(0, len(self.data) - self.window_size + 1)
 
     def __getitem__(self, idx):
+        idx = _window_index(idx, len(self))
         return np.array(self.data[idx : idx + self.window_size]).T
 
 
@@ -333,20 +377,34 @@ class HDF5(Dataset):
     def __len__(self):
         return self.len
 
-    def __del__(self):
+    def close(self):
         if self.h5file is not None:
+            self.h5file.close()
+            self.h5file = None
+
+    def __getstate__(self):
+        # A spawned DataLoader worker opens its own handle, rather than trying
+        # to pickle an open HDF5 file inherited from the parent.
+        state = self.__dict__.copy()
+        state["h5file"] = None
+        return state
+
+    def __del__(self):
+        if getattr(self, "h5file", None) is not None:
             self.h5file.close()
 
 
 class HDF5Sequence(HDF5):
     def __init__(self, file, key, window_size=100):
         super().__init__(file, key)
+        _validate_window(window_size)
         self.window_size = window_size
 
     def __len__(self):
-        return self.len - self.window_size
+        return max(0, self.len - self.window_size + 1)
 
     def __getitem__(self, idx):
+        idx = _window_index(idx, len(self))
         if self.h5file is None:
             self.h5file = _h5py().File(self.file, "r")
         return self.h5file[self.key][idx : idx + self.window_size]

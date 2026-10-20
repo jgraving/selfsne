@@ -49,14 +49,14 @@ class CausalConv1d(nn.Conv1d):
             kernel_size,
             dilation=dilation,
             padding=pad,
-            **kwargs
+            **kwargs,
         )
 
     def forward(self, x):
         # Forward pass produces extra timesteps at the end due to padding.
         out = super().forward(x)
-        if self.padding:
-            out = out[..., : -self.padding]
+        if self.padding[0] > 0:
+            out = out[..., : -self.padding[0]]
         return out
 
 
@@ -72,7 +72,7 @@ class Conv1d(nn.Conv1d):
             dilation=dilation,
             stride=stride,
             padding=pad,
-            **kwargs
+            **kwargs,
         )
 
 
@@ -242,7 +242,7 @@ def ResNet2d(
     for block_idx in range(num_blocks):
         sublayers = []
         residual_in = hidden_channels * (2 ** max(0, block_idx - 1))
-        residual_out = hidden_channels * (2 ** block_idx)
+        residual_out = hidden_channels * (2**block_idx)
         # Residual block with downsampling
         sublayers.append(
             nn.Sequential(
@@ -280,25 +280,25 @@ def ResNet2d(
         for _ in range(num_layers - 1):
             sublayers.append(
                 nn.Sequential(
-                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
+                    nn.BatchNorm2d(hidden_channels * (2**block_idx))
                     if batch_norm
                     else nn.Identity(),
                     init_linear(
                         nn.Conv2d(
-                            hidden_channels * (2 ** block_idx),
-                            hidden_channels * (2 ** block_idx),
+                            hidden_channels * (2**block_idx),
+                            hidden_channels * (2**block_idx),
                             kernel_size=3,
                             padding=1,
                         )
                     ),
                     nn.SELU(),
-                    nn.BatchNorm2d(hidden_channels * (2 ** block_idx))
+                    nn.BatchNorm2d(hidden_channels * (2**block_idx))
                     if batch_norm
                     else nn.Identity(),
                     init_linear(
                         nn.Conv2d(
-                            hidden_channels * (2 ** block_idx),
-                            hidden_channels * (2 ** block_idx),
+                            hidden_channels * (2**block_idx),
+                            hidden_channels * (2**block_idx),
                             kernel_size=3,
                             padding=1,
                         )
@@ -311,8 +311,8 @@ def ResNet2d(
                 nn.Sequential(*sublayers),
                 init_linear(
                     nn.Conv2d(
-                        hidden_channels * (2 ** block_idx),
-                        hidden_channels * (2 ** block_idx),
+                        hidden_channels * (2**block_idx),
+                        hidden_channels * (2**block_idx),
                         kernel_size=3,
                         stride=2,
                         padding=1,

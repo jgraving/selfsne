@@ -37,12 +37,13 @@ class Attention(nn.Module):
 
     def __init__(self, model_dim, num_heads, dropout=0.0, causal_mask=False):
         super().__init__()
-        assert (
-            model_dim % num_heads == 0
-        ), f"model_dim ({model_dim}) must be divisible by num_heads ({num_heads})"
+        if num_heads < 1 or model_dim < 1 or model_dim % num_heads:
+            raise ValueError(
+                "model_dim and num_heads must be positive, and model_dim divisible by num_heads."
+            )
         self.num_heads = num_heads
         self.head_dim = model_dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
         self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         self.causal_mask = causal_mask
 
@@ -51,18 +52,27 @@ class Attention(nn.Module):
         similarity = torch.einsum("b h i d, b h j d -> b h i j", q, k) * self.scale
 
         if self.causal_mask:
-            seq_len = similarity.size(-1)
             causal_mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=similarity.device), diagonal=1
-            ).bool()
+                torch.ones(
+                    similarity.shape[-2:], device=similarity.device, dtype=torch.bool
+                ),
+                diagonal=1,
+            )
             similarity = similarity.masked_fill(causal_mask, float("-inf"))
 
         if mask is not None:
+            if mask.dtype != torch.bool or mask.shape != (q.shape[0], k.shape[-2]):
+                raise ValueError(
+                    "mask must be boolean with shape (batch, context_tokens); True masks a token."
+                )
             similarity = similarity.masked_fill(
                 mask.unsqueeze(1).unsqueeze(2), float("-inf")
             )
 
-        attention = similarity.softmax(dim=-1)
+        # Fully masked rows contribute zero, with finite forward and backward passes.
+        fully_masked = torch.isneginf(similarity).all(dim=-1, keepdim=True)
+        similarity = similarity.masked_fill(fully_masked, 0.0)
+        attention = similarity.softmax(dim=-1).masked_fill(fully_masked, 0.0)
         attention = self.dropout(attention)
         out = torch.einsum("b h i j, b h j d -> b h i d", attention, v)
         return out
@@ -83,14 +93,14 @@ class SelfAttention(nn.Module):
         self.out = init_linear(nn.Linear(model_dim, model_dim))
         self.attention = Attention(model_dim, num_heads, dropout, causal_mask)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         # x: (batch_size, seq_len, model_dim)
         qkv = self.qkv(x)  # Shape: (batch_size, seq_len, 3 * model_dim)
         qkv = rearrange(
             qkv, "b s (c h d) -> c b h s d", c=3, h=self.num_heads, d=self.head_dim
         )
         q, k, v = qkv[0], qkv[1], qkv[2]
-        out = self.attention(q, k, v)
+        out = self.attention(q, k, v, mask=mask)
         out = rearrange(out, "b h s d -> b s (h d)")
         return self.out(out)
 

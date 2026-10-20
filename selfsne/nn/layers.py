@@ -31,13 +31,13 @@ __all__ = [
 
 
 class Residual(nn.Module):
-    def __init__(self, module, residual=nn.Identity()):
+    def __init__(self, module, residual=None):
         super().__init__()
         self.module = module
-        self.residual = residual
+        self.residual = residual if residual is not None else nn.Identity()
 
-    def forward(self, x):
-        return self.residual(x) + self.module(x)
+    def forward(self, x, **kwargs):
+        return self.residual(x) + self.module(x, **kwargs)
 
 
 def ParametricResidual(in_features, out_features, module):

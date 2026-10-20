@@ -97,7 +97,7 @@ class TransformerEncoder(nn.Module):
             A tensor of shape [batch, num_latent_tokens, model_dim].
         """
         for self_attn, mlp in self.layers:
-            x = self_attn(x)
+            x = self_attn(x, mask=mask)
             x = mlp(x)
 
         return self.latent_cross_attention(x, mask=mask)

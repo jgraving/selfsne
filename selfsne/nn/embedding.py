@@ -77,6 +77,8 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
     def __init__(self, model_dim: int):
         super().__init__()
+        if not isinstance(model_dim, int) or model_dim < 1:
+            raise ValueError("model_dim must be a positive integer.")
         self.model_dim = model_dim
         self.register_buffer(
             "div_term",
@@ -89,19 +91,15 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, model_dim = x.shape
-        assert (
-            model_dim == self.model_dim
-        ), "Input model_dim must match initialized model_dim."
+        assert model_dim == self.model_dim, (
+            "Input model_dim must match initialized model_dim."
+        )
         position = torch.arange(seq_len, device=x.device, dtype=x.dtype).unsqueeze(1)
         sin_emb = torch.sin(position * self.div_term)
         cos_emb = torch.cos(position * self.div_term)
-        # Rearranging the sine and cosine embeddings into a single positional embedding
-        positional_embedding = rearrange(
-            [sin_emb, cos_emb], "d seq half_dim -> seq (d half_dim)"
-        )
-        positional_embedding = rearrange(
-            positional_embedding, "seq dim -> 1 seq dim"
-        ).expand(batch_size, -1, -1)
+        positional_embedding = x.new_empty(1, seq_len, model_dim)
+        positional_embedding[0, :, 0::2] = sin_emb
+        positional_embedding[0, :, 1::2] = cos_emb[:, : model_dim // 2]
         return x + positional_embedding
 
 
@@ -112,6 +110,10 @@ class RotaryPositionalEmbedding(nn.Module):
 
     def __init__(self, model_dim: int):
         super().__init__()
+        if not isinstance(model_dim, int) or model_dim < 1:
+            raise ValueError("model_dim must be a positive integer.")
+        if model_dim % 2:
+            raise ValueError("Rotary embeddings require an even model_dim.")
         self.model_dim = model_dim
         self.register_buffer(
             "div_term",
@@ -124,9 +126,9 @@ class RotaryPositionalEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, model_dim = x.shape
-        assert (
-            model_dim == self.model_dim
-        ), "Input model_dim must match initialized model_dim."
+        assert model_dim == self.model_dim, (
+            "Input model_dim must match initialized model_dim."
+        )
         position = torch.arange(seq_len, device=x.device, dtype=x.dtype).unsqueeze(1)
         sin_emb = rearrange(
             torch.sin(position * self.div_term), "seq half_dim -> 1 seq half_dim"
@@ -140,16 +142,16 @@ class RotaryPositionalEmbedding(nn.Module):
         x1 = x_even * cos_emb - x_odd * sin_emb
         x2 = x_even * sin_emb + x_odd * cos_emb
         # Concatenate the transformed parts back together
-        return rearrange([x1, x2], "d b seq half_dim -> b seq (d half_dim)")
+        return rearrange([x1, x2], "d b seq half_dim -> b seq (half_dim d)")
 
 
 def PatchEmbedding1d(seq_length, patch_size, embedding_dim, in_channels):
     """
     Splits a 1D sequence into patches and projects them into an embedding space.
     """
-    assert (
-        seq_length % patch_size == 0
-    ), "Sequence length must be divisible by patch size."
+    assert seq_length % patch_size == 0, (
+        "Sequence length must be divisible by patch size."
+    )
     return nn.Sequential(
         init_linear(
             nn.Conv1d(

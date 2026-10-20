@@ -32,6 +32,14 @@ class TokenSampler(nn.Module):
 
     def __init__(self, p=None, num_tokens=None):
         super(TokenSampler, self).__init__()
+        if num_tokens is not None and (
+            isinstance(num_tokens, bool)
+            or not isinstance(num_tokens, int)
+            or num_tokens < 1
+        ):
+            raise ValueError("num_tokens must be a positive integer.")
+        if p is not None and num_tokens is not None:
+            raise ValueError("Specify either p or num_tokens, not both.")
         self.p = p
         self.num_tokens = num_tokens
 
@@ -57,7 +65,7 @@ class TokenSampler(nn.Module):
             if self.num_tokens is not None:
                 tokens_to_keep = min(tokens, self.num_tokens)
             elif self.p is not None:
-                tokens_to_keep = int(tokens * self.p)
+                tokens_to_keep = max(1, int(tokens * self.p))
             else:
                 return x
             output_tensor = random_sample_columns(x, tokens_to_keep)

@@ -14,13 +14,12 @@ uv sync
 uv run python examples/quickstart.py
 ```
 
-That's it. uv creates the environment and installs the dependencies. On Linux
+uv creates the environment and installs the dependencies. On Linux
 and Windows it uses CPU PyTorch wheels by default; macOS uses the default
 PyTorch distribution. Python 3.10 or newer is required.
 
-The example creates a small synthetic recording, trains on adjacent
-observations, and embeds 128 observations into two dimensions. No dataset
-download, account, or GPU is needed.
+The example trains on adjacent observations from a synthetic time series and
+returns an embedding array with shape `(128, 2)`.
 
 ### Prefer pip?
 
@@ -145,7 +144,7 @@ restored.eval()
 
 Supply the same architecture when loading: checkpoints store weights and
 training state, while encoder, tokenizer, head, and loss modules are supplied
-by your code. Only load checkpoints from trusted sources.
+by your code.
 
 ## Development
 
@@ -160,10 +159,8 @@ uv run python -m build
 without changing the lockfile. pip installs remain supported with
 `python -m pip install -e '.[dev,data,plot,rich]'`.
 
-This is development software. Tests cover installation, losses, kernels,
-baselines, batch validation, scheduling, data helpers, training, prediction,
-and checkpoint restoration. Scientific performance depends on your data,
-pairing strategy, and model configuration.
+Tests cover installation, losses, kernels, baselines, batch validation,
+scheduling, data helpers, training, prediction, and checkpoint restoration.
 
 ## License
 

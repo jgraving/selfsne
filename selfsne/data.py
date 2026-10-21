@@ -225,11 +225,14 @@ class _NumpyDataset(Dataset):
         return len(self.array)
 
     def __getitem__(self, index):
-        return torch.tensor(self.array[index], dtype=torch.float32)
+        # Convert only this row to native-endian, positive-stride storage.
+        row = np.array(self.array[index], dtype=np.float32, order="C", copy=True)
+        return torch.from_numpy(row)
 
     def __getitems__(self, indices):
         # DataLoader's batched fetch path avoids one NumPy read per row.
-        batch = torch.as_tensor(self.array[np.asarray(indices)]).float()
+        rows = np.asarray(self.array[np.asarray(indices)], dtype=np.float32, order="C")
+        batch = torch.from_numpy(rows)
         return list(batch.unbind(0))
 
 

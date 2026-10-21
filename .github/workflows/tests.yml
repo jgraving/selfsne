@@ -59,6 +59,8 @@ jobs:
       - run: uv sync --frozen --python 3.12
       - run: uv run --frozen python examples/quickstart.py
       - run: uv run --frozen python -c "import selfsne.data, selfsne.losses, selfsne.transformers"
+      - name: Resolve CUDA 12.1 wheels without installing GPU packages
+        run: uv pip install --dry-run --no-sources --python .venv/bin/python --torch-backend=cu121 --reinstall-package torch 'torch==2.5.1+cu121' -e '.[dev,data]'
 
   portability:
     runs-on: ${{ matrix.os }}

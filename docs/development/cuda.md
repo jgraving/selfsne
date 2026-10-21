@@ -19,6 +19,13 @@ bash scripts/test-cuda-ubuntu.sh --install-driver
 The script detects the GPU and running driver, downloads uv and Python 3.12 into
 `.cuda-tools/`, creates `.venv-cuda/`, selects PyTorch with `--torch-backend=auto`,
 and executes a real CUDA kernel before running source and built-wheel validation.
+CUDA dependency resolution uses `--no-sources` to bypass the project's CPU-only
+`tool.uv.sources` entry; selecting a backend alone does not override that entry.
+Driver 535 uses the explicitly CUDA-tagged `torch==2.5.1+cu121` build rather than
+automatic selection, which can fall back to CPU on that driver. Override backend
+selection with `--torch-backend=cu121` when needed. A CPU-only wheel is a package
+selection failure and never authorizes a driver change, even with
+`--install-driver`.
 It restores the editable source installation after wheel validation, including on
 failure. Python packages, managed Python, download caches, and temporary files
 stay inside the checkout; shell profiles and global Python installs are unchanged.
@@ -63,7 +70,7 @@ With uv, from the checkout:
 
 ```sh
 uv venv --python 3.12 .venv-cuda
-uv pip install --python .venv-cuda/bin/python --torch-backend=cu130 -e '.[dev,data]'
+uv pip install --no-sources --python .venv-cuda/bin/python --torch-backend=cu130 -e '.[dev,data]'
 uv pip check --python .venv-cuda/bin/python
 .venv-cuda/bin/python -m pytest -m cuda --require-cuda -q --junitxml=cuda-source.xml
 ```
@@ -79,7 +86,7 @@ python -m pytest -m cuda --require-cuda -q --junitxml=cuda-source.xml
 
 `cu130` identifies CUDA 13.0 PyTorch wheels, not a Python version. Choose a
 backend compatible with the installed NVIDIA driver using the official PyTorch
-selector. The validation workflow also offers `cu126` and `cu128`; a passing run
+selector. The validation workflow also offers `cu121`, `cu126`, and `cu128`; a passing run
 only validates its recorded backend, package versions, and device. uv can select
 a backend automatically with `--torch-backend=auto`, but the validation workflow
 uses an explicit backend for identifiable results. A CUDA wheel installation
@@ -87,6 +94,9 @@ without working hardware/driver access does not pass `--require-cuda`.
 
 References: [uv PyTorch integration](https://docs.astral.sh/uv/guides/integration/pytorch/)
 and [PyTorch installation selector](https://pytorch.org/get-started/locally/).
+The CUDA 12.1 / PyTorch 2.5.1 option follows the
+[official previous-version wheels](https://pytorch.org/get-started/previous-versions/)
+and [NVIDIA's CUDA 12.1 driver requirements](https://docs.nvidia.com/cuda/archive/12.1.0/cuda-toolkit-release-notes/).
 
 ## Execution gate
 

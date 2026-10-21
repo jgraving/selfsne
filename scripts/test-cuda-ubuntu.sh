@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/test-cuda-ubuntu.sh [--install-driver]
+Usage: bash scripts/test-cuda-ubuntu.sh [--install-driver] [--torch-backend=cu121]
 
 Detect NVIDIA hardware/driver, download project-local uv and Python 3.12,
 install CUDA PyTorch, and test source plus the built wheel.
@@ -12,6 +12,8 @@ install CUDA PyTorch, and test source plus the built wheel.
 --install-driver permits sudo apt-get and Ubuntu's recommended driver installer
 ONLY if the driver or CUDA initialization is unavailable. Reboot and rerun
 after a driver installation. No automatic reboot, PPA, or CUDA toolkit install.
+--torch-backend selects an explicit CUDA wheel index instead of automatic
+selection. Driver 535 automatically uses PyTorch 2.5.1 with CUDA 12.1.
 EOF
 }
 
@@ -84,6 +86,9 @@ probe_cuda() {
 import torch
 
 print(f"PyTorch {torch.__version__}; bundled CUDA {torch.version.cuda}", flush=True)
+if torch.version.cuda is None:
+    print("A CPU-only PyTorch wheel was installed; this is not a driver failure.", flush=True)
+    raise SystemExit(40)
 if not torch.cuda.is_available():
     print("CUDA is unavailable; CPU fallback is disabled.", flush=True)
     raise SystemExit(30)
@@ -104,10 +109,12 @@ PY
 }
 
 main() {
-    local install_driver_allowed=false argument
+    local install_driver_allowed=false argument torch_backend=auto
     for argument in "$@"; do
         case "$argument" in
             --install-driver) install_driver_allowed=true ;;
+            --torch-backend=auto|--torch-backend=cu121|--torch-backend=cu126|--torch-backend=cu128|--torch-backend=cu130)
+                torch_backend=${argument#*=} ;;
             --help|-h) usage; return 0 ;;
             *) usage >&2; return 2 ;;
         esac
@@ -123,7 +130,20 @@ main() {
         return $?
     fi
 
-    local root tools python uv wheel wheel_directory restore_command probe_status
+    local root tools python uv wheel wheel_directory restore_command probe_status driver_version torch_requirement=torch
+    if [[ $torch_backend == auto ]]; then
+        driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
+        driver_version=${driver_version%%$'\n'*}
+        if [[ $driver_version == 535.* ]]; then
+            torch_backend=cu121
+            echo 'Driver 535 detected: selecting PyTorch 2.5.1 with CUDA 12.1.'
+        fi
+    fi
+    if [[ $torch_backend == cu121 ]]; then
+        # Require the CUDA local-version tag: an installed CPU build must not
+        # satisfy this requirement or remain selected from the CPU project index.
+        torch_requirement='torch==2.5.1+cu121'
+    fi
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
     tools="$root/.cuda-tools"
     python="$root/.venv-cuda/bin/python"
@@ -140,12 +160,18 @@ main() {
         # Refuse existing non-environments rather than deleting user files.
         "$uv" venv --managed-python --python 3.12 "$root/.venv-cuda"
     fi
-    "$uv" pip install --python "$python" --torch-backend=auto --reinstall-package torch -e '.[dev,data]'
+    # Ignore the checkout's CPU-only uv index configuration in this dedicated
+    # CUDA environment; project dependency metadata still comes from pyproject.
+    "$uv" --no-config pip install --no-sources --python "$python" "--torch-backend=$torch_backend" --reinstall-package torch --upgrade-package torch "$torch_requirement" -e '.[dev,data]'
     "$uv" pip check --python "$python"
     if probe_cuda; then
         :
     else
         probe_status=$?
+        if [[ $probe_status == 40 ]]; then
+            echo 'CPU wheel selection failed. Retry with --torch-backend=cu121 for driver 535; do not update the driver to fix CPU wheel selection.' >&2
+            return 1
+        fi
         if [[ $probe_status != 30 ]]; then
             echo 'The CUDA probe failed unexpectedly or this GPU could not execute the PyTorch build. Send the output for compatibility diagnosis; no driver changes were made.' >&2
             return 1

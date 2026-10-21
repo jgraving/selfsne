@@ -27,7 +27,7 @@ def bootstrap(tmp_path):
     uv.write_text(
         '#!/usr/bin/env bash\nset -eu\n'
         'echo "uv $*" >> "$TRACE"\n'
-        'if [[ $* == *--torch-backend=auto* ]]; then exit "${INSTALL_EXIT:-0}"; fi\n'
+        'if [[ $* == *--torch-backend=* ]]; then exit "${INSTALL_EXIT:-0}"; fi\n'
         'if [[ $1 == venv ]]; then\n'
         '  environment=${@: -1}\n'
         '  mkdir -p "$environment/bin"\n'
@@ -96,6 +96,30 @@ def test_missing_gpu_stops_before_installation(bootstrap):
     assert result.returncode != 0
     assert "No NVIDIA GPU" in result.stderr
     assert not trace
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_driver_535_selects_a_cuda_tagged_build(bootstrap, explicit):
+    run, _ = bootstrap
+    result, trace = run(
+        "--torch-backend=cu121" if explicit else "",
+        overrides='nvidia-smi() { echo "535.183.01"; }',
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--torch-backend=cu121" in trace
+    assert "torch==2.5.1+cu121" in trace
+    assert "--reinstall-package torch" in trace
+    assert "uv --no-config pip install" in trace
+    assert "--no-sources" in trace
+    assert "sudo " not in trace
+
+
+def test_cpu_only_build_never_triggers_driver_update(bootstrap):
+    run, _ = bootstrap
+    result, trace = run("--install-driver", PROBE_EXIT="40")
+    assert result.returncode != 0
+    assert "CPU wheel selection failed" in result.stderr
+    assert "sudo " not in trace and "-m pytest" not in trace
 
 
 def test_missing_driver_never_uses_sudo_without_option(bootstrap):

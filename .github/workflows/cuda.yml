@@ -5,7 +5,7 @@ on:
       backend:
         description: PyTorch CUDA backend compatible with the runner driver
         type: choice
-        options: [cu126, cu128, cu130]
+        options: [cu121, cu126, cu128, cu130]
         default: cu130
       installer:
         description: Installer to validate
@@ -31,10 +31,10 @@ jobs:
       - name: Install CUDA environment
         shell: bash
         run: |
-          case "$GPU_BACKEND" in cu126|cu128|cu130) ;; *) exit 2 ;; esac
+          case "$GPU_BACKEND" in cu121|cu126|cu128|cu130) ;; *) exit 2 ;; esac
           uv venv --python 3.12 --seed .venv-cuda
           if [ "$GPU_INSTALLER" = uv ]; then
-            uv pip install --python .venv-cuda/bin/python --torch-backend="$GPU_BACKEND" -e '.[dev,data]'
+            uv pip install --no-sources --python .venv-cuda/bin/python --torch-backend="$GPU_BACKEND" -e '.[dev,data]'
           elif [ "$GPU_INSTALLER" = pip ]; then
             .venv-cuda/bin/python -m pip install torch --index-url "https://download.pytorch.org/whl/$GPU_BACKEND"
             .venv-cuda/bin/python -m pip install -e '.[dev,data]'

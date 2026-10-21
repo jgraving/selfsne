@@ -38,7 +38,8 @@ def test_resumed_watershed_matches_uninterrupted_optimization(tmp_path):
     torch.testing.assert_close(resumed.watershed_assignments, continuous.watershed_assignments)
 
 
-def test_fresh_watershed_optimization_uses_current_component_means():
+def test_fresh_watershed_optimization_uses_current_component_means(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     prior = MixturePrior(num_features=2, num_components=3)
     with torch.no_grad():
         prior.locs.add_(10)

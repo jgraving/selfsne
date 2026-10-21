@@ -21,7 +21,10 @@ The pip CUDA environment `.venv-cuda-pip` works with the same commands. Use
 `--accelerator cpu` for a small CPU check. GPU requests fail if CUDA is unavailable.
 GPU precision options are `32-true` (default), `16-mixed`, and `bf16-mixed`.
 Float16 uses dynamic loss scaling starting at 1024 (`--amp-initial-scale`), rather
-than 65536, so calibration does not consume most of a short validation run. The
+than 65536, to reduce calibration skips in short validation runs. This change
+still awaits hardware confirmation; the latest expanded CUDA run passed 27/28
+source cases and stopped at Swiss-roll float16 before wheel testing. See the
+[CUDA validation record](cuda.md#current-validation-status). The
 scaler state is restored from checkpoints. The finite-step acceptance requirement
 is unchanged: finite optimizer steps must outnumber safely skipped overflow steps.
 `status.json` reports both counts and the final AMP scale, including on failure.
@@ -91,3 +94,22 @@ statistics. `status.json` records pass/fail and the last finite objective. Resum
 refreshes these outputs. A failed run may leave earlier exports; always inspect
 status before using them. Tests check finite objectives/gradients/updates, shapes,
 noise scaling, window boundaries, checkpoint equivalence and export row order.
+
+## Swiss-roll maintainer notebook
+
+[`notebooks/swiss_roll.ipynb`](../../notebooks/swiss_roll.ipynb) provides a small
+CPU-first check in an existing development environment. It calls this workflow
+with the notebook kernel's Python executable, trains one epoch, resumes to two
+total epochs, reconstructs the saved model, verifies ordered clean-target exports,
+and optionally plots the data and embeddings when Matplotlib is available.
+Outputs go to a newly created temporary run directory printed by the notebook;
+copy that directory elsewhere if you need to retain it. Run cells top to bottom
+from the checkout root or its `notebooks` directory. Start a fresh run when
+re-executing the configuration cell; individual train/resume cells are not
+idempotent, because existing runs and completed epoch requests are rejected.
+
+The notebook contains no package installers, automatic device selection,
+divergence sweeps, or precomputed experiment outputs. It checks software behavior;
+two epochs on 129 points do not establish Swiss-roll unrolling or equivariance.
+Its code cells execute in CPU regression tests, including environments without
+Matplotlib; plotting is checked when the maintainer plot extra is present.

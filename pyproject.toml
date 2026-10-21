@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{name = "Jacob Graving", email = "jgraving@gmail.com"}]
 dependencies = [
-    "numpy>=1.24", "scipy>=1.10", "torch>=2.4", "pytorch-lightning>=2.0,<3",
+    "numpy>=1.24", "scipy>=1.10", "torch>=2.4", "pytorch-lightning>=2.4,<3",
     "einops>=0.6", "tqdm>=4.64",
 ]
 

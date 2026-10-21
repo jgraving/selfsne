@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.10"
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
-    "(python_full_version < '3.11' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version < '3.11' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform == 'win32')",
     "python_full_version < '3.11' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
@@ -553,8 +553,8 @@ version = "4.2.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d8/28/3893324bcadf8f89b1616637468d766af3f625008c0735bf704fdfa86617/filelock-4.2.4.tar.gz", hash = "sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d", size = 652444, upload-time = "2026-10-19T01:57:51.001Z" }
@@ -645,8 +645,8 @@ version = "4.67.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/94/36/102e180f8f5dbaee88b26595b01ca8aa80bf4e62128d9aa94265b3996c96/fonttools-4.67.0.tar.gz", hash = "sha256:3cb57e6600ca77c0b1729cf8adc23bc0652633a37f18cfa934d9c7bc3de25519", size = 3750028, upload-time = "2026-10-14T13:20:28.294Z" }
@@ -937,8 +937,8 @@ version = "2.38.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
@@ -1407,8 +1407,8 @@ version = "3.11.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
@@ -2066,8 +2066,8 @@ version = "13.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ce/a4/9cc30690a394a8305e8be4c9036aa16d0dfddadd09079860b582f562496d/pillow-13.0.0.tar.gz", hash = "sha256:cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510", size = 47058631, upload-time = "2026-10-16T22:18:09.718Z" }
@@ -2538,8 +2538,8 @@ version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
@@ -2662,8 +2662,8 @@ version = "1.9.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
@@ -2984,7 +2984,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.6" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7" },
-    { name = "pytorch-lightning", specifier = ">=2.0,<3" },
+    { name = "pytorch-lightning", specifier = ">=2.4,<3" },
     { name = "rich", marker = "extra == 'rich'", specifier = ">=13" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "scikit-image", marker = "extra == 'plot'", specifier = ">=0.20" },
@@ -3086,8 +3086,8 @@ version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "(python_full_version >= '3.12' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'win32')",
-    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version >= '3.12' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version == '3.11.*' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform == 'win32')",
     "python_full_version == '3.11.*' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [

@@ -1,0 +1,10 @@
+# Minimum direct runtime dependencies, tested on Linux / Python 3.10.
+numpy==1.24.0
+scipy==1.10.0
+torch==2.4.0
+pytorch-lightning==2.4.0
+einops==0.6.0
+tqdm==4.64.0
+# The data extra is needed by the representative acceptance workflow.
+h5py==3.8.0
+scikit-learn==1.2.0

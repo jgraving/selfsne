@@ -170,12 +170,18 @@ class TensorDataLoader(DataLoader):
         device=None,
         **kwargs,
     ):
-        self.tensor_dataset = (
-            torch.as_tensor(dataset)
-            .detach()
-            .to(device=device, dtype=torch.float32)
-            .clone()
-        )
+        if isinstance(dataset, np.ndarray):
+            # Establish ownership and normalize byte order/strides before
+            # crossing into PyTorch, including read-only memory maps.
+            owned = np.array(dataset, dtype=np.float32, order="C", copy=True)
+            self.tensor_dataset = torch.from_numpy(owned).to(device=device)
+        else:
+            self.tensor_dataset = (
+                torch.as_tensor(dataset)
+                .detach()
+                .to(device=device, dtype=torch.float32)
+                .clone()
+            )
         self.shuffle = shuffle
         super().__init__(
             self.tensor_dataset,
@@ -199,6 +205,9 @@ class _NumpyDataset(Dataset):
         if (
             isinstance(array, np.memmap)
             and array.filename is not None
+            # Private edits in a copy-on-write mapping are absent from disk.
+            # Serialize their values instead of reopening the original file.
+            and array.mode != "c"
             and (array.flags.c_contiguous or array.flags.f_contiguous)
         ):
             root = array

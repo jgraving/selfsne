@@ -207,8 +207,14 @@ def test_hdf5_can_be_read_by_a_loader_worker(tmp_path, context):
     reason="Worker process tests require /proc on Linux.",
 )
 @pytest.mark.parametrize("loader_class", [TensorDataLoader, NumpyDataLoader])
-def test_array_loaders_support_spawned_workers(loader_class):
+@pytest.mark.parametrize("storage", ["array", "copy_on_write"])
+def test_array_loaders_support_spawned_workers(loader_class, storage, tmp_path):
     data = np.arange(16).reshape(8, 2)
+    if storage == "copy_on_write":
+        path = tmp_path / "array.npy"
+        np.save(path, data)
+        data = np.load(path, mmap_mode="c")
+        data[0] = -123
     loader = loader_class(
         data,
         batch_size=4,

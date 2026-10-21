@@ -14,6 +14,14 @@ This does not change the development status or authorize a public release.
 | `TensorDataLoader` | Owns a detached float32 copy of its input. Normal sampler, generator, batching, and collation options apply. |
 | `NumpyDataLoader` | Converts requested rows/batches to float32 without materializing the complete array or memory map. Normal loader options and Lightning prediction reconstruction apply. |
 
+Both array loaders accept reversed, Fortran-order, read-only, and non-native-endian
+NumPy arrays. `TensorDataLoader` copies the full input at construction;
+`NumpyDataLoader` reads its current values as batches are requested. Contiguous
+file-backed memory maps reopen from a small descriptor in spawned workers.
+Copy-on-write maps serialize their values to preserve private edits, so those
+maps can incur a full copy per spawned worker. Use a read-only or shared writable
+mapping when file-backed worker access is required.
+
 For the supported tabular path, inputs have shape `(batch, features)` and encoder
 outputs have shape `(batch, embedding_features)`. Context and target must have
 matching nonempty batch dimensions. Loss input embedding shapes must match.

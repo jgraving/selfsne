@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import contextmanager
+
 import torch
 import torch.distributions as D
 from torch import nn
@@ -25,7 +27,25 @@ import pytorch_lightning as pl
 
 from selfsne.kernels import ROWWISE_KERNELS
 from selfsne.baselines import BASELINES
-from selfsne.utils import disable_grad, enable_grad, stop_gradient, inverse_softplus
+from selfsne.utils import stop_gradient, inverse_softplus
+
+
+@contextmanager
+def _frozen_prior(module):
+    """Evaluate a prior without parameter gradients, preserving its caller's state."""
+    modes = [(child, child.training) for child in module.modules()]
+    parameters = [(parameter, parameter.requires_grad) for parameter in module.parameters()]
+    try:
+        module.eval()
+        for parameter, _ in parameters:
+            parameter.requires_grad_(False)
+        yield
+    finally:
+        for parameter, requires_grad in parameters:
+            parameter.requires_grad_(requires_grad)
+        # Restore each child directly: train() would overwrite mixed child modes.
+        for child, training in modes:
+            child.training = training
 
 
 class NormalPrior(pl.LightningModule):
@@ -43,10 +63,8 @@ class NormalPrior(pl.LightningModule):
         return D.Normal(self.loc, F.softplus(self.log_scale)).log_prob(x)
 
     def rate(self, x):
-        disable_grad(self)
-        rate = self.log_prob(x)
-        enable_grad(self)
-        return rate
+        with _frozen_prior(self):
+            return self.log_prob(x)
 
 
 class MixturePrior(pl.LightningModule):
@@ -123,10 +141,8 @@ class MixturePrior(pl.LightningModule):
         )
 
     def rate(self, x):
-        disable_grad(self)
-        rate = self.log_prob(x)
-        enable_grad(self)
-        return rate
+        with _frozen_prior(self):
+            return self.log_prob(x)
 
     def assign_modes(self, x):
         return self.weighted_log_prob(x).argmax(0)

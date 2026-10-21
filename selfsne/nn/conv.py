@@ -65,15 +65,58 @@ class Conv1d(nn.Conv1d):
     def __init__(
         self, in_channels, out_channels, kernel_size=3, dilation=1, stride=1, **kwargs
     ):
-        pad = ((kernel_size - 1) * dilation) // 2
+        total = (kernel_size - 1) * dilation
+        self._temporal_padding = (total // 2, total - total // 2)
         super().__init__(
             in_channels,
             out_channels,
             kernel_size,
             dilation=dilation,
             stride=stride,
-            padding=pad,
+            padding=0,
             **kwargs,
+        )
+
+    def forward(self, x):
+        mode = "constant" if self.padding_mode == "zeros" else self.padding_mode
+        return super().forward(F.pad(x, self._temporal_padding, mode=mode))
+
+
+class _TemporalPadding:
+    """Convolve along the last axis while preserving all spatial dimensions."""
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, dilation=1, causal=False
+    ):
+        total = (kernel_size - 1) * dilation
+        self._temporal_padding = (
+            (total, 0) if causal else (total // 2, total - total // 2)
+        )
+        spatial = (1,) * (self._dimensions - 1)
+        super().__init__(
+            in_channels,
+            out_channels,
+            kernel_size=(*spatial, kernel_size),
+            dilation=(*spatial, int(dilation)),
+            padding=0,
+        )
+
+    def forward(self, x):
+        return super().forward(F.pad(x, self._temporal_padding))
+
+
+class _TemporalConv2d(_TemporalPadding, nn.Conv2d):
+    _dimensions = 2
+
+
+class _TemporalConv3d(_TemporalPadding, nn.Conv3d):
+    _dimensions = 3
+
+
+def _validate_causal_normalization(causal, batch_norm):
+    if causal and batch_norm:
+        raise ValueError(
+            "batch_norm=True uses future timesteps and cannot be combined with causal=True."
         )
 
 
@@ -90,7 +133,10 @@ def TCN(
 ):
     """
     Temporal Convolution Network (TCN) for 1D sequences.
+
+    Causal networks exclude future timesteps; batch_norm must be False.
     """
+    _validate_causal_normalization(causal, batch_norm)
     conv1d = CausalConv1d if causal else Conv1d
     layers = []
     if causal and causal_shift:
@@ -134,10 +180,15 @@ def TCN2d(
     batch_norm=False,
 ):
     """
-    Temporal Convolution Network (TCN) for 2D data.
+    Temporal Convolution Network (TCN) over the last axis of 2D data.
+
+    Causal networks exclude future timesteps; batch_norm must be False.
     """
-    conv = nn.Conv2d
+    _validate_causal_normalization(causal, batch_norm)
+    conv = _TemporalConv2d
     layers = []
+    if causal and causal_shift:
+        layers.append(PadShift())
     layers.append(init_linear(nn.Conv2d(in_channels, hidden_channels, (1, 1))))
     layers.append(nn.SELU())
 
@@ -151,9 +202,9 @@ def TCN2d(
                     conv(
                         hidden_channels,
                         hidden_channels,
-                        kernel_size=(1, kernel_size),
-                        dilation=(1, dilation),
-                        padding=(0, ((kernel_size - 1) * dilation // 2)),
+                        kernel_size=kernel_size,
+                        dilation=dilation,
+                        causal=causal,
                     )
                 ),
                 nn.SELU(),
@@ -179,10 +230,17 @@ def TCN3d(
     batch_norm=False,
 ):
     """
-    Temporal Convolution Network (TCN) for 3D data.
+    Temporal Convolution Network (TCN) over the last axis of 3D data.
+
+    Causal networks exclude future timesteps; batch_norm must be False.
+    Set residual=True to enable skip connections around blocks.
     """
-    conv = nn.Conv3d
+    _validate_causal_normalization(causal, batch_norm)
+    conv = _TemporalConv3d
+    wrap = Residual if residual else lambda module: module
     layers = []
+    if causal and causal_shift:
+        layers.append(PadShift())
     layers.append(init_linear(nn.Conv3d(in_channels, hidden_channels, (1, 1, 1))))
     layers.append(nn.SELU())
 
@@ -196,16 +254,16 @@ def TCN3d(
                     conv(
                         hidden_channels,
                         hidden_channels,
-                        kernel_size=(1, 1, kernel_size),
-                        dilation=(1, 1, dilation),
-                        padding=(0, 0, ((kernel_size - 1) * dilation // 2)),
+                        kernel_size=kernel_size,
+                        dilation=dilation,
+                        causal=causal,
                     )
                 ),
                 nn.SELU(),
             )
             layer_list.append(layer)
-        block_list.append(Residual(nn.Sequential(*layer_list)))
-    layers.append(Residual(nn.Sequential(*block_list)))
+        block_list.append(wrap(nn.Sequential(*layer_list)))
+    layers.append(wrap(nn.Sequential(*block_list)))
     layers.append(nn.BatchNorm3d(hidden_channels) if batch_norm else nn.Identity())
     layers.append(init_linear(nn.Conv3d(hidden_channels, out_channels, (1, 1, 1))))
     return nn.Sequential(*layers)

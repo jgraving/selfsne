@@ -13,7 +13,7 @@ Multi-GPU/distributed training and MPS are separate, unverified targets.
 For a native Ubuntu NVIDIA machine, run from the checkout as your normal user:
 
 ```sh
-bash scripts/test-cuda-ubuntu.sh --install-driver
+bash scripts/test-cuda-ubuntu.sh
 ```
 
 For pip installation validation, use `--installer=pip` without a driver flag on
@@ -23,7 +23,8 @@ uv provisions the isolated Python interpreter; pip installs the CUDA wheel,
 project dependencies, built wheel, and final editable source. The existing uv
 environment and reports are retained. Driver 535 selects CUDA 12.1 automatically;
 other drivers need an explicit `--torch-backend` with this pip path. Its command
-orchestration is tested in CPU CI; real pip CUDA execution is still pending.
+orchestration is tested in CPU CI. The earlier 22-test core suite also passed
+real pip CUDA source and wheel execution; see the scoped evidence below.
 
 The script detects the GPU and running driver, downloads uv and Python 3.12 into
 `.cuda-tools/`, creates `.venv-cuda/`, selects PyTorch with `--torch-backend=auto`,
@@ -62,12 +63,13 @@ sudo apt-get update
 sudo apt-get install -y git curl
 git clone https://github.com/jgraving/selfsne.git
 cd selfsne
-bash scripts/test-cuda-ubuntu.sh --install-driver
+bash scripts/test-cuda-ubuntu.sh
 ```
 
-Bootstrap orchestration is covered with mocked commands in CPU CI. CUDA source
-and wheel execution has passed on the configuration recorded below. System
-driver installation remains untested; that run reused its existing driver.
+Bootstrap orchestration is covered with mocked commands in CPU CI. The earlier
+core CUDA suite passed source and wheel execution on the configuration recorded
+below; expanded-suite acceptance remains open. System driver installation is
+untested; the recorded runs reused the existing driver.
 
 ### Manual environments
 
@@ -144,10 +146,22 @@ The suite must execute on real CUDA hardware, not merely collect or skip tests:
 
 ## Current validation status
 
-The uv source and installed-wheel path passed on real hardware at commit
+Evidence reviewed on 2026-10-21 comes from local hardware runs reported by the
+maintainer, not GPU execution in hosted CI. Keep the following scopes separate:
+
+| Scope | Installer | Source | Installed wheel | Status |
+| --- | --- | --- | --- | --- |
+| Earlier 22-test core suite | uv | 22 passed | 22 passed | Validated for that run |
+| Earlier 22-test core suite | pip | 22 passed | 22 passed | Validated for that run |
+| Expanded suite including context transformers | uv | 27 passed, 1 failed | Not reached | Acceptance failed |
+| Expanded suite after float16 calibration fix | uv / pip | Pending hardware execution | Pending hardware execution | Unverified |
+
+The original uv evidence identified commit
 [`3139bbd`](https://github.com/jgraving/selfsne/commit/3139bbd41447ac10ac91ae24762518c3822c706c).
-Evidence is a user-supplied terminal transcript reviewed on 2026-10-21; this is a
-local hardware run, not a GPU execution in hosted CI.
+Separate reviewed evidence confirmed the pip core-suite pass. Exact checkout SHAs
+for the later pip and expanded-suite runs were not captured in the available
+validation record; do not attribute those passes to an inferred commit. Raw terminal
+transcripts are not published because they can contain unrelated private details.
 
 | Configuration | Recorded value |
 | --- | --- |
@@ -156,23 +170,38 @@ local hardware run, not a GPU execution in hosted CI.
 | PyTorch / bundled CUDA | 2.5.1+cu121 / 12.1 |
 | NVIDIA driver | 535.183.01, reused without driver installation |
 | GPU | RTX A5000, 24 GB; one device used for training |
-| Installation | uv via `scripts/test-cuda-ubuntu.sh` |
-| Source acceptance | 22 passed, no failures or skips |
-| Installed-wheel acceptance | 22 passed, no failures or skips |
+| Installation | Separate uv and pip environments via `scripts/test-cuda-ubuntu.sh` |
 
-Float32, float16 mixed precision, and bfloat16 mixed precision all passed,
+Within the earlier core-suite runs, float32, float16 mixed precision, and
+bfloat16 mixed precision all passed,
 including checkpoint state equality, CPU/GPU prediction comparisons, matched-
 precision GPU prediction restoration, and epoch-boundary resume. Both detected
 GPUs passed the initial kernel probe; training used a single device and does not
 establish distributed or multi-GPU training. After wheel validation the script
 successfully restored the editable source installation.
 
-The run generated `.cuda-tools/reports/cuda-source.xml` and `cuda-wheel.xml` on
-the test machine. Those XML files were not supplied with the transcript, so no
-numerical memory, throughput, or AMP skipped-step counts are claimed here.
-The pip CUDA installer, system driver installation, and other GPU/backend
-combinations remain unverified. CPU CI continues to exercise mixed-precision
-regressions while skipping hardware-only cases; CPU CI alone is not CUDA evidence.
+The expanded suite adds six context-transformer cases: Swiss roll and von Mises
+walks, each in float32, float16, and bfloat16. All 22 core cases and five of those
+six new cases passed source testing in the latest supplied run. Swiss-roll
+float16 failed because finite optimizer steps did not outnumber safely skipped
+AMP overflow steps in its three-step training run. The source-stage failure
+stopped the script before any installed-wheel tests; it was not a wheel pass.
+
+[PR #30](https://github.com/jgraving/selfsne/pull/30), merged at
+[`15594f3`](https://github.com/jgraving/selfsne/commit/15594f3dbc27ffcb8abac9d639a80c20b5ffbdde),
+lowered the synthetic float16 initial loss scale from 65536 to 1024, retained the
+finite-update gate, and added finite/skipped-step and scale diagnostics. CPU
+regressions and all eight CPU CI jobs passed. The changed GPU path has **not** been
+confirmed on hardware. GPU CI setup is paused; CPU tests or saved infrastructure
+files do not resolve this acceptance gap.
+
+Hardware runs generate `.cuda-tools/reports/cuda-source.xml` and `cuda-wheel.xml`;
+pip reports are under `.cuda-tools/reports/pip/`. XML files were not supplied with
+the reviewed transcripts, so no numerical memory, throughput, or AMP skipped-step
+counts are claimed here. System driver installation, distributed/multi-GPU
+training, and other GPU/backend combinations remain unverified. CPU CI continues
+to exercise mixed-precision regressions while skipping hardware-only cases;
+CPU CI alone is not CUDA evidence.
 
 Built-in likelihood kernels compute distances/reductions in float32 under
 mixed precision. Custom kernels retain their own precision behavior and require

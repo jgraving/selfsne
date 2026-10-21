@@ -3,8 +3,11 @@
 Maintainer validation scope, not a release announcement or public usage guide.
 The project remains under development. Passing this gate permits a private CPU
 alpha evaluation; it does not authorize a public release. GPU readiness additionally
-requires the separate [CUDA gate](cuda.md). Its uv source/wheel path has passed
-on the recorded RTX A5000 configuration; the pip CUDA installer path is pending.
+requires the separate [CUDA gate](cuda.md). The earlier 22-test core suite passed
+source and wheel acceptance with both uv and pip on the recorded RTX A5000 setup.
+The expanded 28-test suite subsequently failed its Swiss-roll float16 source case;
+its float16 calibration fix still awaits hardware confirmation. Earlier passes do
+not establish acceptance of the expanded suite or every later commit.
 
 ## Supported evaluation path
 

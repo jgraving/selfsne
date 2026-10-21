@@ -114,9 +114,15 @@ The suite must execute on real CUDA hardware, not merely collect or skip tests:
 - A roughly million-parameter MLP trains in float32 and float16 mixed precision
   on 28,752 augmented digit vectors. This scales a real-data workload; it is not
   a new independent dataset or an embedding-quality benchmark.
-- Training losses, parameters, gradients, and predictions stay finite; parameters
-  update and embeddings retain spread. Low-precision predictions export float32
-  NumPy arrays. CPU/GPU prediction comparisons use precision-specific tolerances.
+- Training losses, parameters, and predictions stay finite; parameters update
+  and embeddings retain spread. Nonfinite gradients are allowed only when AMP
+  reduces its loss scale and skips the update with every parameter unchanged.
+  Finite optimizer steps must outnumber skipped steps; bfloat16 and float32 have
+  no loss scaler and must always have finite gradients. Reports retain both counts.
+  Low-precision predictions export float32 NumPy arrays. CPU/GPU checkpoint
+  predictions are compared in float32; restored GPU predictions are compared at
+  the original training precision. Cross-precision prediction error is reported
+  separately and is not a checkpoint equivalence criterion.
 - CUDA-trained checkpoints load on CPU and return to CUDA with matching outputs;
   fixed-order epoch resume reproduces uninterrupted model and optimizer state.
 - Reports record GPU identity, PyTorch/CUDA runtime, precision, sample/model size,
@@ -127,7 +133,14 @@ The suite must execute on real CUDA hardware, not merely collect or skip tests:
 
 ## Current validation status
 
-CUDA hardware execution is pending. CPU CI exercises the mixed-precision safety
+The first user-reported source run at `4e78b4f` on an RTX A5000 with driver
+535.183.01, PyTorch 2.5.1+cu121, and Python 3.12.15 passed 20 of 22 CUDA cases.
+Float32 training, loss/gradient comparisons, queues, and epoch resume passed.
+The float16 gradient monitor and bfloat16 cross-precision comparison failed;
+the installed-wheel stage was not reached. The revised monitor and matched-
+precision checkpoint comparisons still require a hardware rerun.
+
+Complete CUDA hardware acceptance is pending. CPU CI exercises the mixed-precision safety
 regressions and skips hardware-only cases. Those green CPU jobs cannot satisfy
 this gate. The manual workflow must produce passing source and wheel reports on
 an actual GPU before CUDA support is marked validated.

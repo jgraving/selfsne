@@ -1,0 +1,67 @@
+name: CUDA validation
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: PyTorch CUDA backend compatible with the runner driver
+        type: choice
+        options: [cu126, cu128, cu130]
+        default: cu130
+      installer:
+        description: Installer to validate
+        type: choice
+        options: [uv, pip]
+        default: uv
+permissions:
+  contents: read
+jobs:
+  cuda:
+    runs-on: [self-hosted, linux, x64, cuda]
+    timeout-minutes: 45
+    env:
+      GPU_BACKEND: ${{ inputs.backend }}
+      GPU_INSTALLER: ${{ inputs.installer }}
+      CUBLAS_WORKSPACE_CONFIG: ':4096:8'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+      - name: Install CUDA environment
+        shell: bash
+        run: |
+          case "$GPU_BACKEND" in cu126|cu128|cu130) ;; *) exit 2 ;; esac
+          uv venv --python 3.12 --seed .venv-cuda
+          if [ "$GPU_INSTALLER" = uv ]; then
+            uv pip install --python .venv-cuda/bin/python --torch-backend="$GPU_BACKEND" -e '.[dev,data]'
+          elif [ "$GPU_INSTALLER" = pip ]; then
+            .venv-cuda/bin/python -m pip install torch --index-url "https://download.pytorch.org/whl/$GPU_BACKEND"
+            .venv-cuda/bin/python -m pip install -e '.[dev,data]'
+          else
+            exit 2
+          fi
+          echo "$GITHUB_WORKSPACE/.venv-cuda/bin" >> "$GITHUB_PATH"
+      - name: Check driver and dependencies
+        run: |
+          nvidia-smi
+          python -m pip check
+          python -c "import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available(), 'CUDA hardware is required; no CPU fallback'"
+      - name: CUDA source acceptance
+        run: python -m pytest -m cuda --require-cuda -q --junitxml=cuda-source.xml
+      - run: python -m build
+      - name: Install built wheel without replacing CUDA PyTorch
+        run: python -m pip install --force-reinstall --no-deps dist/*.whl
+      - name: CUDA installed-wheel acceptance
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest --import-mode=importlib -m cuda --require-cuda -q "$GITHUB_WORKSPACE/tests" --junitxml="$GITHUB_WORKSPACE/cuda-wheel.xml"
+      - name: Preserve hardware validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuda-${{ inputs.backend }}-${{ inputs.installer }}
+          path: |
+            cuda-source.xml
+            cuda-wheel.xml
+          if-no-files-found: ignore
+          retention-days: 14

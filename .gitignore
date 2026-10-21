@@ -132,3 +132,8 @@ pytest-of-root/
 build-env-*/
 build-via-sdist-*/
 build-requirements-*.txt
+
+# Dedicated CUDA development environment and hardware reports
+.venv-cuda/
+cuda-source.xml
+cuda-wheel.xml

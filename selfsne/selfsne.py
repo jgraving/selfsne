@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 
+def _prediction_numpy(value):
+    value = value.detach().cpu()
+    if value.dtype in (torch.float16, torch.bfloat16):
+        value = value.float()
+    return value.numpy()
+
+
 def get_lr_scheduler(
     optimizer: optim.Optimizer,
     warmup_steps: int,
@@ -404,17 +411,15 @@ class SelfSNE(pl.LightningModule):
         if self.hparams.return_embeddings:
             output.update(
                 {
-                    "context_embedding": context_embedding.detach().cpu().numpy(),
-                    "target_embedding": target_embedding.detach().cpu().numpy(),
+                    "context_embedding": _prediction_numpy(context_embedding),
+                    "target_embedding": _prediction_numpy(target_embedding),
                 }
             )
 
             if baseline_embedding is not None:
-                output["baseline_embedding"] = baseline_embedding.detach().cpu().numpy()
+                output["baseline_embedding"] = _prediction_numpy(baseline_embedding)
             if reference_embedding is not None:
-                output["reference_embedding"] = (
-                    reference_embedding.detach().cpu().numpy()
-                )
+                output["reference_embedding"] = _prediction_numpy(reference_embedding)
 
         if self.hparams.return_logits:
             logits = self.loss.logits(
@@ -424,7 +429,7 @@ class SelfSNE(pl.LightningModule):
                 baseline_embedding=baseline_embedding,
             )
             for key, value in logits.items():
-                output[key] = value.detach().cpu().numpy()
+                output[key] = _prediction_numpy(value)
 
         return output
 

@@ -29,12 +29,13 @@ include = ["selfsne*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["cuda: requires actual CUDA hardware", "cuda_bf16: requires CUDA bfloat16 support"]
 
 [tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82"]
 
 # CPU wheels keep the default uv install small and usable without CUDA.
-# Use `uv sync --no-sources` for PyTorch's default index (including GPU builds).
+# CUDA environments select an explicit backend with uv pip; see docs/development/cuda.md.
 [tool.uv.sources]
 torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
 

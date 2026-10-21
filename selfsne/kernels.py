@@ -74,7 +74,7 @@ def studentt(
     Computes the log Student's t kernel between two sets of points x1 and x2.
 
     The log Student's t kernel is defined as:
-    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / dim) * (dim + 1) / 2
+    K(x1, x2) = - log(1 + ||x1 - x2||_2^2 / (scale^2 * dim)) * (dim + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size, dim).
@@ -84,7 +84,8 @@ def studentt(
         torch.Tensor: The row-wise Student's t kernel matrix, of shape (batch_size,).
     """
     dim = x1.shape[-1]  # df = dim
-    return (x1 - x2).pow(2).sum(-1).div(dim).log1p().neg() * (dim + 1) / 2
+    squared_distance = (x1 - x2).pow(2).sum(-1)
+    return -squared_distance.div(scale**2 * dim).log1p() * (dim + 1) / 2
 
 
 def pairwise_studentt(
@@ -96,7 +97,7 @@ def pairwise_studentt(
     Computes the pairwise log Student's t kernel between two sets of points x1 and x2.
 
     The pairwise log Student's t kernel is defined as:
-    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / dim) * (dim + 1) / 2
+    K(x1_i, x2_j) = - log(1 + ||x1_i - x2_j||_2^2 / (scale^2 * dim)) * (dim + 1) / 2
 
     Args:
         x1 (torch.Tensor): The first set of points, of shape (batch_size_1, dim).
@@ -106,7 +107,8 @@ def pairwise_studentt(
         torch.Tensor: The pairwise Student's t kernel matrix, of shape (batch_size_1, batch_size_2).
     """
     dim = x1.shape[-1]  # df = dim
-    return torch.cdist(x1, x2, p=2).pow(2).div(dim).log1p().neg() * (dim + 1) / 2
+    squared_distance = torch.cdist(x1, x2, p=2).pow(2)
+    return -squared_distance.div(scale**2 * dim).log1p() * (dim + 1) / 2
 
 
 def cauchy(

@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.plugins.precision import MixedPrecision
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -30,6 +31,21 @@ from selfsne.nn import (
 from selfsne.transformers import TransformerEncoder
 
 from paired_workflow import TrainingHealth, trainer_for, write_json
+
+
+def amp_plugin(config):
+    if config["precision"] != "16-mixed":
+        return None
+    device = "cuda" if config["accelerator"] == "gpu" else "cpu"
+    # The default 65536 scale can consume a tiny validation run in overflow
+    # calibration. Keep dynamic scaling and strict finite-update acceptance.
+    return MixedPrecision(
+        "16-mixed",
+        device,
+        scaler=torch.amp.GradScaler(
+            device, init_scale=config.get("amp_initial_scale", 1024)
+        ),
+    )
 
 
 class ContextEncoder(nn.Module):
@@ -239,7 +255,18 @@ class EpochSeed(pl.Callback):
 
     def on_train_end(self, trainer, pl_module):
         if self.finite_steps <= self.skipped_steps:
-            raise ValueError("Training did not complete enough finite optimizer steps")
+            raise ValueError(
+                "Training did not complete enough finite optimizer steps: "
+                f"finite={self.finite_steps}, skipped={self.skipped_steps}"
+            )
+
+    def diagnostics(self, trainer):
+        scaler = getattr(trainer.precision_plugin, "scaler", None)
+        return {
+            "finite_steps": self.finite_steps,
+            "skipped_steps": self.skipped_steps,
+            "amp_scale": scaler.get_scale() if scaler is not None else None,
+        }
 
 
 def export(model, config, data, run):
@@ -304,6 +331,9 @@ def evaluate(config, data, labels, run):
 
 
 def validate(config):
+    initial_scale = config.get("amp_initial_scale", 1024)
+    if not math.isfinite(initial_scale) or initial_scale <= 0:
+        raise ValueError("amp_initial_scale must be positive and finite")
     for key in (
         "samples",
         "batch_size",
@@ -369,12 +399,14 @@ def execute(args):
     if len(batches) < 1:
         raise ValueError("batch_size exceeds available training samples")
     health = TrainingHealth()
+    epoch_health = EpochSeed(batches)
     trainer = trainer_for(
         config,
+        precision_plugin=amp_plugin(config),
         max_epochs=args.epochs,
         callbacks=[
             ModelCheckpoint(dirpath=run, save_last=True, save_top_k=0),
-            EpochSeed(batches),
+            epoch_health,
             health,
         ],
     )
@@ -403,11 +435,17 @@ def execute(args):
                 "embedding_shape": [len(data), config["embedding_dim"]],
                 "cuda_validated": config["accelerator"] == "gpu",
                 "torch": torch.__version__,
+                "training_health": epoch_health.diagnostics(trainer),
             },
         )
     except Exception:
         write_json(
-            run / "status.json", {"status": "failed", "requested_epochs": args.epochs}
+            run / "status.json",
+            {
+                "status": "failed",
+                "requested_epochs": args.epochs,
+                "training_health": epoch_health.diagnostics(trainer),
+            },
         )
         raise
 
@@ -432,6 +470,7 @@ def main():
     ]:
         train.add_argument("--" + name, type=int, default=default)
     train.add_argument("--learning-rate", type=float, default=3e-4)
+    train.add_argument("--amp-initial-scale", type=float, default=1024)
     train.add_argument("--divergence", choices=["kld", "jsd", "rkld"], default="kld")
     train.add_argument("--accelerator", choices=["cpu", "gpu"], default="cpu")
     train.add_argument(

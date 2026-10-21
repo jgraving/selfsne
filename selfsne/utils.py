@@ -128,7 +128,7 @@ def shuffle_rows(tensor: torch.Tensor) -> torch.Tensor:
         >>> shuffled.shape
         torch.Size([10, 20])
     """
-    return tensor[torch.randperm(tensor.shape[0])]
+    return tensor[torch.randperm(tensor.shape[0], device=tensor.device)]
 
 
 def disable_grad(module: torch.nn.Module) -> None:

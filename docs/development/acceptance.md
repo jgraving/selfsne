@@ -2,7 +2,8 @@
 
 Maintainer validation scope, not a release announcement or public usage guide.
 The project remains under development. Passing this gate permits a private CPU
-alpha evaluation; it does not authorize a public release.
+alpha evaluation; it does not authorize a public release. GPU readiness additionally
+requires the separate [CUDA gate](cuda.md), whose hardware execution is pending.
 
 ## Supported evaluation path
 
@@ -16,7 +17,8 @@ alpha evaluation; it does not authorize a public release.
   and epoch-boundary optimizer/scheduler resume with a fixed data order.
 
 Other architectures and objectives keep their existing regression tests, but
-are outside this initial acceptance promise. CUDA, MPS, mixed precision,
+are outside this CPU acceptance promise. CUDA and GPU mixed precision have a separate
+required hardware gate. MPS,
 multiple devices, other Python versions, exact replay of shuffled or mid-epoch
 runs, noise transforms, plots, and callbacks are not acceptance targets.
 

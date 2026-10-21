@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import math
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -167,6 +168,23 @@ class LikelihoodRatioEstimator(nn.Module):
 
         return sorted(expanded)
 
+    def _kernel_call(self, x, y, scale):
+        if not any(self.kernel is kernel for kernel in ROWWISE_KERNELS.values()):
+            return self.kernel(x, y, scale)
+        # Distance reductions can overflow in float16; angular/inverse kernels
+        # also need float32 epsilon and reduction precision under autocast.
+        context = (
+            torch.autocast(device_type=x.device.type, enabled=False)
+            if x.device.type in {"cpu", "cuda"}
+            else nullcontext()
+        )
+        with context:
+            if x.dtype in (torch.float16, torch.bfloat16):
+                x = x.float()
+            if y.dtype in (torch.float16, torch.bfloat16):
+                y = y.float()
+            return self.kernel(x, y, scale)
+
     def similarities(
         self,
         context_embedding: torch.Tensor,
@@ -201,10 +219,10 @@ class LikelihoodRatioEstimator(nn.Module):
                 raise ValueError(
                     "reference embeddings must have shape (batch, samples, features) with at least one sample."
                 )
-            pos_similarity = self.kernel(
+            pos_similarity = self._kernel_call(
                 context_embedding, target_embedding, kernel_scale
             ).unsqueeze(1)
-            neg_similarity = self.kernel(
+            neg_similarity = self._kernel_call(
                 context_embedding.unsqueeze(1), reference_embedding, kernel_scale
             )
         else:
@@ -212,7 +230,7 @@ class LikelihoodRatioEstimator(nn.Module):
                 raise ValueError(
                     "In-batch references require at least two pairs; provide explicit references or use drop_last=True."
                 )
-            similarity = self.kernel(
+            similarity = self._kernel_call(
                 context_embedding.unsqueeze(1), target_embedding, kernel_scale
             )
             pos_similarity = diagonal(similarity).unsqueeze(1)
@@ -310,7 +328,7 @@ class LikelihoodRatioEstimator(nn.Module):
             context_embedding=context_embedding,
             target_embedding=target_embedding,
             baseline_embedding=baseline_embedding,
-            kernel=self.kernel,
+            kernel=self._kernel_call,
             kernel_scale=self.kernel_scale,
         )
         return {

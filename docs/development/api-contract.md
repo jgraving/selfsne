@@ -22,7 +22,8 @@ one sample; they pass through the target encoder/head.
 
 In-batch training requires at least two pairs. Choose a batch division that does
 not leave a singleton, or drop the final training batch. Embedding-only prediction
-accepts a final singleton. Logits use batch-local references: a singleton needs
+accepts a final singleton. Low-precision predictions export float32 NumPy arrays;
+float64 predictions retain float64. Logits use batch-local references: a singleton needs
 explicit references, and negative-logit widths can vary between batches. The
 alpha gate promises ordered embedding output, not a global all-pairs logit matrix.
 

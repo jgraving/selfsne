@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -63,6 +64,58 @@ def invoke(*args):
     )
     assert result.returncode == 0, result.stderr
     return result
+
+
+@pytest.mark.parametrize("initial_scale,passes", [(65536, False), (1024, True)])
+def test_short_amp_run_requires_real_updates_and_restores_scale(
+    workflow, initial_scale, passes
+):
+    # Quantize gradients to float16 with NumPy: some CPU builds cannot execute
+    # half kernels. The optimizer and dynamic GradScaler are real PyTorch objects.
+    class HalfGradient(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, weight):
+            ctx.shape = weight.shape
+            return weight.sum() * 2
+
+        @staticmethod
+        def backward(ctx, gradient):
+            with np.errstate(over="ignore"):
+                value = np.asarray(
+                    gradient.detach().numpy() * 2, dtype=np.float16
+                ).astype(np.float32)
+            return torch.from_numpy(value).expand(ctx.shape)
+
+    c = config("swiss-roll")
+    plugin = workflow.amp_plugin(
+        {**c, "precision": "16-mixed", "amp_initial_scale": initial_scale}
+    )
+    trainer = workflow.trainer_for(c, precision_plugin=plugin)
+    health = workflow.EpochSeed(SimpleNamespace(config=c))
+    model = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    before = model.weight.detach().clone()
+    for _ in range(3):
+        optimizer.zero_grad()
+        loss = HalfGradient.apply(model.weight)
+        plugin.scaler.scale(loss).backward()
+        plugin.scaler.unscale_(optimizer)
+        health.on_before_optimizer_step(trainer, model, optimizer)
+        plugin.scaler.step(optimizer)
+        plugin.scaler.update()
+        health.on_train_batch_end(trainer, model, {"loss": loss}, None, 0)
+    if passes:
+        health.on_train_end(trainer, model)
+        assert health.finite_steps == 3 and health.skipped_steps == 0
+    else:
+        with pytest.raises(ValueError, match="finite=1, skipped=2"):
+            health.on_train_end(trainer, model)
+    assert not torch.equal(before, model.weight)
+    state = plugin.state_dict()
+    restored = workflow.amp_plugin({**c, "precision": "16-mixed"})
+    restored.load_state_dict(state)
+    assert restored.state_dict() == state
+    assert health.diagnostics(trainer)["amp_scale"] == plugin.scaler.get_scale()
 
 
 def test_swiss_noise_and_clean_target_contract(workflow):
@@ -231,4 +284,6 @@ def test_synthetic_cuda_training_resume_export(tmp_path, example, precision):
     invoke("resume", "--run", run, "--epochs", 2)
     report = json.loads((run / "status.json").read_text())
     assert report["cuda_validated"] and report["status"] == "passed"
+    health = report["training_health"]
+    assert health["finite_steps"] > health["skipped_steps"]
     assert np.isfinite(np.load(run / "embeddings.npy")).all()

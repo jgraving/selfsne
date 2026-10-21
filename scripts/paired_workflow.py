@@ -133,7 +133,7 @@ class TrainingHealth(pl.Callback):
         self.last_loss = float(loss.cpu())
 
 
-def trainer_for(config, **kwargs):
+def trainer_for(config, precision_plugin=None, **kwargs):
     if config["accelerator"] == "gpu" and not torch.cuda.is_available():
         raise ValueError(
             "GPU requested but CUDA is unavailable; CPU fallback is disabled"
@@ -144,7 +144,8 @@ def trainer_for(config, **kwargs):
     return pl.Trainer(
         accelerator=config["accelerator"],
         devices=1,
-        precision=config["precision"],
+        precision=config["precision"] if precision_plugin is None else None,
+        plugins=[precision_plugin] if precision_plugin is not None else None,
         logger=False,
         enable_progress_bar=False,
         enable_model_summary=False,

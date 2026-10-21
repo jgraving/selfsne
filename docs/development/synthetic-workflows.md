@@ -20,6 +20,11 @@ checkout/environment. No divergence sweeps are performed.
 The pip CUDA environment `.venv-cuda-pip` works with the same commands. Use
 `--accelerator cpu` for a small CPU check. GPU requests fail if CUDA is unavailable.
 GPU precision options are `32-true` (default), `16-mixed`, and `bf16-mixed`.
+Float16 uses dynamic loss scaling starting at 1024 (`--amp-initial-scale`), rather
+than 65536, so calibration does not consume most of a short validation run. The
+scaler state is restored from checkpoints. The finite-step acceptance requirement
+is unchanged: finite optimizer steps must outnumber safely skipped overflow steps.
+`status.json` reports both counts and the final AMP scale, including on failure.
 The six marked CUDA cases run automatically in the existing source/wheel CUDA
 acceptance commands; skipped cases on CPU do not validate GPU execution.
 

@@ -175,10 +175,6 @@ class MixturePrior(pl.LightningModule):
     def assign_labels(self, p):
         return self.watershed_assignments[self.assign_modes(p)]
 
-    def on_train_start(self):
-        with torch.no_grad():
-            self.watershed_locs.copy_(self.locs)
-
     def on_train_end(self):
         self.watershed_assignments = self.watershed_labels()
 
@@ -227,6 +223,10 @@ class MixturePrior(pl.LightningModule):
         lr=1,
         scheduler_kwargs=None,
     ):
+        # This helper starts a fresh optimization from the current component means.
+        # Trainer checkpoint resumes must retain their saved watershed locations.
+        with torch.no_grad():
+            self.watershed_locs.copy_(self.locs)
         self.hparams.lr = lr
         self.hparams.scheduler_kwargs = scheduler_kwargs or {}
 

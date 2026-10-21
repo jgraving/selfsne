@@ -25,24 +25,25 @@ def bootstrap(tmp_path):
     uv = root / ".cuda-tools" / "bin" / "uv"
     uv.parent.mkdir(parents=True)
     uv.write_text(
-        '#!/usr/bin/env bash\nset -eu\n'
+        "#!/usr/bin/env bash\nset -eu\n"
         'echo "uv $*" >> "$TRACE"\n'
         'if [[ $* == *--torch-backend=* ]]; then exit "${INSTALL_EXIT:-0}"; fi\n'
-        'if [[ $1 == venv ]]; then\n'
-        '  environment=${@: -1}\n'
+        "if [[ $1 == venv ]]; then\n"
+        "  environment=${@: -1}\n"
         '  mkdir -p "$environment/bin"\n'
         '  cp "$FAKE_PYTHON" "$environment/bin/python"\n'
-        'fi\n'
+        "fi\n"
     )
     uv.chmod(0o755)
     python = tmp_path / "fake-python"
     python.write_text(
-        '#!/usr/bin/env bash\nset -eu\n'
+        "#!/usr/bin/env bash\nset -eu\n"
+        'echo "interpreter $0" >> "$TRACE"\n'
         'echo "python $*" >> "$TRACE"\n'
         'if [[ $1 == - ]]; then cat >/dev/null; exit "${PROBE_EXIT:-0}"; fi\n'
         'if [[ $* == *"-m build"* ]]; then\n'
         '  mkdir -p "${@: -1}"; touch "${@: -1}/selfsne.whl"\n'
-        'fi\n'
+        "fi\n"
         'if [[ $* == *cuda-wheel.xml* ]]; then exit "${WHEEL_EXIT:-0}"; fi\n'
     )
     python.chmod(0o755)
@@ -56,14 +57,14 @@ def bootstrap(tmp_path):
     def run(arguments="", overrides="", **variables):
         wrapper = (
             'source "$1"\n'
-            'check_platform() { :; }\n'
-            'has_nvidia_gpu() { return 0; }\n'
+            "check_platform() { :; }\n"
+            "has_nvidia_gpu() { return 0; }\n"
             'nvidia-smi() { echo "GPU, driver"; }\n'
             'sudo() { echo "sudo $*" >> "$TRACE"; }\n'
             + overrides
-            + '\nmain '
+            + "\nmain "
             + arguments
-            + '\n'
+            + "\n"
         )
         result = subprocess.run(
             ["bash", "-c", wrapper, "bootstrap-test", str(script)],
@@ -86,7 +87,7 @@ def test_bootstrap_runs_source_and_wheel_without_system_changes(bootstrap):
     assert trace.count("--require-cuda") == 2
     assert "--import-mode=importlib" in trace
     assert "--force-reinstall --no-deps" in trace
-    assert trace.rstrip().endswith('checkout with spaces')  # Editable restore.
+    assert trace.rstrip().endswith("checkout with spaces")  # Editable restore.
     assert "CUDA source and wheel tests passed" in result.stdout
 
 
@@ -187,17 +188,45 @@ def test_uv_bootstrap_download_stays_in_checkout(bootstrap, tmp_path):
     assert uv.is_file() and "--require-cuda" in trace
 
 
-def test_failed_wheel_validation_restores_source_and_propagates_failure(bootstrap):
+@pytest.mark.parametrize("installer", ["uv", "pip"])
+def test_failed_wheel_validation_restores_source_and_propagates_failure(
+    bootstrap, installer
+):
     run, _ = bootstrap
-    result, trace = run(WHEEL_EXIT="7")
+    result, trace = run(
+        f"--installer={installer} --torch-backend=cu121", WHEEL_EXIT="7"
+    )
     assert result.returncode == 7
     assert trace.rstrip().endswith("checkout with spaces")
     assert "CUDA source and wheel tests passed" not in result.stdout
 
 
+def test_pip_installs_in_separate_environment_and_preserves_uv_reports(bootstrap):
+    run, _ = bootstrap
+    result, trace = run(
+        "--installer=pip", overrides='nvidia-smi() { echo "535.183.01"; }'
+    )
+    assert result.returncode == 0, result.stderr
+    assert ".venv-cuda-pip/bin/python" in trace
+    assert ".venv-cuda/bin/python" not in trace
+    assert (
+        "python -m pip install --upgrade --index-url https://download.pytorch.org/whl/cu121 torch==2.5.1+cu121"
+        in trace
+    )
+    assert "python -m pip check" in trace
+    assert "uv --no-config pip install" not in trace
+    assert (
+        "reports/pip/cuda-source.xml" in trace and "reports/pip/cuda-wheel.xml" in trace
+    )
+    assert trace.rstrip().endswith("checkout with spaces")
+    assert "sudo " not in trace
+
+
 def test_help_does_not_detect_hardware_or_install_anything(bootstrap):
     run, script = bootstrap
-    result = subprocess.run(["bash", str(script), "--help"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["bash", str(script), "--help"], capture_output=True, text=True
+    )
     assert result.returncode == 0
     assert "--install-driver" in result.stdout
     _, trace = run("--unknown-option")

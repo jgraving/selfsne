@@ -135,6 +135,7 @@ build-requirements-*.txt
 
 # Dedicated CUDA development environment and hardware reports
 .venv-cuda/
+.venv-cuda-pip/
 cuda-source.xml
 cuda-wheel.xml
 .cuda-tools/

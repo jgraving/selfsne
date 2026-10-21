@@ -16,6 +16,15 @@ For a native Ubuntu NVIDIA machine, run from the checkout as your normal user:
 bash scripts/test-cuda-ubuntu.sh --install-driver
 ```
 
+For pip installation validation, use `--installer=pip` without a driver flag on
+a machine whose driver already works. It creates `.venv-cuda-pip/` and runs the
+same source and wheel checks, retaining reports under `.cuda-tools/reports/pip/`.
+uv provisions the isolated Python interpreter; pip installs the CUDA wheel,
+project dependencies, built wheel, and final editable source. The existing uv
+environment and reports are retained. Driver 535 selects CUDA 12.1 automatically;
+other drivers need an explicit `--torch-backend` with this pip path. Its command
+orchestration is tested in CPU CI; real pip CUDA execution is still pending.
+
 The script detects the GPU and running driver, downloads uv and Python 3.12 into
 `.cuda-tools/`, creates `.venv-cuda/`, selects PyTorch with `--torch-backend=auto`,
 and executes a real CUDA kernel before running source and built-wheel validation.

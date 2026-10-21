@@ -97,15 +97,6 @@ def test_shuffle_rows_uses_cuda_rng_without_consuming_cpu_rng():
     torch.testing.assert_close(first.sort(dim=0).values, values.sort(dim=0).values)
 
 
-class _FiniteLoss(pl.Callback):
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        assert torch.isfinite(outputs["loss"]).all()
-        for parameter in pl_module.parameters():
-            assert torch.isfinite(parameter).all()
-            if parameter.grad is not None:
-                assert torch.isfinite(parameter.grad).all()
-
-
 def _model(width=256, embedding_dim=16, scheduler=False):
     torch.manual_seed(41)
     return SelfSNE(
@@ -124,7 +115,7 @@ def _model(width=256, embedding_dim=16, scheduler=False):
     )
 
 
-def _trainer(epochs, precision="32-true"):
+def _trainer(epochs, callback_type, precision="32-true"):
     return pl.Trainer(
         accelerator="gpu",
         devices=1,
@@ -134,7 +125,7 @@ def _trainer(epochs, precision="32-true"):
         enable_checkpointing=False,
         enable_progress_bar=False,
         enable_model_summary=False,
-        callbacks=[_FiniteLoss()],
+        callbacks=[callback_type()],
         deterministic=True,
     )
 
@@ -144,7 +135,7 @@ def _trainer(epochs, precision="32-true"):
     ["32-true", "16-mixed", pytest.param("bf16-mixed", marks=pytest.mark.cuda_bf16)],
 )
 def test_cuda_scaled_training_checkpoint_prediction(
-    tmp_path, record_testsuite_property, precision
+    tmp_path, record_testsuite_property, precision, finite_training_callback
 ):
     if precision == "bf16-mixed" and not torch.cuda.is_bf16_supported():
         pytest.skip("This CUDA device does not support bfloat16.")
@@ -160,7 +151,7 @@ def test_cuda_scaled_training_checkpoint_prediction(
     )
     model = _model(width=1024, embedding_dim=32)
     before = model.target_encoder[0].weight.detach().clone()
-    trainer = _trainer(2, precision)
+    trainer = _trainer(2, finite_training_callback, precision)
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     start = time.perf_counter()
@@ -176,19 +167,31 @@ def test_cuda_scaled_training_checkpoint_prediction(
         target_encoder=_model(width=1024, embedding_dim=32).target_encoder,
         map_location="cpu",
     ).eval()
+    for name, value in restored_cpu.state_dict().items():
+        torch.testing.assert_close(
+            model.state_dict()[name].cpu(), value, rtol=0, atol=0
+        )
     with torch.no_grad():
         expected = restored_cpu(source)["target_embedding"].numpy()
+    # Check checkpoint transfer at the same arithmetic precision. Comparing
+    # bfloat16 output against float32 elementwise confounds restoration with
+    # rounding, especially for outputs near zero after cancelling large terms.
+    model.cuda().eval()
+    with torch.no_grad(), torch.autocast("cuda", enabled=False):
+        full_precision = model(source.cuda())["target_embedding"].cpu().numpy()
+    np.testing.assert_allclose(full_precision, expected, rtol=2e-4, atol=2e-4)
     prediction_loader = DataLoader(source, batch_size=449)
     batches = trainer.predict(model, prediction_loader)
     actual = np.concatenate([batch["target_embedding"] for batch in batches])
     assert actual.dtype == np.float32 and actual.shape == (1797, 32)
     assert batches[-1]["target_embedding"].shape == (1, 32)
     assert np.isfinite(actual).all() and (actual.std(0) > 1e-3).all()
-    tolerance = {"32-true": 2e-4, "16-mixed": 5e-3, "bf16-mixed": 0.03}[precision]
-    np.testing.assert_allclose(actual, expected, rtol=tolerance, atol=tolerance)
     roundtrip = trainer.predict(restored_cpu, prediction_loader)
     again = np.concatenate([batch["target_embedding"] for batch in roundtrip])
     np.testing.assert_allclose(again, actual, rtol=1e-5, atol=1e-5)
+    monitor = next(
+        c for c in trainer.callbacks if isinstance(c, finite_training_callback)
+    )
     report = {
         "status": "passed",
         "precision": precision,
@@ -202,13 +205,23 @@ def test_cuda_scaled_training_checkpoint_prediction(
         "observations_per_second": 2 * len(observations) / duration,
         "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
         "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
-        "max_prediction_error": float(np.max(np.abs(actual - expected))),
+        "cross_precision_max_prediction_error": float(
+            np.max(np.abs(actual - expected))
+        ),
+        "checkpoint_same_precision_max_prediction_error": float(
+            np.max(np.abs(again - actual))
+        ),
+        "float32_checkpoint_max_prediction_error": float(
+            np.max(np.abs(full_precision - expected))
+        ),
+        "finite_optimizer_steps": monitor.finite_steps,
+        "amp_skipped_optimizer_steps": monitor.skipped_steps,
     }
     record_testsuite_property("cuda_acceptance_" + precision, json.dumps(report))
     print("CUDA_ACCEPTANCE " + json.dumps(report))
 
 
-def test_cuda_epoch_resume_matches_uninterrupted(tmp_path):
+def test_cuda_epoch_resume_matches_uninterrupted(tmp_path, finite_training_callback):
     generator = torch.Generator().manual_seed(9)
     values = torch.rand(512, 64, generator=generator)
     loader = DataLoader(
@@ -218,15 +231,15 @@ def test_cuda_epoch_resume_matches_uninterrupted(tmp_path):
     torch.backends.cuda.matmul.allow_tf32 = False
     try:
         continuous = _model(scheduler=True)
-        full = _trainer(4)
+        full = _trainer(4, finite_training_callback)
         full.fit(continuous, loader)
         interrupted = _model(scheduler=True)
-        first = _trainer(2)
+        first = _trainer(2, finite_training_callback)
         first.fit(interrupted, loader)
         checkpoint = tmp_path / "resume.ckpt"
         first.save_checkpoint(checkpoint)
         resumed = _model(scheduler=True)
-        final = _trainer(4)
+        final = _trainer(4, finite_training_callback)
         final.fit(resumed, loader, ckpt_path=checkpoint)
         assert full.global_step == final.global_step
         assert (

@@ -106,10 +106,31 @@ class LikelihoodRatioEstimator(nn.Module):
         else:
             self.baseline = baseline
 
+        self._builtin_baseline = isinstance(baseline, (str, int, float))
         self.kernel_scale = float(kernel_scale)
         self.pos_as_neg = pos_as_neg
         self.classifier_metrics = classifier_metrics
         self.metrics = self._expand_metrics(metrics)
+
+    def _checkpoint_signature(self):
+        """Describe supported built-in loss settings not contained in weights."""
+        if (
+            not self._builtin_baseline
+            or not any(self.kernel is kernel for kernel in ROWWISE_KERNELS.values())
+            or not any(
+                self.divergence is divergence for divergence in DIVERGENCES.values()
+            )
+            or not hasattr(self.kernel, "__name__")
+            or not hasattr(self.divergence, "__name__")
+        ):
+            return None
+        return {
+            "kernel": self.kernel.__name__,
+            "kernel_scale": self.kernel_scale,
+            "divergence": self.divergence.__name__,
+            "baseline": type(self.baseline).__name__,
+            "pos_as_neg": bool(self.pos_as_neg),
+        }
 
     def _expand_metrics(self, metrics: Optional[List[str]]) -> List[str]:
         if metrics is None:

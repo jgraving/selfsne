@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/test-cuda-ubuntu.sh [--install-driver] [--torch-backend=cu121]
+Usage: bash scripts/test-cuda-ubuntu.sh [--installer=uv|pip] [--install-driver] [--torch-backend=cu121]
 
 Detect NVIDIA hardware/driver, download project-local uv and Python 3.12,
 install CUDA PyTorch, and test source plus the built wheel.
@@ -14,6 +14,8 @@ ONLY if the driver or CUDA initialization is unavailable. Reboot and rerun
 after a driver installation. No automatic reboot, PPA, or CUDA toolkit install.
 --torch-backend selects an explicit CUDA wheel index instead of automatic
 selection. Driver 535 automatically uses PyTorch 2.5.1 with CUDA 12.1.
+--installer=pip uses .venv-cuda-pip and separate reports; uv only provisions
+the local Python interpreter. Dependency and wheel installation use pip.
 EOF
 }
 
@@ -109,10 +111,11 @@ PY
 }
 
 main() {
-    local install_driver_allowed=false argument torch_backend=auto
+    local install_driver_allowed=false argument torch_backend=auto installer=uv
     for argument in "$@"; do
         case "$argument" in
             --install-driver) install_driver_allowed=true ;;
+            --installer=uv|--installer=pip) installer=${argument#*=} ;;
             --torch-backend=auto|--torch-backend=cu121|--torch-backend=cu126|--torch-backend=cu128|--torch-backend=cu130)
                 torch_backend=${argument#*=} ;;
             --help|-h) usage; return 0 ;;
@@ -144,11 +147,19 @@ main() {
         # satisfy this requirement or remain selected from the CPU project index.
         torch_requirement='torch==2.5.1+cu121'
     fi
+    if [[ $installer == pip && $torch_backend == auto ]]; then
+        echo 'The pip path requires an explicit --torch-backend=cu121, cu126, cu128, or cu130 for this driver.' >&2
+        return 2
+    fi
+    local environment_name=.venv-cuda reports
+    if [[ $installer == pip ]]; then environment_name=.venv-cuda-pip; fi
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
     tools="$root/.cuda-tools"
-    python="$root/.venv-cuda/bin/python"
+    python="$root/$environment_name/bin/python"
     uv="$tools/bin/uv"
-    mkdir -p "$tools/bin" "$tools/tmp" "$tools/reports"
+    reports="$tools/reports"
+    if [[ $installer == pip ]]; then reports="$reports/pip"; fi
+    mkdir -p "$tools/bin" "$tools/tmp" "$reports"
     export UV_CACHE_DIR="$tools/cache"
     export UV_PYTHON_INSTALL_DIR="$tools/python"
     export TMPDIR="$tools/tmp"
@@ -158,12 +169,18 @@ main() {
     cd -- "$root"
     if [[ ! -x $python ]]; then
         # Refuse existing non-environments rather than deleting user files.
-        "$uv" venv --managed-python --python 3.12 "$root/.venv-cuda"
+        "$uv" venv --managed-python --python 3.12 --seed "$root/$environment_name"
     fi
     # Ignore the checkout's CPU-only uv index configuration in this dedicated
     # CUDA environment; project dependency metadata still comes from pyproject.
-    "$uv" --no-config pip install --no-sources --python "$python" "--torch-backend=$torch_backend" --reinstall-package torch --upgrade-package torch "$torch_requirement" -e '.[dev,data]'
-    "$uv" pip check --python "$python"
+    if [[ $installer == uv ]]; then
+        "$uv" --no-config pip install --no-sources --python "$python" "--torch-backend=$torch_backend" --reinstall-package torch --upgrade-package torch "$torch_requirement" -e '.[dev,data]'
+        "$uv" pip check --python "$python"
+    else
+        "$python" -m pip install --upgrade --index-url "https://download.pytorch.org/whl/$torch_backend" "$torch_requirement"
+        "$python" -m pip install "$torch_requirement" -e '.[dev,data]'
+        "$python" -m pip check
+    fi
     if probe_cuda; then
         :
     else
@@ -184,23 +201,35 @@ main() {
         echo 'For the Ubuntu-recommended driver update, rerun with --install-driver.' >&2
         return 1
     fi
-    "$python" -m pytest -m cuda --require-cuda -v --tb=short --junitxml="$tools/reports/cuda-source.xml"
+    "$python" -m pytest -m cuda --require-cuda -v --tb=short --junitxml="$reports/cuda-source.xml"
 
     wheel_directory=$(mktemp -d "$tools/tmp/wheel.XXXXXX")
     "$python" -m build --wheel --outdir "$wheel_directory"
     # Always return the environment to editable source, even if wheel install
     # or validation fails. Expand paths now: main's locals expire before EXIT.
-    printf -v restore_command '%q ' "$uv" pip install --python "$python" --no-deps -e "$root"
+    if [[ $installer == uv ]]; then
+        printf -v restore_command '%q ' "$uv" pip install --python "$python" --no-deps -e "$root"
+    else
+        printf -v restore_command '%q ' "$python" -m pip install --no-deps -e "$root"
+    fi
     trap "$restore_command" EXIT
     for wheel in "$wheel_directory"/*.whl; do
-        "$uv" pip install --python "$python" --force-reinstall --no-deps "$wheel"
+        if [[ $installer == uv ]]; then
+            "$uv" pip install --python "$python" --force-reinstall --no-deps "$wheel"
+        else
+            "$python" -m pip install --force-reinstall --no-deps "$wheel"
+        fi
     done
     cd -- "$tools/tmp"
-    "$python" -m pytest --import-mode=importlib -m cuda --require-cuda -v --tb=short "$root/tests" --junitxml="$tools/reports/cuda-wheel.xml"
+    "$python" -m pytest --import-mode=importlib -m cuda --require-cuda -v --tb=short "$root/tests" --junitxml="$reports/cuda-wheel.xml"
     cd -- "$root"
-    "$uv" pip install --python "$python" --no-deps -e "$root"
+    if [[ $installer == uv ]]; then
+        "$uv" pip install --python "$python" --no-deps -e "$root"
+    else
+        "$python" -m pip install --no-deps -e "$root"
+    fi
     trap - EXIT
-    echo "CUDA source and wheel tests passed. Reports: $tools/reports/"
+    echo "CUDA source and wheel tests passed ($installer). Reports: $reports/"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

@@ -1,2 +1,3 @@
 include examples/quickstart.py
 include scripts/test-cuda-ubuntu.sh
+include scripts/paired_workflow.py

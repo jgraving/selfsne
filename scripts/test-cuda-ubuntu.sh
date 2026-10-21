@@ -10,7 +10,7 @@ Detect NVIDIA hardware/driver, download project-local uv and Python 3.12,
 install CUDA PyTorch, and test source plus the built wheel.
 
 --install-driver permits sudo apt-get and Ubuntu's recommended driver installer
-ONLY if the driver is unavailable or the CUDA probe fails. Reboot and rerun
+ONLY if the driver or CUDA initialization is unavailable. Reboot and rerun
 after a driver installation. No automatic reboot, PPA, or CUDA toolkit install.
 EOF
 }
@@ -85,16 +85,21 @@ import torch
 
 print(f"PyTorch {torch.__version__}; bundled CUDA {torch.version.cuda}", flush=True)
 if not torch.cuda.is_available():
-    raise SystemExit("CUDA is unavailable; CPU fallback is disabled.")
+    print("CUDA is unavailable; CPU fallback is disabled.", flush=True)
+    raise SystemExit(30)
 for index in range(torch.cuda.device_count()):
     device = torch.device("cuda", index)
     print(f"GPU {index}: {torch.cuda.get_device_name(index)}", flush=True)
     # Driver detection alone cannot establish that the installed wheel supports
     # this GPU's architecture. Execute a kernel and a matrix multiplication.
-    values = torch.ones((32, 32), device=device)
-    product = values @ values
-    torch.cuda.synchronize(device)
-    assert torch.isfinite(product).all() and (product == 32).all()
+    try:
+        values = torch.ones((32, 32), device=device)
+        product = values @ values
+        torch.cuda.synchronize(device)
+        assert torch.isfinite(product).all() and (product == 32).all()
+    except (RuntimeError, AssertionError) as exc:
+        print(f"CUDA initialized but GPU execution failed: {exc}", flush=True)
+        raise SystemExit(20) from exc
 PY
 }
 
@@ -118,7 +123,7 @@ main() {
         return $?
     fi
 
-    local root tools python uv wheel wheel_directory restore_command
+    local root tools python uv wheel wheel_directory restore_command probe_status
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
     tools="$root/.cuda-tools"
     python="$root/.venv-cuda/bin/python"
@@ -137,8 +142,15 @@ main() {
     fi
     "$uv" pip install --python "$python" --torch-backend=auto --reinstall-package torch -e '.[dev,data]'
     "$uv" pip check --python "$python"
-    if ! probe_cuda; then
-        echo 'CUDA execution failed. An old driver or unsupported GPU/wheel combination may be responsible.' >&2
+    if probe_cuda; then
+        :
+    else
+        probe_status=$?
+        if [[ $probe_status != 30 ]]; then
+            echo 'The CUDA probe failed unexpectedly or this GPU could not execute the PyTorch build. Send the output for compatibility diagnosis; no driver changes were made.' >&2
+            return 1
+        fi
+        echo 'CUDA initialization failed. An old driver or unsupported GPU/wheel combination may be responsible.' >&2
         if [[ $install_driver_allowed == true ]]; then
             install_driver
             return $?

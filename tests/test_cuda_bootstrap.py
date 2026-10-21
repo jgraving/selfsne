@@ -112,7 +112,7 @@ def test_driver_update_stops_for_reboot_before_tests(bootstrap, missing_driver):
     result, trace = run(
         "--install-driver",
         overrides="nvidia-smi() { return 1; }" if missing_driver else "",
-        PROBE_EXIT="1",
+        PROBE_EXIT="30",
     )
     assert result.returncode == 10
     assert "sudo apt-get install -y ubuntu-drivers-common" in trace
@@ -125,9 +125,18 @@ def test_driver_update_stops_for_reboot_before_tests(bootstrap, missing_driver):
 
 def test_failed_cuda_probe_does_not_pass_or_update_driver_implicitly(bootstrap):
     run, _ = bootstrap
-    result, trace = run(PROBE_EXIT="1")
+    result, trace = run(PROBE_EXIT="30")
     assert result.returncode != 0
-    assert "CUDA execution failed" in result.stderr
+    assert "CUDA initialization failed" in result.stderr
+    assert "sudo " not in trace and "-m pytest" not in trace
+
+
+@pytest.mark.parametrize("status", ["1", "20"])
+def test_gpu_execution_failure_does_not_trigger_driver_change(bootstrap, status):
+    run, _ = bootstrap
+    result, trace = run("--install-driver", PROBE_EXIT=status)
+    assert result.returncode != 0
+    assert "compatibility diagnosis" in result.stderr
     assert "sudo " not in trace and "-m pytest" not in trace
 
 

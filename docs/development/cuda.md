@@ -25,7 +25,7 @@ stay inside the checkout; shell profiles and global Python installs are unchange
 Reports are `.cuda-tools/reports/cuda-source.xml` and `cuda-wheel.xml`.
 
 `--install-driver` explicitly permits system changes with sudo if the driver is
-unavailable or the CUDA probe fails: update APT metadata, install
+unavailable or CUDA cannot initialize: update APT metadata, install
 `ubuntu-drivers-common`, show detected/recommended drivers, then run
 `ubuntu-drivers install`. A working CUDA setup reuses its driver. Omitting this
 option permits only detection and project-local installation. Driver packages
@@ -33,8 +33,10 @@ are system-wide; no standalone CUDA toolkit or third-party repository is added.
 Driver installation stops with exit code 10: reboot and rerun the same command.
 Complete Secure Boot key enrollment if requested during reboot. An unsupported
 older GPU may still require a different PyTorch build; a driver update is not a
-guarantee of compatibility. Dependency-download failures do not trigger driver
-installation. WSL is rejected because its driver belongs to the Windows host.
+guarantee of compatibility. Kernel execution failures after CUDA initialization
+stop for diagnosis rather than changing the driver. Dependency-download failures
+do not trigger driver installation. WSL is rejected because its driver belongs
+to the Windows host.
 
 For a machine without Git or a downloader, first install those Ubuntu utilities
 and clone the repository:

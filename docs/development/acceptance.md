@@ -35,7 +35,9 @@ runs, noise transforms, plots, and callbacks are not acceptance targets.
    and include a final singleton batch.
 4. Supported input/output contracts and architecture reconstruction requirements
    are recorded in maintainer documentation and exercised by tests. Incompatible
-   checkpoints must fail clearly; historical breaking changes are listed.
+   checkpoint formats and parameter shapes must fail clearly; changed built-in
+   loss settings must be rejected for new checkpoints. Historical limits and
+   caller-owned architecture settings are listed in `api-contract.md`.
 5. The README stays a development-only notice. No release tag, package publication,
    public walkthrough, or experimental quality claim is part of this gate.
 

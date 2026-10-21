@@ -130,7 +130,7 @@ def visualize_lr_schedule(
 class SelfSNE(pl.LightningModule):
     def __init__(
         self,
-        loss,
+        loss=None,
         target_encoder=None,
         context_encoder=None,
         target_tokenizer=None,
@@ -202,6 +202,39 @@ class SelfSNE(pl.LightningModule):
         )
         if self.hparams.lr_scheduler_interval not in ("step", "epoch"):
             raise ValueError("lr_scheduler_interval must be either 'step' or 'epoch'")
+
+    def _loss_checkpoint_signature(self):
+        from selfsne.losses import LikelihoodRatioEstimator
+
+        if type(self.loss) is LikelihoodRatioEstimator:
+            return self.loss._checkpoint_signature()
+        return None
+
+    def on_save_checkpoint(self, checkpoint):
+        checkpoint["selfsne"] = {
+            "format_version": 1,
+            "loss_configuration": self._loss_checkpoint_signature(),
+        }
+
+    def on_load_checkpoint(self, checkpoint):
+        metadata = checkpoint.get("selfsne")
+        # Historical checkpoints have weights but no loss configuration metadata.
+        if metadata is None:
+            return
+        if (
+            not isinstance(metadata, dict)
+            or type(metadata.get("format_version")) is not int
+            or metadata["format_version"] != 1
+        ):
+            raise ValueError(
+                "Unsupported selfsne checkpoint format; use a compatible version."
+            )
+        saved = metadata.get("loss_configuration")
+        if saved is not None and saved != self._loss_checkpoint_signature():
+            raise ValueError(
+                "Checkpoint loss configuration does not match the supplied loss. "
+                "Recreate the original kernel, scale, divergence, baseline, and pos_as_neg settings."
+            )
 
     def process_batch(self, batch) -> Tuple:
         if isinstance(batch, dict):

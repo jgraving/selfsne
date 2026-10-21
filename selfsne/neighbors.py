@@ -216,6 +216,8 @@ class NearestNeighborSampler(nn.Module):
             self.kernel = kernel
         else:
             raise ValueError("Invalid kernel type. Expected str or callable.")
+        if not isinstance(num_neighbors, int) or num_neighbors < 1:
+            raise ValueError("num_neighbors must be a positive integer.")
         self.num_neighbors = num_neighbors
         self.return_index = return_index
         if self.return_index:
@@ -252,15 +254,28 @@ class NearestNeighborSampler(nn.Module):
                     "`return_index` is True, but index was not passed with batch."
                 )
 
+        if self.return_index:
+            if index.ndim not in (1, 2) or index.shape[0] != data.shape[0] or (
+                index.ndim == 2 and index.shape[1] != 1
+            ):
+                raise ValueError("index must have shape (batch_size,) or (batch_size, 1).")
+            if index.dtype not in (torch.int32, torch.int64):
+                raise ValueError("index must contain integers.")
+
+        # Only a queue updated with this batch has corresponding diagonal entries.
+        updated = self.data_queue.training and not self.data_queue.freeze
         data_queue = self.data_queue(data)
+        if self.return_index:
+            index_queue = self.index_queue(index.reshape(-1, 1))
         sample_idx = knn_sampler(
-            data, data_queue, self.kernel, self.num_neighbors, self.max_similarity
+            data, data_queue, self.kernel, self.num_neighbors, self.max_similarity,
+            exclude_diagonal=updated,
         )
 
         if self.return_index:
-            return self.index_queue(index)[sample_idx]
-        else:
-            return data_queue[sample_idx]
+            selected = index_queue[sample_idx]
+            return selected[:, 0] if index.ndim == 1 else selected
+        return data_queue[sample_idx]
 
 
 def knn_sampler(
@@ -269,6 +284,7 @@ def knn_sampler(
     kernel: callable,
     num_neighbors: int,
     max_similarity: float = 0.0,
+    exclude_diagonal: bool = True,
 ) -> torch.Tensor:
     """
     Performs K-nearest neighbors sampling given two input tensors x1 and x2, a kernel function to compute the similarity
@@ -280,33 +296,33 @@ def knn_sampler(
         kernel (callable): A callable function that computes the pairwise similarity between two tensors. It should take two
             arguments of shape (batch_size, num_features) and (num_samples, num_features) respectively and return a tensor
             of shape (batch_size, num_samples) representing the similarity between them.
-        num_neighbors (int): The number of neighbors to sample.
+        exclude_diagonal (bool): Exclude corresponding rows, for inputs sharing row identities.
+            Set False for independent query and candidate sets. Defaults to True.
+        num_neighbors (int): The number of nearest eligible neighbors to sample uniformly from.
         max_similarity (float): The maximum similarity value to exclude from the selection. Defaults to 0.
 
     Returns:
         torch.Tensor: A tensor of shape (batch_size,) representing the indices of the sampled neighbors for each batch element.
     """
-    batch_size = x1.shape[0]
-    num_samples = x2.shape[0]
-    
+    if not isinstance(num_neighbors, int) or num_neighbors < 1:
+        raise ValueError("num_neighbors must be a positive integer.")
+    batch_size, num_samples = x1.shape[0], x2.shape[0]
+    if num_samples == 0:
+        raise ValueError("No eligible neighbors: the candidate queue is empty.")
     similarity = kernel(x1, x2)
-    
-    # Ensure the dimensions match for proper masking
-    min_size = min(batch_size, num_samples)
-    diagonal_idx = torch.arange(min_size, device=x1.device)
-    similarity[diagonal_idx, diagonal_idx] = NEG_INF
-    
-    similarity = torch.where(similarity == max_similarity, NEG_INF, similarity)
-
-    num_neighbors = min(num_neighbors, num_samples)
-    _, knn_index = torch.topk(similarity, num_neighbors, dim=-1)
-
-    if num_neighbors > 1:
-        neighbor_idx = torch.randint(
-            0, num_neighbors, (batch_size,), device=knn_index.device
-        )
-        sample_idx = knn_index[torch.arange(batch_size, device=knn_index.device), neighbor_idx]
-    else:
-        sample_idx = knn_index[:, 0]
-
-    return sample_idx
+    if similarity.shape != (batch_size, num_samples):
+        raise ValueError("kernel must return shape (batch_size, num_samples).")
+    valid = torch.isfinite(similarity) & (similarity != max_similarity)
+    if exclude_diagonal:
+        diagonal_idx = torch.arange(min(batch_size, num_samples), device=similarity.device)
+        valid[diagonal_idx, diagonal_idx] = False
+    counts = valid.sum(dim=-1).clamp(max=num_neighbors)
+    if (counts == 0).any():
+        raise ValueError("No eligible neighbors for one or more input rows.")
+    similarity = similarity.masked_fill(~valid, NEG_INF)
+    knn_index = torch.topk(similarity, min(num_neighbors, num_samples), dim=-1).indices
+    if num_neighbors == 1:
+        return knn_index[:, 0]
+    # Each row may have fewer eligible neighbors than the requested count.
+    ranks = (torch.rand(batch_size, device=similarity.device) * counts).long()
+    return knn_index[torch.arange(batch_size, device=similarity.device), ranks]

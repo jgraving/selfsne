@@ -22,7 +22,6 @@ from torch import nn
 from torch.utils.data import Dataset
 
 from selfsne.kernels import PAIRWISE_KERNELS
-import numpy as np
 
 from typing import Tuple, List, Any, Union, Callable
 
@@ -109,11 +108,13 @@ class Queue(nn.Module):
         dtype: torch.dtype = torch.float32,
     ):
         super(Queue, self).__init__()
+        if num_features <= 0 or queue_size <= 0:
+            raise ValueError("num_features and queue_size must be positive.")
         self.register_buffer(
             "queue", torch.zeros((queue_size, num_features), dtype=dtype)
         )
         self.max_size = queue_size
-        self.queue_size = 0
+        self.register_buffer("_queue_size", torch.zeros((), dtype=torch.long))
         self.freeze_on_full = freeze_on_full
 
     @torch.no_grad()
@@ -128,12 +129,18 @@ class Queue(nn.Module):
         Returns:
             torch.Tensor: The current state of the queue.
         """
-        if self.freeze or not self.training:
-            return self.queue
-        else:
-            self.queue = torch.cat((x, self.queue))[: self.max_size]
-            self.queue_size = np.minimum(self.queue_size + x.shape[0], self.max_size)
-            return self.queue[: self.queue_size]
+        if x.ndim != 2 or x.shape[1] != self.queue.shape[1]:
+            raise ValueError("x must have shape (batch_size, num_features).")
+        if not self.freeze and self.training:
+            values = torch.cat((x.to(self.queue), self.queue))[: self.max_size]
+            self.queue = values
+            self._queue_size.fill_(min(self.queue_size + x.shape[0], self.max_size))
+        return self.queue[: self.queue_size]
+
+    @property
+    def queue_size(self) -> int:
+        """Number of valid rows, persisted alongside the queue in checkpoints."""
+        return int(self._queue_size.item())
 
     @torch.no_grad()
     def sample(self, n_samples: int) -> torch.Tensor:
@@ -146,7 +153,10 @@ class Queue(nn.Module):
         Returns:
             torch.Tensor: A tensor containing the sampled data points.
         """
-        assert n_samples <= self.queue_size
+        if not 0 <= n_samples <= self.queue_size:
+            raise ValueError("n_samples must be between zero and the current queue size.")
+        if n_samples == 0:
+            return self.queue[:0]
         sample_idx = torch.randint(
             self.queue_size, (n_samples,), device=self.queue.device
         )

@@ -8,6 +8,50 @@ Multi-GPU/distributed training and MPS are separate, unverified targets.
 
 ## Developer installation
 
+### Ubuntu bootstrap
+
+For a native Ubuntu NVIDIA machine, run from the checkout as your normal user:
+
+```sh
+bash scripts/test-cuda-ubuntu.sh --install-driver
+```
+
+The script detects the GPU and running driver, downloads uv and Python 3.12 into
+`.cuda-tools/`, creates `.venv-cuda/`, selects PyTorch with `--torch-backend=auto`,
+and executes a real CUDA kernel before running source and built-wheel validation.
+It restores the editable source installation after wheel validation, including on
+failure. Python packages, managed Python, download caches, and temporary files
+stay inside the checkout; shell profiles and global Python installs are unchanged.
+Reports are `.cuda-tools/reports/cuda-source.xml` and `cuda-wheel.xml`.
+
+`--install-driver` explicitly permits system changes with sudo if the driver is
+unavailable or the CUDA probe fails: update APT metadata, install
+`ubuntu-drivers-common`, show detected/recommended drivers, then run
+`ubuntu-drivers install`. A working CUDA setup reuses its driver. Omitting this
+option permits only detection and project-local installation. Driver packages
+are system-wide; no standalone CUDA toolkit or third-party repository is added.
+Driver installation stops with exit code 10: reboot and rerun the same command.
+Complete Secure Boot key enrollment if requested during reboot. An unsupported
+older GPU may still require a different PyTorch build; a driver update is not a
+guarantee of compatibility. Dependency-download failures do not trigger driver
+installation. WSL is rejected because its driver belongs to the Windows host.
+
+For a machine without Git or a downloader, first install those Ubuntu utilities
+and clone the repository:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git curl
+git clone https://github.com/jgraving/selfsne.git
+cd selfsne
+bash scripts/test-cuda-ubuntu.sh --install-driver
+```
+
+Bootstrap orchestration is covered with mocked commands in CPU CI. Actual
+driver installation and CUDA execution remain pending hardware validation.
+
+### Manual environments
+
 Use a separate environment for CUDA development. `uv sync` follows the project's
 CPU lockfile; do not use it to maintain the CUDA environment. PyTorch accelerator
 selection is done explicitly through the uv pip interface or PyTorch's pip index.

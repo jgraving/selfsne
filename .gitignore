@@ -137,3 +137,4 @@ build-requirements-*.txt
 .venv-cuda/
 cuda-source.xml
 cuda-wheel.xml
+.cuda-tools/

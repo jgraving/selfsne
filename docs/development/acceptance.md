@@ -3,7 +3,8 @@
 Maintainer validation scope, not a release announcement or public usage guide.
 The project remains under development. Passing this gate permits a private CPU
 alpha evaluation; it does not authorize a public release. GPU readiness additionally
-requires the separate [CUDA gate](cuda.md), whose hardware execution is pending.
+requires the separate [CUDA gate](cuda.md). Its uv source/wheel path has passed
+on the recorded RTX A5000 configuration; the pip CUDA installer path is pending.
 
 ## Supported evaluation path
 

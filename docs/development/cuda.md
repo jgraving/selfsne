@@ -56,8 +56,9 @@ cd selfsne
 bash scripts/test-cuda-ubuntu.sh --install-driver
 ```
 
-Bootstrap orchestration is covered with mocked commands in CPU CI. Actual
-driver installation and CUDA execution remain pending hardware validation.
+Bootstrap orchestration is covered with mocked commands in CPU CI. CUDA source
+and wheel execution has passed on the configuration recorded below. System
+driver installation remains untested; that run reused its existing driver.
 
 ### Manual environments
 
@@ -100,10 +101,11 @@ and [NVIDIA's CUDA 12.1 driver requirements](https://docs.nvidia.com/cuda/archiv
 
 ## Execution gate
 
-The manual `CUDA validation` workflow targets an existing self-hosted Linux x64
-runner carrying the `cuda` label. It does not provision hardware and is not
-triggered by pull requests. Dispatch a trusted revision once such a runner is
-available, once with each installer for the selected backend.
+Hardware validation can run locally with the Ubuntu bootstrap or through the
+manual `CUDA validation` workflow. The workflow targets an existing self-hosted
+Linux x64 runner carrying the `cuda` label. It does not provision hardware and is
+not triggered by pull requests. Validate each installer separately for the
+selected backend; passing the uv path does not establish the pip installation.
 
 The suite must execute on real CUDA hardware, not merely collect or skip tests:
 
@@ -133,17 +135,35 @@ The suite must execute on real CUDA hardware, not merely collect or skip tests:
 
 ## Current validation status
 
-The first user-reported source run at `4e78b4f` on an RTX A5000 with driver
-535.183.01, PyTorch 2.5.1+cu121, and Python 3.12.15 passed 20 of 22 CUDA cases.
-Float32 training, loss/gradient comparisons, queues, and epoch resume passed.
-The float16 gradient monitor and bfloat16 cross-precision comparison failed;
-the installed-wheel stage was not reached. The revised monitor and matched-
-precision checkpoint comparisons still require a hardware rerun.
+The uv source and installed-wheel path passed on real hardware at commit
+[`3139bbd`](https://github.com/jgraving/selfsne/commit/3139bbd41447ac10ac91ae24762518c3822c706c).
+Evidence is a user-supplied terminal transcript reviewed on 2026-10-21; this is a
+local hardware run, not a GPU execution in hosted CI.
 
-Complete CUDA hardware acceptance is pending. CPU CI exercises the mixed-precision safety
-regressions and skips hardware-only cases. Those green CPU jobs cannot satisfy
-this gate. The manual workflow must produce passing source and wheel reports on
-an actual GPU before CUDA support is marked validated.
+| Configuration | Recorded value |
+| --- | --- |
+| OS | Ubuntu 20.04.6 LTS, Linux x86_64 |
+| Python | 3.12.15 |
+| PyTorch / bundled CUDA | 2.5.1+cu121 / 12.1 |
+| NVIDIA driver | 535.183.01, reused without driver installation |
+| GPU | RTX A5000, 24 GB; one device used for training |
+| Installation | uv via `scripts/test-cuda-ubuntu.sh` |
+| Source acceptance | 22 passed, no failures or skips |
+| Installed-wheel acceptance | 22 passed, no failures or skips |
+
+Float32, float16 mixed precision, and bfloat16 mixed precision all passed,
+including checkpoint state equality, CPU/GPU prediction comparisons, matched-
+precision GPU prediction restoration, and epoch-boundary resume. Both detected
+GPUs passed the initial kernel probe; training used a single device and does not
+establish distributed or multi-GPU training. After wheel validation the script
+successfully restored the editable source installation.
+
+The run generated `.cuda-tools/reports/cuda-source.xml` and `cuda-wheel.xml` on
+the test machine. Those XML files were not supplied with the transcript, so no
+numerical memory, throughput, or AMP skipped-step counts are claimed here.
+The pip CUDA installer, system driver installation, and other GPU/backend
+combinations remain unverified. CPU CI continues to exercise mixed-precision
+regressions while skipping hardware-only cases; CPU CI alone is not CUDA evidence.
 
 Built-in likelihood kernels compute distances/reductions in float32 under
 mixed precision. Custom kernels retain their own precision behavior and require

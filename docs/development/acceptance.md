@@ -43,7 +43,10 @@ runs, noise transforms, plots, and callbacks are not acceptance targets.
 
 The authoritative evidence is the CI run at the candidate commit, including
 installed-wheel tests and the minimum-dependency job. The representative test
-must record its initial/final held-out loss, resume error, prediction error,
-embedding shape, and dependency versions in its pytest output/artifacts.
+is `tests/test_cpu_acceptance.py`. It records its initial/final held-out loss,
+model/optimizer resume error, prediction error,
+embedding shape, and dependency versions in the `cpu_alpha_acceptance` property
+of the source/wheel JUnit reports. CI retains those reports as artifacts for seven
+days. Each candidate run must pass the representative test in its own environment.
 A green gate means the defined workflow is ready for private evaluation, not
 that every exposed module or dependency combination has been validated.

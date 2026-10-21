@@ -247,6 +247,10 @@ class NumpyDataLoader(DataLoader):
     def __init__(
         self, dataset, batch_size=1024, shuffle=True, drop_last=False, **kwargs
     ):
+        # Lightning reinstantiates loaders with their already-wrapped dataset
+        # when it injects the prediction batch sampler.
+        if isinstance(dataset, _NumpyDataset):
+            dataset = dataset.array
         if not isinstance(dataset, np.ndarray):
             raise TypeError("dataset must be a NumPy array or memory map.")
         if dataset.ndim == 0:

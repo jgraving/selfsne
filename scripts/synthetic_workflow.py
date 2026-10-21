@@ -192,6 +192,7 @@ class EpochSeed(pl.Callback):
         self.finite_steps = 0
         self.skipped_steps = 0
         self.overflow = False
+        self.completed_epochs = 0
 
     def on_train_epoch_start(self, trainer, pl_module):
         self.dataset.epoch = trainer.current_epoch
@@ -201,6 +202,13 @@ class EpochSeed(pl.Callback):
 
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         checkpoint["synthetic_config"] = self.dataset.config
+        checkpoint["synthetic_epochs_completed"] = self.completed_epochs
+
+    def on_load_checkpoint(self, trainer, pl_module, checkpoint):
+        self.completed_epochs = checkpoint["synthetic_epochs_completed"]
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        self.completed_epochs = trainer.current_epoch + 1
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
         self.overflow = any(
@@ -345,7 +353,7 @@ def execute(args):
         saved = torch.load(run / "last.ckpt", map_location="cpu", weights_only=False)
         if saved.get("synthetic_config") != config:
             raise ValueError("Configuration changed since the checkpoint was saved")
-        completed = saved["loops"]["fit_loop"]["epoch_progress"]["total"]["completed"]
+        completed = saved["synthetic_epochs_completed"]
         if args.epochs <= completed:
             raise ValueError(
                 "epochs must exceed completed epochs (total desired epochs)"

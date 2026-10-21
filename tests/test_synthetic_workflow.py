@@ -172,6 +172,7 @@ def test_resume_matches_continuous_and_exports_original_order(
     c = json.loads((resumed / "config.json").read_text())
     model = workflow.model_for(c).eval()
     state = torch.load(resumed / "last.ckpt", weights_only=False, map_location="cpu")
+    assert state["synthetic_epochs_completed"] == 2
     model.load_state_dict(state["state_dict"])
     data, labels = workflow.generate(c)
     with torch.inference_mode():

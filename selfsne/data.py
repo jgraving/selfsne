@@ -91,7 +91,7 @@ def correlated_gaussian_sampler(
     n_samples, mutual_information, dim=20, seed=None, device=None
 ):
     def mi_to_rho(dim, mi):
-        return torch.sqrt(1 - torch.exp(-2.0 / dim * mi))
+        return torch.sqrt(-torch.expm1(-2.0 / dim * mi))
 
     if n_samples < 1 or dim < 1:
         raise ValueError("n_samples and dim must be positive.")
@@ -106,7 +106,9 @@ def correlated_gaussian_sampler(
         generator = torch.Generator(device=device or "cpu").manual_seed(seed)
     z = torch.randn(n_samples, 2 * dim, device=device, generator=generator)
     x, eps = torch.split(z, dim, dim=1)
-    y = correlation * x + torch.sqrt(1.0 - correlation**2) * eps
+    # Derive the conditional scale from MI directly: subtracting rho**2 from
+    # one loses the noise term once the rounded correlation reaches one.
+    y = correlation * x + torch.exp(-mi / dim) * eps
 
     samples = torch.cat((x, y), dim=1)
     return samples

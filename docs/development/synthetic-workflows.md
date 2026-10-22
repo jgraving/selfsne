@@ -119,3 +119,13 @@ without assuming unrolling or equivariance. Set `SELFSNE_NOTEBOOK_SMOKE=1` only
 for a three-epoch software check on 129 points.
 Its code cells execute with that explicit smoke configuration in CPU regression tests, including environments without
 Matplotlib; plotting is checked when the maintainer plot extra is present.
+
+
+### Local Swiss-roll contexts
+
+`--noise-scale` multiplies the Swiss-roll per-view noise standard deviation.
+The default `1` preserves existing behavior; omitted settings in saved runs also
+mean `1`. For example, `--noise-scale 0.25` uses per-view standard deviation
+`0.25 * sqrt(3 * N)` and mean-context variance `3 * 0.25**2 = 0.1875` per
+coordinate. The clean target is unchanged. This setting is saved in the run
+configuration and restored on resume; it does not affect von Mises trajectories.

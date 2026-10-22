@@ -212,7 +212,11 @@ class Batches(IterableDataset):
             if c["example"] == "swiss-roll":
                 target = self.data[rows, None]
                 noise = torch.randn(len(rows), c["views"], 3, generator=rng)
-                yield target + noise * math.sqrt(3 * c["views"]), target
+                yield (
+                    target
+                    + noise * math.sqrt(3 * c["views"]) * c.get("noise_scale", 1.0),
+                    target,
+                )
             else:
                 offset = selected % windows
                 indices = offset[:, None] + torch.arange(c["context_length"])[None]
@@ -361,6 +365,9 @@ def validate(config):
         raise ValueError(
             "Need schedule_epochs >= 0 and 0 <= warmup_epochs < schedule_epochs"
         )
+    noise_scale = config.get("noise_scale", 1.0)
+    if not math.isfinite(noise_scale) or noise_scale < 0:
+        raise ValueError("noise_scale must be nonnegative and finite")
     initial_scale = config.get("amp_initial_scale", 1024)
     if not math.isfinite(initial_scale) or initial_scale <= 0:
         raise ValueError("amp_initial_scale must be positive and finite")
@@ -504,6 +511,12 @@ def main():
     ]:
         train.add_argument("--" + name, type=int, default=default)
     train.add_argument("--learning-rate", type=float, default=3e-4)
+    train.add_argument(
+        "--noise-scale",
+        type=float,
+        default=1.0,
+        help="Swiss-roll noise standard-deviation multiplier (default: 1)",
+    )
     train.add_argument("--amp-initial-scale", type=float, default=1024)
     train.add_argument("--divergence", choices=["kld", "jsd", "rkld"], default="kld")
     train.add_argument("--accelerator", choices=["cpu", "gpu"], default="cpu")

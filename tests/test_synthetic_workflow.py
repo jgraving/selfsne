@@ -215,6 +215,8 @@ def test_resume_matches_continuous_and_exports_original_order(
         4,
     ]
     options += ["--schedule-epochs", 3, "--warmup-epochs", 1]
+    if example == "swiss-roll":
+        options += ["--noise-scale", 0.25]
     resumed, full = tmp_path / "resumed", tmp_path / "full"
     invoke("train", *options, "--run", resumed, "--epochs", 1)
     invoke("resume", "--run", resumed, "--epochs", 2)
@@ -307,3 +309,21 @@ def test_invalid_schedule_rejected(workflow, horizon, warmup):
     c.update(schedule_epochs=horizon, warmup_epochs=warmup)
     with pytest.raises(ValueError, match="schedule_epochs"):
         workflow.validate(c)
+
+
+@pytest.mark.parametrize("scale", [0.0, 0.25])
+def test_swiss_noise_scale_preserves_targets_and_sampling(workflow, scale):
+    c = config("swiss-roll")
+    data, _ = workflow.generate(c)
+    context, target = next(iter(workflow.Batches(c, data, np.arange(len(data)))))
+    reduced, clean = next(
+        iter(workflow.Batches({**c, "noise_scale": scale}, data, np.arange(len(data))))
+    )
+    torch.testing.assert_close(clean, target, rtol=0, atol=0)
+    torch.testing.assert_close(reduced, target + scale * (context - target))
+
+
+@pytest.mark.parametrize("scale", [-1.0, float("nan"), float("inf")])
+def test_invalid_noise_scale_rejected(workflow, scale):
+    with pytest.raises(ValueError, match="noise_scale"):
+        workflow.validate({**config("swiss-roll"), "noise_scale": scale})

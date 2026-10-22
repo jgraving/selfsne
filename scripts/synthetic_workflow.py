@@ -103,6 +103,30 @@ class TokenHead(nn.Module):
         return self.project(x[:, self.token])
 
 
+def schedule_options(config):
+    """Derive a fixed optimizer-step horizon from saved dataset configuration."""
+    epochs = config.get("schedule_epochs", 0)
+    if not epochs:
+        return {}
+    rows = config["samples"]
+    windows = 1
+    if config["example"] == "von-mises":
+        rows = int(0.75 * rows)
+        windows = (
+            config["trajectory_length"]
+            - config["context_length"]
+            - config["target_length"]
+            + 1
+        )
+    steps = rows * windows // config["batch_size"]
+    warmup = config.get("warmup_epochs", 0)
+    return dict(
+        lr_scheduler=True,
+        lr_warmup_steps=warmup * steps,
+        lr_cosine_steps=(epochs - warmup) * steps,
+    )
+
+
 def model_for(config):
     walk = config["example"] == "von-mises"
     return SelfSNE(
@@ -118,6 +142,7 @@ def model_for(config):
         ),
         learning_rate=config["learning_rate"],
         weight_decay=1e-5,
+        **schedule_options(config),
     )
 
 
@@ -331,6 +356,11 @@ def evaluate(config, data, labels, run):
 
 
 def validate(config):
+    horizon, warmup = config.get("schedule_epochs", 0), config.get("warmup_epochs", 0)
+    if horizon < 0 or warmup < 0 or (warmup and warmup >= horizon):
+        raise ValueError(
+            "Need schedule_epochs >= 0 and 0 <= warmup_epochs < schedule_epochs"
+        )
     initial_scale = config.get("amp_initial_scale", 1024)
     if not math.isfinite(initial_scale) or initial_scale <= 0:
         raise ValueError("amp_initial_scale must be positive and finite")
@@ -376,6 +406,8 @@ def execute(args):
     validate(config)
     if args.epochs < 1:
         raise ValueError("epochs must be positive")
+    if config.get("schedule_epochs", 0) and args.epochs > config["schedule_epochs"]:
+        raise ValueError("epochs exceeds the saved schedule horizon")
     if resume and not (run / "last.ckpt").exists():
         raise ValueError("No completed epoch checkpoint")
     if resume:
@@ -467,6 +499,8 @@ def main():
         ("context-length", 65),
         ("target-length", 17),
         ("seed", 42),
+        ("schedule-epochs", 0),
+        ("warmup-epochs", 0),
     ]:
         train.add_argument("--" + name, type=int, default=default)
     train.add_argument("--learning-rate", type=float, default=3e-4)

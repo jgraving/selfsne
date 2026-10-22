@@ -63,7 +63,12 @@ uses the maintained transformer/loss implementations rather than copying the
 reference's custom attention stack or its misleadingly named `info_nce_loss`:
 that function actually used forward KL with a Cauchy embedding baseline.
 The default divergence is `kld`; `jsd` and `rkld` are selectable for one run.
-There is no scheduler in this initial validation workflow.
+Constant learning rate remains the CLI default. Opt into a fixed schedule at
+creation with `--schedule-epochs 100 --warmup-epochs 10`: linear warmup followed
+by cosine decay, measured in optimizer steps from complete training batches.
+The horizon is saved independently of the requested stopping epoch; resuming
+restores scheduler state and cannot extend beyond that horizon. Old runs without
+these settings retain their constant learning rate.
 
 Exports embed each complete trajectory in original generation order. For observed
 relative turns `theta`, sufficient statistics at fixed sample count are
@@ -97,10 +102,10 @@ noise scaling, window boundaries, checkpoint equivalence and export row order.
 
 ## Swiss-roll maintainer notebook
 
-[`notebooks/swiss_roll.ipynb`](../../notebooks/swiss_roll.ipynb) provides a small
-CPU-first check in an existing development environment. It calls this workflow
-with the notebook kernel's Python executable, trains one epoch, resumes to two
-total epochs, reconstructs the saved model, verifies ordered clean-target exports,
+[`notebooks/swiss_roll.ipynb`](../../notebooks/swiss_roll.ipynb) provides a
+CPU-first training example in an existing development environment. It calls this workflow
+with the notebook kernel's Python executable, trains ten epochs, resumes to 100
+total epochs with ten warmup epochs and cosine decay, reconstructs the saved model, verifies ordered clean-target exports,
 and optionally plots the data and embeddings when Matplotlib is available.
 Outputs go to a newly created temporary run directory printed by the notebook;
 copy that directory elsewhere if you need to retain it. Run cells top to bottom
@@ -109,7 +114,8 @@ re-executing the configuration cell; individual train/resume cells are not
 idempotent, because existing runs and completed epoch requests are rejected.
 
 The notebook contains no package installers, automatic device selection,
-divergence sweeps, or precomputed experiment outputs. It checks software behavior;
-two epochs on 129 points do not establish Swiss-roll unrolling or equivariance.
-Its code cells execute in CPU regression tests, including environments without
+divergence sweeps, or precomputed experiment outputs. Its default uses 2,049 points and batch size 128; inspect the resulting geometry
+without assuming unrolling or equivariance. Set `SELFSNE_NOTEBOOK_SMOKE=1` only
+for a three-epoch software check on 129 points.
+Its code cells execute with that explicit smoke configuration in CPU regression tests, including environments without
 Matplotlib; plotting is checked when the maintainer plot extra is present.

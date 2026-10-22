@@ -214,6 +214,7 @@ def test_resume_matches_continuous_and_exports_original_order(
         "--chunk-size",
         4,
     ]
+    options += ["--schedule-epochs", 3, "--warmup-epochs", 1]
     resumed, full = tmp_path / "resumed", tmp_path / "full"
     invoke("train", *options, "--run", resumed, "--epochs", 1)
     invoke("resume", "--run", resumed, "--epochs", 2)
@@ -226,6 +227,14 @@ def test_resume_matches_continuous_and_exports_original_order(
     model = workflow.model_for(c).eval()
     state = torch.load(resumed / "last.ckpt", weights_only=False, map_location="cpu")
     assert state["synthetic_epochs_completed"] == 2
+    continuous = torch.load(full / "last.ckpt", weights_only=False, map_location="cpu")
+    assert state["lr_schedulers"] == continuous["lr_schedulers"]
+    assert (
+        state["optimizer_states"][0]["param_groups"]
+        == continuous["optimizer_states"][0]["param_groups"]
+    )
+    for key, value in state["state_dict"].items():
+        torch.testing.assert_close(value, continuous["state_dict"][key], rtol=0, atol=0)
     model.load_state_dict(state["state_dict"])
     data, labels = workflow.generate(c)
     with torch.inference_mode():
@@ -237,6 +246,9 @@ def test_resume_matches_continuous_and_exports_original_order(
     if example == "von-mises":
         report = json.loads((resumed / "evaluation.json").read_text())
         assert report["split"] == "trajectory" and report["heldout_trajectories"] == 7
+    args = argparse.Namespace(command="resume", run=resumed, epochs=4)
+    with pytest.raises(ValueError, match="schedule horizon"):
+        workflow.execute(args)
     args = argparse.Namespace(command="resume", run=resumed, epochs=2)
     with pytest.raises(ValueError, match="exceed completed"):
         workflow.execute(args)
@@ -287,3 +299,11 @@ def test_synthetic_cuda_training_resume_export(tmp_path, example, precision):
     health = report["training_health"]
     assert health["finite_steps"] > health["skipped_steps"]
     assert np.isfinite(np.load(run / "embeddings.npy")).all()
+
+
+@pytest.mark.parametrize("horizon,warmup", [(-1, 0), (0, 1), (3, 3), (3, -1)])
+def test_invalid_schedule_rejected(workflow, horizon, warmup):
+    c = config("swiss-roll")
+    c.update(schedule_epochs=horizon, warmup_epochs=warmup)
+    with pytest.raises(ValueError, match="schedule_epochs"):
+        workflow.validate(c)

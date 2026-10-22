@@ -65,6 +65,7 @@ print('NOTEBOOK_CHECK_PASSED')
             "OMP_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
             "MPLBACKEND": "Agg",
+            "SELFSNE_NOTEBOOK_SMOKE": "1",
             "PYTHONPATH": str(Path(selfsne.__file__).resolve().parent.parent),
         },
         text=True,

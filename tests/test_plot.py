@@ -5,14 +5,20 @@ import pytest
 import torch
 import numpy as np
 
-from selfsne.plot import (
-    PCAAlign,
-    align_embeddings,
-    equalize_axes_limits,
-    EmbeddingDensity,
-    density_colormaps,
-    highest_density_contours,
-)
+try:
+    from selfsne.plot import (
+        PCAAlign,
+        align_embeddings,
+        equalize_axes_limits,
+        EmbeddingDensity,
+        density_colormaps,
+        highest_density_contours,
+    )
+    _PLOT_AVAILABLE = True
+except Exception:
+    _PLOT_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(not _PLOT_AVAILABLE, reason="plot dependencies (matplotlib) not available")
 
 
 class TestPCAAlign:

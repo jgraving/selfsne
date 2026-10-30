@@ -23,6 +23,9 @@ rich = ["rich>=13", "typing-extensions>=4.4"]
 
 [project.urls]
 Repository = "https://github.com/jgraving/selfsne"
+Documentation = "https://github.com/jgraving/selfsne/blob/main/README.md"
+Changelog = "https://github.com/jgraving/selfsne/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/jgraving/selfsne/issues"
 
 [tool.setuptools.packages.find]
 include = ["selfsne*"]

@@ -1,10 +1,18 @@
 # selfsne
 
-This project is undergoing refactoring and validation. **It is not ready for use.**
+**Self-Supervised Noise Embeddings** — A PyTorch Lightning library for learning
+low-dimensional embeddings via contrastive divergence estimation.
 
-Public installation instructions, usage examples, and release documentation
-will be added when the software is ready.
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE.md)
 
-## License
+## Installation
 
-[Apache 2.0](LICENSE.md).
+```bash
+# Core package (CPU, no CUDA)
+pip install -e '.[dev]'
+
+# With optional extras
+pip install -e '.[dev,data,plot,rich]'
+```
+
+See [docs/development/cuda.md](docs/development/cuda.md) for GPU installation.

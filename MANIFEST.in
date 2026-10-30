@@ -1,3 +1,10 @@
 include examples/quickstart.py
 include scripts/test-cuda-ubuntu.sh
 include scripts/paired_workflow.py
+include scripts/synthetic_workflow.py
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include API_REFERENCE.md
+recursive-include docs *.md
+recursive-include notebooks *.ipynb

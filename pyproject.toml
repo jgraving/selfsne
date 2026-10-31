@@ -30,6 +30,12 @@ Changelog = "https://github.com/jgraving/selfsne/blob/main/CHANGELOG.md"
 [tool.setuptools.packages.find]
 include = ["selfsne*"]
 
+[tool.towncrier]
+filename = "CHANGELOG.md"
+directory = "news"
+template = "docs/towncrier_template.rst"
+underlines = ["=", "-", "~"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["cuda: requires actual CUDA hardware", "cuda_bf16: requires CUDA bfloat16 support"]

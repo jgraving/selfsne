@@ -16,8 +16,9 @@ except ImportError:
 has_deps = has_matplotlib and has_sklearn
 pytestmark = pytest.mark.skipif(not has_deps, reason="matplotlib or scikit-learn not installed")
 
-import numpy as np
-from selfsne.plot import EmbeddingDensity, PCAAlign, align_embeddings
+# Guard import of selfsne.plot which requires optional deps
+if has_deps:
+    from selfsne.plot import EmbeddingDensity, PCAAlign, align_embeddings
 
 
 def test_embedding_density_histogram_shape():

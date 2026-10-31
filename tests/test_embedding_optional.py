@@ -9,14 +9,15 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(not has_sklearn, reason="scikit-learn not installed")
 
-from selfsne.nn.embedding import (
-    PositionEmbedding2d,
-    PositionEmbedding1d,
-    SinusoidalPositionalEmbedding,
-    RotaryPositionalEmbedding,
-    PatchEmbedding1d,
-    PatchEmbedding2d,
-)
+if has_sklearn:
+    from selfsne.nn.embedding import (
+        PositionEmbedding2d,
+        PositionEmbedding1d,
+        SinusoidalPositionalEmbedding,
+        RotaryPositionalEmbedding,
+        PatchEmbedding1d,
+        PatchEmbedding2d,
+    )
 
 
 def test_position_embedding_2d():

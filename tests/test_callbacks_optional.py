@@ -8,10 +8,9 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(not has_rich, reason="rich not installed")
 
-from selfsne.callbacks import TotalStepsProgressBar
-
 
 def test_total_steps_progress_bar_instantiation():
+    from selfsne.callbacks import TotalStepsProgressBar
     cb = TotalStepsProgressBar()
     assert cb is not None
     assert hasattr(cb, "progress")
@@ -19,6 +18,7 @@ def test_total_steps_progress_bar_instantiation():
 
 
 def test_total_steps_progress_bar_inherits():
+    from selfsne.callbacks import TotalStepsProgressBar
     from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBar
     cb = TotalStepsProgressBar()
     assert isinstance(cb, RichProgressBar)

@@ -6,7 +6,7 @@ from selfsne.losses import LikelihoodRatioEstimator
 
 
 KERNELS = ["euclidean", "normal", "student_t", "cauchy", "cosine", "laplace", "inverse", "inner_product"]
-DIVERGENCES = ["bce", "jsd", "kld", "rkld", "dr", "wasserstein"]
+DIVERGENCES = ["bce", "jsd", "kld", "fkld", "rkld", "dr", "wasserstein"]
 BASELINES = [0, 1.0, "batch", "constant", "momentum", "parametric"]
 
 

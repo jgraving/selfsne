@@ -33,6 +33,7 @@ def exact_lower_bound(objective):
     "name",
     [
         "kld",
+        "fkld",
         "rkld",
         "jsd",
         "bce",
@@ -107,6 +108,7 @@ def test_invalid_nce_parameters_are_rejected(kwargs):
     "name",
     [
         "kld",
+        "fkld",
         "rkld",
         "jsd",
         "bce",

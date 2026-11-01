@@ -1,0 +1,1 @@
+Add ``fkld`` as an alias for ``kld`` in ``DIVERGENCES`` and ``GENERATORS``, matching the ``rkld`` convention for the reverse Kullback-Leibler divergence.

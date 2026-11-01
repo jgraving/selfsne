@@ -334,6 +334,7 @@ def softened_reverse_kullback_leibler_divergence_f(logits):
 # Factory dictionary for f(r) generator functions
 GENERATORS = {
     "kld": kullback_leibler_divergence_f,
+    "fkld": kullback_leibler_divergence_f,
     "rkld": reverse_kullback_leibler_divergence_f,
     "jsd": jensen_shannon_divergence_f,
     "bce": binary_cross_entropy_f,
@@ -354,6 +355,8 @@ DIVERGENCES = {
     "wasserstein": wasserstein,
     "binary": binary_cross_entropy,
     "bce": binary_cross_entropy,
+    # Alias: forward Kullback-Leibler divergence
+    "fkld": kullback_leibler_divergence,
     "jsd": jensen_shannon_divergence,
     "rkld": reverse_kullback_leibler_divergence,
     "kld": kullback_leibler_divergence,

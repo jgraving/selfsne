@@ -299,11 +299,13 @@ class SelfSNE(pl.LightningModule):
         if reference is not None:
             if (
                 reference.ndim < 3
-                or reference.shape[0] != context.shape[0]
+                or reference.shape[0] not in (1, context.shape[0])
                 or reference.shape[1] == 0
             ):
                 raise ValueError(
-                    "reference must have shape (batch, samples, ...) with at least one sample."
+                    "reference must have shape (batch, samples, ...) or "
+                    "(1, samples, ...) to broadcast over the batch, "
+                    "with at least one sample."
                 )
             reference_tokens = self.target_tokenizer(
                 rearrange(reference, "b s ... -> (b s) ...")

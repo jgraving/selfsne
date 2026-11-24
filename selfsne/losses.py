@@ -192,6 +192,14 @@ class LikelihoodRatioEstimator(nn.Module):
         kernel_scale: float,
         reference_embedding: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Positive (context, target) and negative (context, reference) similarities.
+
+        ``reference_embedding`` may be a per-row set of shape
+        ``(batch, samples, features)`` or a shared reference pool of shape
+        ``(1, samples, features)``, broadcast over the batch: the pool is
+        used as the negative set for every row. When omitted, in-batch
+        off-diagonal references are used.
+        """
         if context_embedding.ndim != 2 or target_embedding.ndim != 2:
             raise ValueError(
                 "context and target embeddings must have shape (batch, features)."
@@ -209,15 +217,17 @@ class LikelihoodRatioEstimator(nn.Module):
         ):
             raise TypeError("Embeddings must be floating-point tensors.")
         if reference_embedding is not None:
-            expected = (context_embedding.shape[0], context_embedding.shape[1])
             if (
                 reference_embedding.ndim != 3
-                or (reference_embedding.shape[0], reference_embedding.shape[-1])
-                != expected
+                or reference_embedding.shape[-1] != context_embedding.shape[-1]
                 or reference_embedding.shape[1] == 0
+                or reference_embedding.shape[0]
+                not in (1, context_embedding.shape[0])
             ):
                 raise ValueError(
-                    "reference embeddings must have shape (batch, samples, features) with at least one sample."
+                    "reference embeddings must have shape (batch, samples, features) "
+                    "or (1, samples, features) to broadcast over the batch, "
+                    "with at least one sample."
                 )
             pos_similarity = self._kernel_call(
                 context_embedding, target_embedding, kernel_scale

@@ -175,3 +175,54 @@ def test_training_with_scheduler_updates_and_logs_learning_rate(optimizer):
     trainer.fit(model, loader)
     assert torch.isfinite(trainer.callback_metrics["lr_scale"])
     assert torch.isfinite(trainer.callback_metrics["loss"])
+
+
+def test_shared_reference_pool_broadcast_over_batch():
+    pl.seed_everything(0)
+    model = make_model().eval()
+    context, target = torch.randn(4, 4), torch.randn(4, 4)
+    pool = torch.randn(3, 4)
+
+    ctx_emb, tgt_emb, ref_emb, _ = model.get_embeddings(context, target, pool[None])
+    assert ref_emb.shape == (1, 3, 2)
+    _, _, ref_expanded, _ = model.get_embeddings(
+        context, target, pool[None].expand(4, -1, -1).contiguous()
+    )
+    assert ref_expanded.shape == (4, 3, 2)
+    for row in range(4):
+        torch.testing.assert_close(ref_expanded[row], ref_emb[0])
+
+    batch = {"context": context, "target": target, "reference": pool[None]}
+    out = model(batch)
+    assert out["reference_embedding"].shape == (1, 3, 2)
+    logits = model.loss.logits(
+        out["context_embedding"], out["target_embedding"], out["reference_embedding"]
+    )
+    assert logits["pos_logits"].shape == (4, 1)
+    assert logits["neg_logits"].shape == (4, 3)
+
+
+def test_shared_reference_pool_training_step_runs():
+    model = make_model()
+    batch = {
+        "context": torch.randn(4, 4),
+        "target": torch.randn(4, 4),
+        "reference": torch.randn(1, 6, 4),
+    }
+    loss = model.training_step(batch, 0)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert model.target_encoder.weight.grad is not None
+    assert torch.isfinite(model.target_encoder.weight.grad).all()
+
+
+@pytest.mark.parametrize("reference_shape", [(2, 6, 4), (6, 4)])
+def test_shared_reference_pool_invalid_shapes_raise(reference_shape):
+    model = make_model()
+    batch = {
+        "context": torch.randn(4, 4),
+        "target": torch.randn(4, 4),
+        "reference": torch.randn(*reference_shape),
+    }
+    with pytest.raises(ValueError):
+        model.training_step(batch, 0)

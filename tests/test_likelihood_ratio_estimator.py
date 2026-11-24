@@ -72,3 +72,55 @@ def test_likelihood_ratio_estimator_invalid_divergence():
 def test_likelihood_ratio_estimator_invalid_baseline_name():
     with pytest.raises(ValueError):
         LikelihoodRatioEstimator(baseline="invalid_baseline")
+
+
+@pytest.mark.parametrize(
+    "kernel", ["normal", "cauchy", "laplace", "cosine", "inner_product"]
+)
+def test_broadcast_reference_pool_matches_expanded_reference(kernel):
+    """Shared (1, N, D) / (N, D) pools match the same references given as (B, N, D)."""
+    loss = LikelihoodRatioEstimator(kernel=kernel, divergence="jsd", baseline="batch")
+    context_emb = torch.randn(4, 3)
+    target_emb = torch.randn(4, 3)
+    pool_emb = torch.randn(5, 3)
+    pool = pool_emb.unsqueeze(0)
+    expanded = pool_emb.unsqueeze(0).expand(4, -1, -1)
+    batched = loss.logits(context_emb, target_emb, expanded)
+    broadcast = loss.logits(context_emb, target_emb, pool)
+    torch.testing.assert_close(broadcast["pos_logits"], batched["pos_logits"])
+    torch.testing.assert_close(broadcast["neg_logits"], batched["neg_logits"])
+    assert broadcast["neg_logits"].shape == (4, 5)
+
+
+def test_broadcast_reference_pool_training_loss_and_gradients():
+    loss = LikelihoodRatioEstimator(kernel="normal", divergence="bce", baseline=0)
+    context_emb = torch.randn(4, 2, requires_grad=True)
+    target_emb = torch.randn(4, 2, requires_grad=True)
+    pool_emb = torch.randn(6, 2, requires_grad=True)
+    out = loss(
+        context_embedding=context_emb,
+        target_embedding=target_emb,
+        reference_embedding=pool_emb.unsqueeze(0),
+    )
+    assert out["loss"].ndim == 0
+    assert torch.isfinite(out["loss"])
+    out["loss"].backward()
+    for name, grad in (("context", context_emb), ("target", target_emb), ("pool", pool_emb)):
+        assert grad.grad is not None, name
+        assert torch.isfinite(grad.grad).all(), name
+        assert grad.grad.abs().sum() > 0, name
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        torch.randn(2, 5, 3),   # first dim neither 1 nor the batch size
+        torch.randn(4, 0, 3),   # empty reference set
+        torch.randn(4, 5, 2),   # feature mismatch
+        torch.randn(5),         # unrecognizable shape
+    ],
+)
+def test_broadcast_reference_embedding_invalid_shapes_raise(reference):
+    loss = LikelihoodRatioEstimator()
+    with pytest.raises(ValueError):
+        loss.logits(torch.randn(4, 3), torch.randn(4, 3), reference)
